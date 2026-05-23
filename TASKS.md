@@ -267,3 +267,28 @@ AC: [ ] `npm run build` produces both web and lib outputs [ ] lib.jsx exports a 
 `todo` · P2 · M · dep: none · parallel: yes — src/App.jsx
 Add canonical deep-link routes for each app surface: `vulos-office://docs/{id}`, `vulos-office://meet/{roomId}`, `vulos-office://calendar/{eventId}`, etc. The `src/App.jsx` router handles both web-subdomain URL patterns and the OS deep-link scheme. Coordinate with the multi-target build work and the OS app wrapper tasks in the `vulos` repo.
 AC: [ ] deep-link URLs for docs/sheets/slides/spaces/calendar/meet defined [ ] App.jsx routes resolve them correctly [ ] OS launcher links tested against the routing table [ ] npm run build
+
+---
+
+## Area: BYO Mail integration + bundling
+
+_Spec: [`ROADMAP.md §Bundling decision`](ROADMAP.md)_  ·  _Prefix: `OFFICE-BYO-*`_
+_Cross-repo: [`vulos-cloud`](https://github.com/vul-os/vulos-cloud) · [`vulos-mail`](https://github.com/vul-os/vulos-mail)_
+
+> Office is bundled from Starter and up. These tasks ensure the bundling is surfaced correctly in
+> the product and that BYO Mail customers at Starter+ tier get Office access without extra steps.
+
+### [OFFICE-BYO-01] OS installer hook: install vulos-office alongside vulos-mail for Starter+
+`in-progress` · P2 · M · dep: none · parallel: yes — docs/INSTALL.md (new or update)
+Scope: Document the OS install wizard integration point: when a Vulos OS user selects Starter or
+higher, the wizard installs vulos-office (Docs, Sheets, Slides, Spaces, Calendar) as a built-in
+service alongside vulos-mail. No code change to vulos-office itself — this is a doc + install
+script integration task. Coordinate with the vulos-mail MAIL-BYO-04 bash installer.
+AC: [ ] INSTALL.md documents vulos-office install alongside vulos-mail for Starter+ [ ] install hook point documented for OS wizard team [ ] no .go or .jsx changes [ ] npm run build passes unmodified
+
+### [OFFICE-BYO-02] Pricing copy verification: Office bundled from Starter
+`in-progress` · P3 · S · dep: none · parallel: yes — (doc only)
+Scope: Verify that all user-facing copy in vulos-office README.md, ROADMAP.md, and any marketing
+copy in `docs/` correctly reflects that Office is bundled from Starter and up — no standalone
+Office tier exists. Fix any copy that implies a standalone Office tier.
+AC: [ ] README.md mentions bundling from Starter [ ] ROADMAP.md §Bundling decision present [ ] no copy implies standalone Office tier [ ] npm run build passes unmodified

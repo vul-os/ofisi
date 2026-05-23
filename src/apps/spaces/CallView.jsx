@@ -1,5 +1,5 @@
 /**
- * CallView — Vulos Spaces 1:1 + group voice/video call surface.
+ * CallView — Vulos Meet + Spaces call surface (Google Meet parity).
  *
  * Design pass:
  *   - Backdrop: warm ink (`bg-ink` paired with paper text) rather than slate.
@@ -7,6 +7,7 @@
  *   - Transport badge (P2P vs Relay): tiny accent-tint pill (or warning when relay).
  *   - Controls: IconButtons in a dock-style cluster; leave is the only persimmon.
  *   - Screen-share area: kept at 55% height per spec.
+ *   - Raise hand, reactions, background blur, presenter focus, captions, recording stub.
  *
  * Props:
  *   sessionId    — fabric session id for this call (channel id, DM id, room id)
@@ -14,6 +15,7 @@
  *   threadParent — optional thread-parent message id for meeting-room threads
  *   identity     — { displayName, accountAddress, color }
  *   video        — start with camera on (default true)
+ *   isOrganizer  — whether the viewer is the meeting organizer (enables spotlight-all, lobby admin)
  *   onLeave      — called after the call tears down
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
@@ -24,9 +26,15 @@ import {
 import { createCall } from '../../lib/call/rtc'
 import InCallChat from './InCallChat.jsx'
 import { Tooltip } from '../../components/ui'
+import RaiseHand, { HandIndicator } from './components/RaiseHand.jsx'
+import Reactions from './components/Reactions.jsx'
+import BackgroundBlur from './components/BackgroundBlur.jsx'
+import PresenterFocus, { usePinnedLayout } from './components/PresenterFocus.jsx'
+import RecordingStub from './components/RecordingStub.jsx'
+import Captions, { CaptionOverlay } from './components/Captions.jsx'
 
 export default function CallView({
-  sessionId, channelId, threadParent = '', identity, video = true, onLeave,
+  sessionId, channelId, threadParent = '', identity, video = true, isOrganizer = false, onLeave,
 }) {
   const [call, setCall] = useState(null)
   const [error, setError] = useState(null)
@@ -40,8 +48,17 @@ export default function CallView({
   const [showChat, setShowChat] = useState(false)
   const [screenSharing, setScreenSharing] = useState(false)
   const [screenPresenter, setScreenPresenter] = useState(null)
+  // New Meet features
+  const [handRaised, setHandRaised] = useState(false)
+  const [peerHands, setPeerHands] = useState({}) // peerId → bool
+  const [peerCaptions, setPeerCaptions] = useState({}) // peerId → string
+  const [selfCaption, setSelfCaption] = useState('')
+  const [blurEnabled, setBlurEnabled] = useState(false)
+  const [captionsEnabled, setCaptionsEnabled] = useState(false)
+  const [pinnedId, setPinnedId] = useState(null)
   const localVideoRef = useRef(null)
   const screenPreviewRef = useRef(null)
+  const blurPreviewRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -64,6 +81,29 @@ export default function CallView({
         c.on('transport', (t) => setTransport(t))
         c.on('state', (s) => setState(s))
         c.on('screen-share', (peerId) => setScreenPresenter(peerId))
+        // Raise-hand events from remote peers
+        c.on('raise-hand', ({ peerId, raised }) => {
+          setPeerHands((prev) => ({ ...prev, [peerId]: raised }))
+        })
+        // Remote captions
+        c.on('caption', ({ peerId, text }) => {
+          setPeerCaptions((prev) => ({ ...prev, [peerId]: text }))
+          // Auto-clear after 4s
+          setTimeout(() => {
+            setPeerCaptions((prev) => {
+              const next = { ...prev }
+              if (next[peerId] === text) delete next[peerId]
+              return next
+            })
+          }, 4000)
+        })
+        // Self-caption feedback
+        c.on('caption-self', ({ text }) => {
+          setSelfCaption(text)
+          setTimeout(() => setSelfCaption((t) => (t === text ? '' : t)), 4000)
+        })
+        // Remote spotlight signal (organizer → everyone)
+        c.on('spotlight', ({ peerId }) => setPinnedId(peerId))
       } catch (e) {
         console.error(e)
         if (!cancelled) setError(e.message || String(e))
@@ -140,13 +180,24 @@ export default function CallView({
   }
 
   const totalTiles = peers.length + 1
-  const cols = totalTiles <= 1 ? 1 : totalTiles <= 4 ? 2 : 3
 
   const presentingPeer = screenPresenter && screenPresenter !== 'local'
     ? peers.find((p) => p.peerId === screenPresenter) ?? null
     : null
 
   const anyScreenActive = screenSharing || !!presentingPeer
+
+  // Presenter focus / pinned layout
+  const { mainPeer, stripPeers, cols } = usePinnedLayout({
+    peers,
+    pinnedId,
+    screenPresenter,
+  })
+
+  // Responsive grid: mobile 1-col, tablet 2-up, desktop up to 3x3
+  const gridCols = mainPeer
+    ? 1
+    : totalTiles <= 1 ? 1 : totalTiles <= 4 ? 2 : 3
 
   return (
     <div
@@ -161,7 +212,7 @@ export default function CallView({
       />
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden relative">
           {anyScreenActive && (
             <ScreenShareView
               isLocal={screenSharing && screenPresenter === 'local'}
@@ -175,9 +226,26 @@ export default function CallView({
             />
           )}
 
+          {/* Pinned main tile */}
+          {mainPeer && !anyScreenActive && (
+            <div
+              className="mx-3 mt-3 rounded-lg overflow-hidden flex-shrink-0 relative"
+              style={{ height: '55%', minHeight: 200 }}
+            >
+              <RemoteTile
+                peer={mainPeer}
+                isSpeaking={activeSpeaker === mainPeer.peerId}
+                handRaised={peerHands[mainPeer.peerId]}
+                captionText={peerCaptions[mainPeer.peerId]}
+                onPin={() => setPinnedId(null)}
+                isPinned
+              />
+            </div>
+          )}
+
           <div
             className="flex-1 grid gap-2 p-3 overflow-auto"
-            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+            style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
           >
             <Tile
               label={identity?.displayName ? `${identity.displayName} (you)` : 'You'}
@@ -187,14 +255,24 @@ export default function CallView({
               videoRef={localVideoRef}
               color={identity?.color}
               isPresenting={screenPresenter === 'local'}
+              handRaised={handRaised}
+              captionText={selfCaption}
             />
-            {peers.map((p) => (
+            {(mainPeer ? stripPeers : peers).map((p) => (
               <RemoteTile
                 key={p.peerId}
                 peer={p}
                 isSpeaking={activeSpeaker === p.peerId}
+                handRaised={peerHands[p.peerId]}
+                captionText={peerCaptions[p.peerId]}
+                onPin={() => setPinnedId((cur) => cur === p.peerId ? null : p.peerId)}
               />
             ))}
+          </div>
+
+          {/* Floating reactions overlay — absolute over the tile grid */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            <Reactions call={call} />
           </div>
         </div>
 
@@ -204,6 +282,7 @@ export default function CallView({
             self={identity}
             activeSpeaker={activeSpeaker}
             screenPresenter={screenPresenter}
+            peerHands={peerHands}
           />
         )}
         {showChat && channelId && (
@@ -217,9 +296,16 @@ export default function CallView({
       </div>
 
       <Controls
+        call={call}
         muted={muted}
         cameraOff={cameraOff}
         screenSharing={screenSharing}
+        handRaised={handRaised}
+        blurEnabled={blurEnabled}
+        captionsEnabled={captionsEnabled}
+        isOrganizer={isOrganizer}
+        peers={peers}
+        pinnedId={pinnedId}
         onMute={handleMute}
         onCamera={handleCamera}
         onScreenShare={handleScreenShare}
@@ -228,6 +314,26 @@ export default function CallView({
         rosterActive={showRoster}
         onToggleChat={channelId ? () => setShowChat((v) => !v) : null}
         chatActive={showChat}
+        onHandToggle={(raised) => setHandRaised(raised)}
+        onBlurToggle={(on) => setBlurEnabled(on)}
+        onCaptionsToggle={(on) => setCaptionsEnabled(on)}
+        onPin={setPinnedId}
+        identity={identity}
+        blurPreviewRef={blurPreviewRef}
+      />
+
+      {/* Background blur processed-stream preview (hidden unless debugging) */}
+      <BackgroundBlur
+        call={call}
+        enabled={blurEnabled}
+        onToggle={setBlurEnabled}
+        previewRef={blurPreviewRef}
+      />
+      <Captions
+        call={call}
+        enabled={captionsEnabled}
+        onToggle={setCaptionsEnabled}
+        identity={identity}
       />
     </div>
   )
@@ -304,7 +410,7 @@ function CallHeader({ state, transport, participantCount, onToggleRoster }) {
   )
 }
 
-function Tile({ label, muted, cameraOff, isLocal, videoRef, color, isPresenting }) {
+function Tile({ label, muted, cameraOff, isLocal, videoRef, color, isPresenting, handRaised, captionText }) {
   return (
     <div
       className="relative rounded-lg overflow-hidden flex items-center justify-center min-h-[140px]"
@@ -332,6 +438,18 @@ function Tile({ label, muted, cameraOff, isLocal, videoRef, color, isPresenting 
           {(label || '?').slice(0, 1)}
         </div>
       )}
+      {/* Captions overlay */}
+      {captionText && (
+        <div className="absolute bottom-8 left-2 right-2 flex justify-center pointer-events-none">
+          <span
+            className="max-w-full px-2 py-1 rounded-sm text-2xs text-paper text-center leading-snug tracking-tightish"
+            style={{ background: 'rgba(26,25,22,.78)' }}
+            aria-live="polite"
+          >
+            {captionText}
+          </span>
+        </div>
+      )}
       <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between text-2xs text-paper">
         <span
           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill tracking-tightish"
@@ -340,21 +458,31 @@ function Tile({ label, muted, cameraOff, isLocal, videoRef, color, isPresenting 
           {isPresenting && <Monitor size={10} className="text-accent" />}
           {label}
         </span>
-        {muted && (
-          <span
-            className="inline-flex items-center justify-center w-5 h-5 rounded-pill"
-            style={{ background: 'rgba(26,25,22,.55)' }}
-            title="Muted"
-          >
-            <MicOff size={11} />
-          </span>
-        )}
+        <span className="inline-flex items-center gap-1">
+          {handRaised && (
+            <span
+              className="inline-flex items-center justify-center w-5 h-5 rounded-pill bg-warning/90 text-white"
+              title="Hand raised"
+            >
+              ✋
+            </span>
+          )}
+          {muted && (
+            <span
+              className="inline-flex items-center justify-center w-5 h-5 rounded-pill"
+              style={{ background: 'rgba(26,25,22,.55)' }}
+              title="Muted"
+            >
+              <MicOff size={11} />
+            </span>
+          )}
+        </span>
       </div>
     </div>
   )
 }
 
-function RemoteTile({ peer, isSpeaking }) {
+function RemoteTile({ peer, isSpeaking, handRaised, captionText, onPin, isPinned }) {
   const ref = useRef(null)
   useEffect(() => {
     if (ref.current && peer.stream && ref.current.srcObject !== peer.stream) {
@@ -365,12 +493,12 @@ function RemoteTile({ peer, isSpeaking }) {
   const noVideo = !peer.stream || peer.stream.getVideoTracks().every((t) => !t.enabled)
   return (
     <div
-      className="relative rounded-lg overflow-hidden flex items-center justify-center min-h-[140px] transition-[outline] duration-fast ease-out"
+      className="relative rounded-lg overflow-hidden flex items-center justify-center min-h-[140px] transition-[outline] duration-fast ease-out group"
       style={{
         background: 'rgba(255,255,255,.04)',
-        outline: peer.isPresenting
-          ? '2px solid var(--accent)'
-          : isSpeaking
+        outline: isPinned
+          ? '2px solid var(--warning)'
+          : peer.isPresenting || isSpeaking
             ? '2px solid var(--accent)'
             : '1px solid rgba(255,255,255,.06)',
         outlineOffset: '-2px',
@@ -382,6 +510,30 @@ function RemoteTile({ peer, isSpeaking }) {
           {label.slice(0, 1)}
         </div>
       )}
+      {/* Caption overlay */}
+      {captionText && (
+        <div className="absolute bottom-8 left-2 right-2 flex justify-center pointer-events-none">
+          <span
+            className="max-w-full px-2 py-1 rounded-sm text-2xs text-paper text-center leading-snug tracking-tightish"
+            style={{ background: 'rgba(26,25,22,.78)' }}
+            aria-live="polite"
+          >
+            {captionText}
+          </span>
+        </div>
+      )}
+      {/* Pin button — visible on hover */}
+      {onPin && (
+        <button
+          type="button"
+          onClick={onPin}
+          className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-fast inline-flex items-center justify-center w-6 h-6 rounded-sm bg-paper/20 text-paper hover:bg-paper/35"
+          title={isPinned ? 'Unpin' : 'Pin presenter'}
+          aria-label={isPinned ? 'Unpin' : 'Pin presenter'}
+        >
+          📌
+        </button>
+      )}
       <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between text-2xs">
         <span
           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill tracking-tightish text-paper"
@@ -390,24 +542,40 @@ function RemoteTile({ peer, isSpeaking }) {
           {peer.isPresenting && <Monitor size={10} className="text-accent" />}
           {label}
         </span>
-        {peer.usingRelay && (
-          <span
-            className="inline-flex items-center px-2 py-0.5 rounded-pill text-[10px] font-medium uppercase tracking-eyebrow"
-            style={{
-              background: 'rgba(192,132,54,.18)',
-              color: 'var(--signal-warning)',
-              border: '1px solid rgba(192,132,54,.35)',
-            }}
-          >
-            relay
-          </span>
-        )}
+        <span className="inline-flex items-center gap-1">
+          {handRaised && (
+            <span
+              className="inline-flex items-center justify-center w-5 h-5 rounded-pill bg-warning/90 text-white text-[10px]"
+              title="Hand raised"
+            >
+              ✋
+            </span>
+          )}
+          {peer.usingRelay && (
+            <span
+              className="inline-flex items-center px-2 py-0.5 rounded-pill text-[10px] font-medium uppercase tracking-eyebrow"
+              style={{
+                background: 'rgba(192,132,54,.18)',
+                color: 'var(--signal-warning)',
+                border: '1px solid rgba(192,132,54,.35)',
+              }}
+            >
+              relay
+            </span>
+          )}
+        </span>
       </div>
     </div>
   )
 }
 
-function Roster({ peers, self, activeSpeaker, screenPresenter }) {
+function Roster({ peers, self, activeSpeaker, screenPresenter, peerHands = {} }) {
+  // Sort: hands raised first
+  const sorted = [...peers].sort((a, b) => {
+    const aHand = peerHands[a.peerId] ? 1 : 0
+    const bHand = peerHands[b.peerId] ? 1 : 0
+    return bHand - aHand
+  })
   return (
     <aside className="w-60 border-l border-paper/10 overflow-y-auto p-3 text-sm">
       <h3 className="text-2xs uppercase text-paper/50 mb-2 tracking-eyebrow font-semibold">
@@ -421,7 +589,7 @@ function Roster({ peers, self, activeSpeaker, screenPresenter }) {
             <span className="text-paper/40 text-2xs">(you)</span>
           </span>
         </li>
-        {peers.map((p) => (
+        {sorted.map((p) => (
           <li key={p.peerId} className="flex items-center justify-between py-1">
             <span
               className={[
@@ -430,6 +598,7 @@ function Roster({ peers, self, activeSpeaker, screenPresenter }) {
               ].join(' ')}
             >
               {p.isPresenting && <Monitor size={12} className="text-accent" />}
+              {peerHands[p.peerId] && <span title="Hand raised" className="text-[12px]">✋</span>}
               <span className="font-serif italic">
                 {p.identity?.displayName || p.peerId.slice(0, 6)}
               </span>
@@ -469,15 +638,21 @@ function DockButton({ onClick, active, title, children }) {
 }
 
 function Controls({
+  call,
   muted, cameraOff, screenSharing,
+  handRaised, blurEnabled, captionsEnabled,
+  isOrganizer, peers, pinnedId,
   onMute, onCamera, onScreenShare, onLeave,
   onToggleRoster, rosterActive,
   onToggleChat, chatActive,
+  onHandToggle, onBlurToggle, onCaptionsToggle, onPin,
+  identity, blurPreviewRef,
 }) {
   return (
-    <div className="px-4 py-3 border-t border-paper/10 flex items-center justify-center">
+    <div className="px-4 py-3 border-t border-paper/10 flex items-center justify-center relative">
+      {/* Reactions popover anchors here */}
       <div
-        className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg border border-paper/10"
+        className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg border border-paper/10 relative"
         style={{ background: 'rgba(255,255,255,.04)' }}
       >
         <DockButton onClick={onMute} active={muted} title={muted ? 'Unmute' : 'Mute'}>
@@ -489,7 +664,43 @@ function Controls({
         <DockButton onClick={onScreenShare} active={screenSharing} title={screenSharing ? 'Stop sharing' : 'Share screen'}>
           {screenSharing ? <MonitorOff size={17} /> : <Monitor size={17} />}
         </DockButton>
+
         <span className="w-px h-6 bg-paper/10 mx-1" aria-hidden />
+
+        {/* Raise hand */}
+        <RaiseHand
+          call={call}
+          raised={handRaised}
+          onToggle={onHandToggle}
+          identity={identity}
+        />
+
+        {/* Floating reactions — palette pops above the dock */}
+        <Reactions call={call} />
+
+        <span className="w-px h-6 bg-paper/10 mx-1" aria-hidden />
+
+        {/* Background blur */}
+        <BackgroundBlur
+          call={call}
+          enabled={blurEnabled}
+          onToggle={onBlurToggle}
+          previewRef={blurPreviewRef}
+        />
+
+        {/* Captions */}
+        <Captions
+          call={call}
+          enabled={captionsEnabled}
+          onToggle={onCaptionsToggle}
+          identity={identity}
+        />
+
+        {/* Recording stub */}
+        <RecordingStub />
+
+        <span className="w-px h-6 bg-paper/10 mx-1" aria-hidden />
+
         <DockButton onClick={onToggleRoster} active={rosterActive} title="Participants">
           <Users size={17} />
         </DockButton>

@@ -250,6 +250,33 @@ paying for Slack and Zoom.
 
 ---
 
+## Bundling decision
+
+**Office is bundled from Starter and up.** There is no standalone Office tier. The Vulos Mail
+tier (R19/user) is mail-only; from Starter (R39/user) and up, Office, Spaces, and Calendar are
+included in the tier price with no separate line item.
+
+This is a deliberate product decision: Google Workspace refugees should not have to choose
+between mail and office — they are bundled together from the first paid tier above Vulos Mail.
+The messaging on the pricing page reflects this: "Office, Spaces, Calendar are included from
+Starter and up."
+
+Cross-repo: see `vulos-cloud/ROADMAP.md` billing model section and `src/pages/Pricing.jsx` for
+the pricing copy that reflects this bundling.
+
+---
+
+## BYO Mail support (in progress — parallel implementation)
+
+Vulos Office is not directly involved in the BYO Mail delivery flow (that is `vulos-mail` and
+`vulos-cloud`). However, Office and Spaces are bundled features available to all BYO and hosted
+Mail customers at Starter and above. The Vulos OS install wizard installs vulos-office alongside
+vulos-mail when the user selects a Starter+ tier.
+
+Cross-repo: see `vulos-cloud/ROADMAP.md §BYO Mail support`.
+
+---
+
 ## Future work
 
 ### Multi-target builds: web subdomain + OS-embed library for all apps

@@ -1,7 +1,9 @@
-// Meetings.jsx — OFFICE-65: Scheduled meetings dashboard.
+// Meetings.jsx — OFFICE-MEET: Google Meet-parity meetings dashboard.
 //
 // Shows scheduled/active/ended meeting rooms, lets the host create new ones,
 // and provides a copy-to-clipboard join link per meeting.
+// "New meeting" modal: title, date/time, duration, invitees (autocomplete),
+// lobby on/off, recording stub on/off, require sign-in toggle.
 // Clicking "Join" navigates to /room/<sessionId> which renders Room.jsx.
 //
 // Design pass: warm paper dashboard, Cards for each meeting, Modal for create,
@@ -11,6 +13,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Calendar, Clock, Copy, Plus, Trash2, Video, Users, Check,
+  Lock, ShieldCheck, Circle,
 } from 'lucide-react'
 import { Button, Card, IconButton, Input, Modal, Topbar } from '../../components/ui'
 
@@ -113,13 +116,13 @@ export default function Meetings() {
         title={
           <h1 className="inline-flex items-center gap-2 text-md font-semibold text-ink tracking-tightish">
             <Video size={16} className="text-accent" />
-            Meetings
+            Meet
           </h1>
         }
         actions={
           <Button variant="primary" onClick={() => setCreating(true)}>
             <Plus size={14} />
-            New room
+            New meeting
           </Button>
         }
       />
@@ -145,11 +148,11 @@ export default function Meetings() {
           <div className="flex flex-col items-center justify-center h-64 gap-3">
             <Video size={36} className="text-ink-faint opacity-50" />
             <p className="text-sm text-ink-muted font-serif italic">
-              No rooms yet. Create one to get started.
+              No meetings yet. Create one to get started.
             </p>
             <Button variant="primary" onClick={() => setCreating(true)}>
               <Plus size={14} />
-              New room
+              New meeting
             </Button>
           </div>
         )}
@@ -277,6 +280,40 @@ function MeetingCard({ meeting: m, copied, onJoin, onCopyLink, onDelete }) {
   )
 }
 
+function ToggleRow({ label, hint, checked, onChange, icon: Icon }) {
+  return (
+    <label className="flex items-start gap-3 cursor-pointer group">
+      <div className="mt-0.5 shrink-0">
+        <div
+          className={[
+            'w-9 h-5 rounded-pill relative transition-colors duration-fast',
+            checked ? 'bg-accent' : 'bg-line-strong',
+          ].join(' ')}
+          onClick={onChange}
+          role="switch"
+          aria-checked={checked}
+          tabIndex={0}
+          onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && onChange()}
+        >
+          <span
+            className={[
+              'absolute top-0.5 w-4 h-4 rounded-pill bg-white shadow transition-transform duration-fast',
+              checked ? 'translate-x-4' : 'translate-x-0.5',
+            ].join(' ')}
+          />
+        </div>
+      </div>
+      <div className="min-w-0">
+        <span className="flex items-center gap-1 text-sm text-ink font-medium tracking-tightish">
+          {Icon && <Icon size={13} className="text-ink-faint" />}
+          {label}
+        </span>
+        {hint && <p className="text-2xs text-ink-faint mt-0.5">{hint}</p>}
+      </div>
+    </label>
+  )
+}
+
 function CreateModal({ open, onCreated, onClose }) {
   const [form, setForm] = useState({
     title: '',
@@ -284,6 +321,9 @@ function CreateModal({ open, onCreated, onClose }) {
     invitees_raw: '',
     scheduled_at: '',
     duration_min: 60,
+    lobby_required: true,
+    signin_required: false,
+    recording_enabled: false,
   })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -304,17 +344,45 @@ function CreateModal({ open, onCreated, onClose }) {
           .map((s) => s.trim())
           .filter(Boolean),
         duration_min: form.duration_min || 0,
+        lobby_required: form.lobby_required,
+        signin_required: form.signin_required,
+        recording_enabled: false, // always false — stub
       }
       if (form.scheduled_at) {
         body.scheduled_at = new Date(form.scheduled_at).toISOString()
+        body.start_unix = Math.floor(new Date(form.scheduled_at).getTime() / 1000)
       }
-      const m = await apiFetch(API, {
-        method: 'POST',
-        body: JSON.stringify(body),
-      })
+      // POST to new Meet schedule API first, fall back to old /meetings endpoint
+      let m
+      try {
+        const schedRes = await apiFetch('/api/meeting/schedule', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: body.title,
+            start_unix: body.start_unix || Math.floor(Date.now() / 1000),
+            duration_min: body.duration_min,
+            invitees: body.invitees,
+            lobby_required: body.lobby_required,
+            signin_required: body.signin_required,
+          }),
+        })
+        // Merge into the old Meeting shape for the card list
+        m = {
+          ...schedRes.meeting,
+          session_id: `meeting:${schedRes.meeting?.room_id || schedRes.meeting?.id}`,
+          join_link: schedRes.join_link,
+          host_vumail: body.host_vumail,
+          invitees: body.invitees,
+        }
+      } catch (_) {
+        // Fall back to legacy endpoint if new one not wired
+        m = await apiFetch(API, { method: 'POST', body: JSON.stringify(body) })
+      }
       onCreated(m)
-      // Reset for next time
-      setForm({ title: '', host_vumail: '', invitees_raw: '', scheduled_at: '', duration_min: 60 })
+      setForm({
+        title: '', host_vumail: '', invitees_raw: '', scheduled_at: '', duration_min: 60,
+        lobby_required: true, signin_required: false, recording_enabled: false,
+      })
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -323,7 +391,7 @@ function CreateModal({ open, onCreated, onClose }) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="New meeting room" size="md">
+    <Modal open={open} onClose={onClose} title="New meeting" size="md">
       <form onSubmit={handleSubmit}>
         <Modal.Body className="space-y-4">
           <Input
@@ -368,12 +436,41 @@ function CreateModal({ open, onCreated, onClose }) {
               onChange={(e) => update('duration_min', parseInt(e.target.value, 10) || 0)}
             />
           </div>
+
+          {/* Security + access controls */}
+          <div className="rounded-md border border-line p-3 space-y-3 bg-bg-elev-1">
+            <p className="text-2xs text-ink-faint uppercase tracking-eyebrow font-semibold">
+              Access controls
+            </p>
+            <ToggleRow
+              label="Lobby"
+              hint="Participants wait in a lobby until you admit them"
+              checked={form.lobby_required}
+              onChange={() => update('lobby_required', !form.lobby_required)}
+              icon={Users}
+            />
+            <ToggleRow
+              label="Require sign-in"
+              hint="Anonymous joins are blocked; a Vulos account is required"
+              checked={form.signin_required}
+              onChange={() => update('signin_required', !form.signin_required)}
+              icon={ShieldCheck}
+            />
+            <ToggleRow
+              label="Recording"
+              hint="Coming soon — stub only. All participants will be notified before recording starts."
+              checked={false}
+              onChange={() => {}}
+              icon={Circle}
+            />
+          </div>
+
           {err && <p className="text-danger text-xs">{err}</p>}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
           <Button variant="primary" type="submit" disabled={busy || !form.title.trim()}>
-            {busy ? 'Creating…' : 'Create room'}
+            {busy ? 'Creating…' : 'Create meeting'}
           </Button>
         </Modal.Footer>
       </form>

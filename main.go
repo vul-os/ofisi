@@ -157,10 +157,52 @@ func main() {
 	// Join is public — external invitees follow a bare link with no Vulos account.
 	api.GET("/meetings/:id/join", meetingHandler.Join)
 
+	// OFFICE-MEET: Google Meet parity — scheduled meetings, signed join tokens, lobby.
+	meetScheduleHandler := handlers.NewMeetScheduleHandler(store)
+	protected.POST("/meeting/schedule", meetScheduleHandler.Schedule)
+	protected.GET("/meeting/schedule", meetScheduleHandler.List)
+	protected.GET("/meeting/schedule/:id", meetScheduleHandler.Get)
+	protected.DELETE("/meeting/schedule/:id", meetScheduleHandler.Delete)
+
+	meetJoinHandler := handlers.NewMeetJoinHandler(meetScheduleHandler)
+	// Token issuance: semi-public (anon token if no auth; signed-in token if auth present).
+	api.POST("/meet/:roomId/token", meetJoinHandler.IssueToken)
+	// Lobby endpoints: token required in header.
+	api.POST("/meet/:roomId/lobby/enter", meetJoinHandler.LobbyEnter)
+	protected.GET("/meet/:roomId/lobby", meetJoinHandler.LobbyList)
+	protected.POST("/meet/:roomId/admit", meetJoinHandler.Admit)
+	protected.POST("/meet/:roomId/admit-all", meetJoinHandler.AdmitAll)
+	protected.POST("/meet/:roomId/deny", meetJoinHandler.Deny)
+
 	// Sheets XLSX import/export endpoints.
 	sheetsHandler := handlers.NewSheetsHandler(store)
 	protected.POST("/sheets/:id/import", sheetsHandler.Import)
 	protected.GET("/sheets/:id/export", sheetsHandler.Export)
+
+	// Calendar: events, RSVP, ICS export, RRULE helper, subscriptions.
+	calHandler := handlers.NewCalendarEventHandler()
+	protected.GET("/calendar/events", calHandler.ListEvents)
+	protected.POST("/calendar/events", calHandler.CreateEvent)
+	protected.PUT("/calendar/events/:id", calHandler.UpdateEvent)
+	protected.DELETE("/calendar/events/:id", calHandler.DeleteEvent)
+	protected.POST("/calendar/events/:id/rsvp", calHandler.RSVPEvent)
+	protected.GET("/calendar/export/:calID", calHandler.ExportICS)
+	protected.POST("/calendar/rrule/expand", calHandler.ExpandRRule)
+
+	calSubHandler := handlers.NewCalendarSubscribeHandler()
+	protected.POST("/calendar/subscribe", calSubHandler.Subscribe)
+	protected.GET("/calendar/subscriptions", calSubHandler.List)
+
+	// Contacts: VCF import/export, dedup, merge.
+	contactsHandler := handlers.NewContactsVCFHandler()
+	protected.POST("/contacts/import", contactsHandler.ImportVCF)
+	protected.GET("/contacts/export", contactsHandler.ExportVCF)
+	protected.GET("/contacts/duplicates", contactsHandler.FindDuplicates)
+	protected.POST("/contacts/merge", contactsHandler.MergeContacts)
+
+	// Start background workers.
+	handlers.StartReminderWorker(nil)
+	handlers.StartSubscriptionRefresher()
 
 	// OFFICE-60/61: Vulos Spaces — channels, DMs, threads, messages (CRDT-synced).
 	// OFFICE-SPACES-1/4/5/6: reactions, status, search, pins (additive via SpacesHandlerExt).
