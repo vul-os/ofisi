@@ -23,6 +23,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { X, MessageSquare, CheckCircle, RotateCcw, Trash2, Send, ChevronDown, ChevronUp } from 'lucide-react'
 import { api } from '../lib/api'
 import { getCommentStore } from '../lib/crdt/comments'
+import { IconButton, Tabs } from './ui'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -80,7 +81,7 @@ function ReplyItem({ reply, fileId, commentId, authorId, onDeleted }) {
 
   if (reply.deleted) {
     return (
-      <div className="pl-3 text-xs text-gray-400 italic py-1 border-l-2 border-gray-100">
+      <div className="pl-3 text-2xs text-ink-faint italic py-1 border-l border-line">
         [deleted]
       </div>
     )
@@ -89,10 +90,10 @@ function ReplyItem({ reply, fileId, commentId, authorId, onDeleted }) {
   const isOwn = reply.author_id === authorId
 
   return (
-    <div className="pl-3 border-l-2 border-indigo-100 py-1.5 space-y-1">
+    <div className="pl-3 border-l border-accent-tint-2 py-1.5 space-y-1">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-600">{reply.author_id || 'Anonymous'}</span>
-        <span className="text-[10px] text-gray-400">{formatTs(reply.created_at)}</span>
+        <span className="text-2xs font-semibold text-ink-muted tracking-tightish">{reply.author_id || 'Anonymous'}</span>
+        <span className="text-2xs text-ink-faint">{formatTs(reply.created_at)}</span>
       </div>
       {editing ? (
         <div className="space-y-1">
@@ -100,31 +101,31 @@ function ReplyItem({ reply, fileId, commentId, authorId, onDeleted }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             rows={2}
-            className="w-full text-xs border border-indigo-300 rounded px-2 py-1 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className="w-full text-xs bg-paper border border-line rounded-sm px-2 py-1 resize-none outline-none focus:border-accent focus:shadow-focus transition-colors"
           />
           <div className="flex gap-1">
             <button
               onClick={handleSave}
               disabled={busy}
-              className="px-2 py-0.5 text-[10px] bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-60"
+              className="px-2 py-0.5 text-2xs bg-accent text-white rounded-xs hover:bg-accent-hover disabled:opacity-60 transition-colors"
             >
               Save
             </button>
             <button
               onClick={() => { setEditing(false); setDraft(reply.body) }}
-              className="px-2 py-0.5 text-[10px] border border-gray-300 rounded hover:bg-gray-50"
+              className="px-2 py-0.5 text-2xs border border-line text-ink-muted rounded-xs hover:bg-bg-elev2 transition-colors"
             >
               Cancel
             </button>
           </div>
         </div>
       ) : (
-        <p className="text-xs text-gray-700 whitespace-pre-wrap">{reply.body}</p>
+        <p className="text-xs text-ink whitespace-pre-wrap leading-snug">{reply.body}</p>
       )}
       {isOwn && !editing && (
         <div className="flex gap-2">
-          <button onClick={() => setEditing(true)} className="text-[10px] text-indigo-500 hover:underline">Edit</button>
-          <button onClick={handleDelete} disabled={busy} className="text-[10px] text-red-400 hover:underline">Delete</button>
+          <button onClick={() => setEditing(true)} className="text-2xs text-accent hover:underline">Edit</button>
+          <button onClick={handleDelete} disabled={busy} className="text-2xs text-danger/80 hover:text-danger">Delete</button>
         </div>
       )}
     </div>
@@ -211,26 +212,26 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
   const isOwn = item.author_id === authorId
 
   return (
-    <div className={`rounded-lg border p-3 space-y-2 transition-colors ${isResolved ? 'bg-gray-50 border-gray-200 opacity-70' : 'bg-white border-gray-200'}`}>
+    <div className={`rounded-md border p-3 space-y-2 transition-colors animate-rise-in ${isResolved ? 'bg-bg-elev2 border-line opacity-70' : 'bg-paper border-line'}`}>
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs font-semibold text-gray-700">{item.author_id || 'Anonymous'}</span>
+            <span className="text-xs font-semibold text-ink tracking-tightish">{item.author_id || 'Anonymous'}</span>
             {isResolved && (
-              <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">Resolved</span>
+              <span className="text-2xs bg-success-bg text-success px-1.5 py-0.5 rounded-pill font-medium">Resolved</span>
             )}
-            <span className="text-[10px] text-gray-400">{formatTs(item.created_at)}</span>
+            <span className="text-2xs text-ink-faint">{formatTs(item.created_at)}</span>
           </div>
           {item.anchor && (
-            <p className="text-[10px] text-indigo-500 mt-0.5 truncate" title={anchorLabel(item.anchor)}>
-              {anchorLabel(item.anchor)}
+            <p className="text-2xs text-accent mt-0.5 truncate font-serif italic" title={anchorLabel(item.anchor)}>
+              “{anchorLabel(item.anchor)}”
             </p>
           )}
         </div>
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5"
+          className="text-ink-faint hover:text-ink-muted flex-shrink-0 mt-0.5 transition-colors"
         >
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
@@ -245,26 +246,26 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
                 value={editDraft}
                 onChange={(e) => setEditDraft(e.target.value)}
                 rows={3}
-                className="w-full text-sm border border-indigo-300 rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                className="w-full text-sm bg-paper border border-line rounded-sm px-2 py-1.5 resize-none outline-none focus:border-accent focus:shadow-focus transition-colors"
               />
               <div className="flex gap-1.5">
                 <button
                   onClick={handleSaveEdit}
                   disabled={busy}
-                  className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-60"
+                  className="px-2.5 py-1 text-xs bg-accent text-white rounded-sm hover:bg-accent-hover disabled:opacity-60 transition-colors"
                 >
                   Save
                 </button>
                 <button
                   onClick={() => { setEditing(false); setEditDraft(item.body) }}
-                  className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+                  className="px-2.5 py-1 text-xs border border-line text-ink-muted rounded-sm hover:bg-bg-elev2 transition-colors"
                 >
                   Cancel
                 </button>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-gray-800 whitespace-pre-wrap">{item.body}</p>
+            <p className="text-sm text-ink whitespace-pre-wrap leading-snug">{item.body}</p>
           )}
 
           {/* Replies */}
@@ -292,12 +293,12 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleReply() } }}
                 rows={1}
                 placeholder="Reply…"
-                className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-300 min-h-[28px]"
+                className="flex-1 text-xs bg-paper border border-line rounded-sm px-2 py-1 resize-none outline-none focus:border-accent focus:shadow-focus transition-colors min-h-[28px]"
               />
               <button
                 onClick={handleReply}
                 disabled={!replyDraft.trim() || busy}
-                className="p-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 flex-shrink-0"
+                className="p-1.5 bg-accent text-white rounded-sm hover:bg-accent-hover disabled:opacity-40 flex-shrink-0 transition-colors"
               >
                 <Send size={12} />
               </button>
@@ -305,12 +306,12 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
           )}
 
           {/* Actions */}
-          <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+          <div className="flex items-center gap-3 pt-0.5 flex-wrap">
             {isResolved ? (
               <button
                 onClick={handleReopen}
                 disabled={busy}
-                className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-indigo-600 transition"
+                className="flex items-center gap-1 text-2xs text-ink-faint hover:text-accent transition-colors"
               >
                 <RotateCcw size={10} /> Reopen
               </button>
@@ -318,7 +319,7 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
               <button
                 onClick={handleResolve}
                 disabled={busy}
-                className="flex items-center gap-1 text-[10px] text-green-600 hover:text-green-700 transition"
+                className="flex items-center gap-1 text-2xs text-success hover:text-accent-press transition-colors"
               >
                 <CheckCircle size={10} /> Resolve
               </button>
@@ -327,14 +328,14 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
               <>
                 <button
                   onClick={() => setEditing(true)}
-                  className="text-[10px] text-indigo-500 hover:underline"
+                  className="text-2xs text-accent hover:underline"
                 >
                   Edit
                 </button>
                 <button
                   onClick={handleDelete}
                   disabled={busy}
-                  className="flex items-center gap-0.5 text-[10px] text-red-400 hover:text-red-600"
+                  className="flex items-center gap-0.5 text-2xs text-danger/80 hover:text-danger transition-colors"
                 >
                   <Trash2 size={10} /> Delete
                 </button>
@@ -410,42 +411,51 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
     ? comments
     : comments.filter((c) => c.state === filter)
 
+  /*
+   * Side rail (clean, not stacked overlay):
+   *   - lives inline as a 288px right column under the topbar
+   *   - paper-elev2 background so it reads as "the side", not as a popover
+   *   - sticky header / tabs / composer; comments are the only thing that scrolls
+   */
+  const openCount     = comments.filter((c) => c.state !== 'resolved').length
+  const resolvedCount = comments.filter((c) => c.state === 'resolved').length
+
   return (
-    <div className="w-72 flex-shrink-0 border-l border-gray-200 bg-gray-50 flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-200 bg-white flex-shrink-0">
-        <div className="flex items-center gap-1.5">
-          <MessageSquare size={15} className="text-indigo-500" />
-          <span className="text-sm font-semibold text-gray-800">Comments</span>
+    <aside className="w-72 flex-shrink-0 border-l border-line bg-bg-elev2 flex flex-col overflow-hidden animate-slide-in-right">
+      {/* Header — discreet, no coloured accent on title */}
+      <div className="flex items-center justify-between px-3 h-11 border-b border-line bg-paper flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <MessageSquare size={14} className="text-ink-muted" />
+          <span className="text-sm font-semibold text-ink tracking-tightish">Comments</span>
           {comments.length > 0 && (
-            <span className="text-[10px] bg-indigo-100 text-indigo-700 rounded-full px-1.5 py-0.5 font-medium">
+            <span className="text-2xs bg-bg-elev2 text-ink-faint rounded-pill px-1.5 py-0.5 font-medium">
               {comments.length}
             </span>
           )}
         </div>
-        <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition">
-          <X size={15} />
-        </button>
+        <IconButton size="sm" title="Close" onClick={onClose}>
+          <X size={14} />
+        </IconButton>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex border-b border-gray-200 bg-white flex-shrink-0">
-        {[['all', 'All'], ['open', 'Open'], ['resolved', 'Resolved']].map(([v, label]) => (
-          <button
-            key={v}
-            onClick={() => setFilter(v)}
-            className={`flex-1 py-1.5 text-xs font-medium transition-colors ${filter === v ? 'text-indigo-600 border-b-2 border-indigo-500' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Filter tabs — using design system Tabs primitive */}
+      <div className="bg-paper flex-shrink-0">
+        <Tabs
+          value={filter}
+          onChange={setFilter}
+          items={[
+            { value: 'all',      label: 'All',      count: comments.length },
+            { value: 'open',     label: 'Open',     count: openCount       },
+            { value: 'resolved', label: 'Resolved', count: resolvedCount   },
+          ]}
+        />
       </div>
 
-      {/* New comment input */}
-      <div className="p-3 border-b border-gray-200 bg-white flex-shrink-0 space-y-1.5">
+      {/* Composer — paper bg, accent only on the Post button */}
+      <div className="p-3 border-b border-line bg-paper flex-shrink-0 space-y-2">
         {anchorCtx && (
-          <p className="text-[10px] text-indigo-500 truncate" title={anchorLabel(anchorCtx)}>
-            Anchor: {anchorLabel(anchorCtx)}
+          <p className="text-2xs text-accent font-serif italic truncate" title={anchorLabel(anchorCtx)}>
+            On “{anchorLabel(anchorCtx)}”
           </p>
         )}
         <textarea
@@ -455,24 +465,24 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAdd() } }}
           rows={2}
           placeholder="Add a comment…"
-          className="w-full text-sm border border-gray-200 rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-300"
+          className="w-full text-sm bg-bg-elev2 border border-line rounded-sm px-2 py-1.5 resize-none outline-none focus:border-accent focus:shadow-focus focus:bg-paper transition-colors"
         />
         <button
           onClick={handleAdd}
           disabled={!newBody.trim() || busy}
-          className="w-full py-1.5 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 transition"
+          className="w-full h-7 text-xs font-medium bg-accent text-white rounded-sm hover:bg-accent-hover disabled:opacity-50 transition-colors tracking-tightish"
         >
-          {busy ? 'Posting…' : 'Post Comment'}
+          {busy ? 'Posting…' : 'Comment'}
         </button>
       </div>
 
-      {/* Comment list */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      {/* Comment list — only the comments scroll */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {loading && (
-          <p className="text-xs text-gray-400 text-center py-4">Loading…</p>
+          <p className="text-xs text-ink-faint text-center py-4">Loading…</p>
         )}
         {!loading && filtered.length === 0 && (
-          <p className="text-xs text-gray-400 text-center py-8">
+          <p className="text-xs text-ink-faint text-center py-8 font-serif italic">
             {filter === 'all' ? 'No comments yet.' : `No ${filter} comments.`}
           </p>
         )}
@@ -487,6 +497,6 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
           />
         ))}
       </div>
-    </div>
+    </aside>
   )
 }

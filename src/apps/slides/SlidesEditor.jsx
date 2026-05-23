@@ -11,7 +11,11 @@ import Placeholder from '@tiptap/extension-placeholder'
 import {
   ArrowLeft, Save, Loader2, Play, Plus, Trash2,
   ChevronUp, ChevronDown, Download, EyeOff, MessageSquare,
+  Bold, Italic, Underline as UnderlineIcon,
+  AlignLeft, AlignCenter, AlignRight, List, Image as ImageIcon,
+  Check, Circle, AlertCircle, StickyNote,
 } from 'lucide-react'
+import DOMPurify from 'dompurify'
 import { useFilesStore } from '../../store/filesStore'
 import { api } from '../../lib/api'
 import SlidePreview from './SlidePreview'
@@ -20,6 +24,16 @@ import { TreeSession, getTreeReplicaId, ordKeyBetween } from '../../lib/crdt/tre
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '../../lib/useLiveCursors.js'
 import { getSlideViewers } from '../../components/RemoteCursors.jsx'
+import { Button, IconButton, Tooltip, Topbar } from '../../components/ui'
+
+const PURIFY_CONFIG = {
+  USE_PROFILES: { html: true },
+  FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
+  FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur',
+                'onchange', 'onsubmit', 'onkeydown', 'onkeyup', 'onkeypress'],
+}
+
+const sanitize = (html) => DOMPurify.sanitize(html ?? '', PURIFY_CONFIG)
 
 const THEMES = ['black', 'white', 'league', 'beige', 'sky', 'night', 'serif', 'simple', 'solarized', 'moon', 'dracula']
 const TRANSITIONS = ['none', 'fade', 'slide', 'convex', 'concave', 'zoom']
@@ -54,7 +68,11 @@ export default function SlidesEditor() {
 
   // ── OFFICE-25: Live cursors (slide viewers) ───────────────────────────────
   // fabric is null until OFFICE-20 is wired; hook is a graceful no-op.
-  const { remoteCursors, broadcastSlideCursor } = useLiveCursors({ fabric: null, localIdentity: null, color: '#f59e0b' })
+  // Colour comes from a warm signal (honey) so viewer badges sit comfortably
+  // on the paper canvas instead of shouting a generic amber.
+  const { remoteCursors, broadcastSlideCursor } = useLiveCursors({
+    fabric: null, localIdentity: null, color: 'var(--signal-warning)',
+  })
 
   const editor = useEditor({
     extensions: [
@@ -263,92 +281,230 @@ export default function SlidesEditor() {
     e.target.value = ''
   }
 
-  if (!editor) return <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-amber-500" size={24} /></div>
+  if (!editor) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-bg">
+        <Loader2 className="animate-spin text-accent" size={22} />
+      </div>
+    )
+  }
+
+  // Discreet save status — meta-line, not banner (matches DocsEditor).
+  const statusInfo = (() => {
+    if (saving)  return { text: 'Saving',  tone: 'muted',   icon: Loader2,    spin: true  }
+    if (saved)   return { text: 'Saved',   tone: 'success', icon: Check,      spin: false }
+    return         { text: 'Unsaved', tone: 'muted',   icon: Circle,     spin: false }
+  })()
+  const StatusIcon = statusInfo.icon
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-gray-50">
-      {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 bg-white flex-shrink-0">
-        <button onClick={() => navigate('/slides')} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition"><ArrowLeft size={18} /></button>
-        <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
-          <svg viewBox="0 0 24 24" className="w-4 h-4 text-amber-600 fill-current"><path d="M21 3H3a2 2 0 00-2 2v14a2 2 0 002 2h18a2 2 0 002-2V5a2 2 0 00-2-2zm0 16H3V5h18v14zM7 12H5v5h2v-5zm4-3H9v8h2V9zm4 2h-2v6h2v-6zm4-4h-2v10h2V7z"/></svg>
-        </div>
-        <input
-          value={title}
-          onChange={(e) => { setTitle(e.target.value); setSaved(false) }}
-          className="flex-1 text-base font-semibold text-gray-900 bg-transparent border-none outline-none hover:bg-gray-50 focus:bg-gray-50 rounded px-2 py-0.5"
-          placeholder="Untitled Presentation"
-        />
-        <span className="text-xs text-gray-400 hidden sm:block">{saving ? 'Saving…' : saved ? 'Saved' : 'Unsaved'}</span>
-        <button
-          onClick={() => setShowComments(v => !v)}
-          title="Comments"
-          className={`p-1.5 rounded-lg transition ${showComments ? 'bg-amber-100 text-amber-600' : 'hover:bg-gray-100 text-gray-500'}`}
-        >
-          <MessageSquare size={16} />
-        </button>
-        <button
-          onClick={() => setPresenting(!presenting)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-700 transition"
-        >
-          {presenting ? <><EyeOff size={14} /> Edit</> : <><Play size={14} /> Present</>}
-        </button>
-        <button
-          onClick={() => { clearTimeout(saveTimer.current); autosave(slidesData) }}
-          disabled={saving}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 disabled:opacity-60 transition"
-        >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
-        </button>
-        <div className="relative group">
-          <button className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
-            <Download size={14} /> Export ▾
-          </button>
-          <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-xl shadow-xl z-30 py-1 text-sm hidden group-hover:block">
-            <button onClick={() => exportSlidesToPdf(title)} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-gray-700">PDF (print)</button>
-            <button onClick={() => exportSlidesToPptx(slidesData, title)} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-gray-700">PowerPoint (.pptx)</button>
-          </div>
-        </div>
-      </div>
+    <div className="flex-1 flex flex-col overflow-hidden bg-bg">
+      {/* Top bar — composed from the design system, mirroring DocsEditor. */}
+      <Topbar
+        leading={
+          <Tooltip label="Back to Slides">
+            <IconButton size="sm" onClick={() => navigate('/slides')}>
+              <ArrowLeft size={15} />
+            </IconButton>
+          </Tooltip>
+        }
+        title={
+          <input
+            value={title}
+            onChange={(e) => { setTitle(e.target.value); setSaved(false) }}
+            placeholder="Untitled presentation"
+            aria-label="Presentation title"
+            className={[
+              'flex-1 min-w-0 text-sm font-semibold tracking-tightish',
+              'bg-transparent border border-transparent rounded-sm px-2 py-1',
+              'text-ink placeholder:text-ink-faint',
+              'hover:border-line focus:border-line-strong focus:bg-paper',
+              'transition-[border-color,background] duration-fast ease-out outline-none',
+            ].join(' ')}
+          />
+        }
+        meta={
+          <span
+            className={[
+              'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
+              statusInfo.tone === 'success' ? 'text-success' :
+              statusInfo.tone === 'danger'  ? 'text-danger' :
+                                              'text-ink-faint',
+            ].join(' ')}
+          >
+            <StatusIcon size={11} className={statusInfo.spin ? 'animate-spin' : ''} />
+            {statusInfo.text}
+          </span>
+        }
+        actions={
+          <>
+            <Tooltip label="Comments">
+              <IconButton
+                size="sm"
+                active={showComments}
+                onClick={() => setShowComments((v) => !v)}
+              >
+                <MessageSquare size={14} />
+              </IconButton>
+            </Tooltip>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPresenting(!presenting)}
+              aria-pressed={presenting}
+            >
+              {presenting ? <><EyeOff size={13} /> Edit</> : <><Play size={13} /> Present</>}
+            </Button>
+            {/* Export — quiet secondary so it doesn't compete with primary Save. */}
+            <div className="relative group">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                className={[
+                  'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md',
+                  'bg-paper border border-line text-xs font-medium tracking-tightish',
+                  'text-ink-muted hover:border-line-strong hover:text-ink',
+                  'transition-colors duration-fast ease-out',
+                  'focus-visible:outline-none focus-visible:shadow-focus',
+                ].join(' ')}
+              >
+                <Download size={12} /> Export
+                <ChevronDown size={11} className="opacity-60" />
+              </button>
+              <div
+                role="menu"
+                className={[
+                  'absolute right-0 top-full mt-0.5 w-48 py-1',
+                  'bg-paper border border-line rounded-md shadow-e2 z-30 text-sm',
+                  'hidden group-hover:block animate-scale-in',
+                ].join(' ')}
+              >
+                <button
+                  role="menuitem"
+                  onClick={() => exportSlidesToPdf(title)}
+                  className="w-full text-left px-3 py-2 hover:bg-accent-tint text-ink-muted flex items-center gap-2"
+                >
+                  <span className="text-2xs font-bold tracking-eyebrow text-danger w-10">PDF</span>
+                  Print to PDF
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={() => exportSlidesToPptx(slidesData, title)}
+                  className="w-full text-left px-3 py-2 hover:bg-accent-tint text-ink-muted flex items-center gap-2"
+                >
+                  <span className="text-2xs font-bold tracking-eyebrow text-accent w-10">PPTX</span>
+                  PowerPoint
+                </button>
+              </div>
+            </div>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => { clearTimeout(saveTimer.current); autosave(slidesData) }}
+              disabled={saving}
+            >
+              {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              Save
+            </Button>
+          </>
+        }
+      />
 
       {presenting ? (
         <SlidePreview data={slidesData} onClose={() => setPresenting(false)} />
       ) : (
         <div className="flex-1 flex overflow-hidden">
-          {/* Slide list */}
-          <div className="w-52 flex-shrink-0 bg-gray-900 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Slides ({slidesData.slides.length})</span>
-              <button onClick={addSlide} className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition"><Plus size={14} /></button>
+          {/* Slide list — clay panel with the same warm-neutral language as the
+              sidebar. Selected thumbnail is marked with a quiet 2-px accent
+              rail, not a coloured frame (mirrors Sidebar pattern). */}
+          <aside className="w-56 flex-shrink-0 bg-clay border-r border-line flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-3 h-9 border-b border-line">
+              <span className="text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow">
+                Slides · {slidesData.slides.length}
+              </span>
+              <Tooltip label="Add slide">
+                <IconButton size="sm" onClick={addSlide} aria-label="Add slide">
+                  <Plus size={13} />
+                </IconButton>
+              </Tooltip>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+            <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5">
               {slidesData.slides.map((slide, idx) => {
                 const viewers = getSlideViewers(remoteCursors, slide.id)
+                const isActive = idx === activeIdx
                 return (
                   <div
                     key={slide.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-current={isActive ? 'true' : undefined}
                     onClick={() => setActiveIdx(idx)}
-                    className={`group relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${idx === activeIdx ? 'border-amber-500' : 'border-transparent hover:border-gray-600'}`}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setActiveIdx(idx)
+                      }
+                    }}
+                    className={[
+                      'group relative cursor-pointer rounded-md overflow-hidden',
+                      'transition-[box-shadow,background] duration-fast ease-out',
+                      'focus-visible:outline-none focus-visible:shadow-focus',
+                      isActive
+                        ? 'bg-paper shadow-e1'
+                        : 'bg-paper/60 hover:bg-paper',
+                    ].join(' ')}
                   >
+                    {/* Active rail — quiet 2 px accent on the left, mirrors Sidebar. */}
+                    {isActive && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-0 top-0 bottom-0 w-0.5 bg-accent rounded-r-sm"
+                      />
+                    )}
                     <div
-                      className="h-24 bg-gray-800 flex flex-col items-center justify-center p-2 text-center"
+                      className="h-20 flex flex-col items-start justify-start p-2 text-left border border-line rounded-md"
                       style={{ background: slide.background || undefined }}
                     >
-                      <div className="text-white text-xs font-bold truncate w-full">{slide.title || `Slide ${idx + 1}`}</div>
-                      <div className="text-gray-400 text-[9px] mt-1 w-full overflow-hidden line-clamp-3" dangerouslySetInnerHTML={{ __html: slide.content }} />
+                      <div
+                        className={[
+                          'text-2xs font-semibold truncate w-full tracking-tightish',
+                          slide.background ? 'text-white' : 'text-ink',
+                        ].join(' ')}
+                      >
+                        {slide.title || `Slide ${idx + 1}`}
+                      </div>
+                      <div
+                        className={[
+                          'text-[10px] mt-1 w-full overflow-hidden line-clamp-3 leading-snug',
+                          slide.background ? 'text-white/70' : 'text-ink-faint',
+                        ].join(' ')}
+                        dangerouslySetInnerHTML={{ __html: sanitize(slide.content) }}
+                      />
                     </div>
-                    <div className="absolute top-1 left-1 text-[9px] text-gray-500 bg-black/40 px-1 rounded">{idx + 1}</div>
+                    {/* Slide index — micro label, eyebrow tracking. */}
+                    <div
+                      className={[
+                        'absolute top-1 left-1.5 text-[9px] font-semibold tracking-eyebrow uppercase px-1 rounded-sm',
+                        slide.background
+                          ? 'text-white/80 bg-black/30'
+                          : 'text-ink-faint bg-bg-elev2',
+                      ].join(' ')}
+                    >
+                      {String(idx + 1).padStart(2, '0')}
+                    </div>
                     {/* OFFICE-25: remote viewer badges */}
                     {viewers.length > 0 && (
-                      <div className="absolute bottom-1 left-1 flex gap-0.5">
+                      <div className="absolute bottom-1 left-1.5 flex gap-0.5">
                         {viewers.map((v) => (
                           <span
                             key={v.accountId}
                             title={v.displayName}
-                            style={{ background: v.color }}
-                            className="flex items-center justify-center rounded-full text-white font-bold select-none"
                             aria-label={v.displayName}
-                            {...{ style: { background: v.color, width: 14, height: 14, fontSize: 8, borderRadius: '50%' } }}
+                            className="flex items-center justify-center rounded-pill text-white font-bold select-none"
+                            style={{
+                              background: v.color,
+                              width: 14, height: 14, fontSize: 8,
+                            }}
                           >
                             {(v.displayName || '?')[0].toUpperCase()}
                           </span>
@@ -356,79 +512,238 @@ export default function SlidesEditor() {
                       </div>
                     )}
                     <div className="absolute top-1 right-1 hidden group-hover:flex gap-0.5">
-                      <button onClick={(e) => { e.stopPropagation(); moveSlide(idx, -1) }} className="p-0.5 rounded bg-black/50 text-gray-300 hover:text-white"><ChevronUp size={10} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); moveSlide(idx, 1) }} className="p-0.5 rounded bg-black/50 text-gray-300 hover:text-white"><ChevronDown size={10} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); deleteSlide(idx) }} className="p-0.5 rounded bg-black/50 text-red-400 hover:text-red-300"><Trash2 size={10} /></button>
+                      <IconButton
+                        size="sm"
+                        title="Move up"
+                        className="h-5 w-5"
+                        onClick={(e) => { e.stopPropagation(); moveSlide(idx, -1) }}
+                      >
+                        <ChevronUp size={10} />
+                      </IconButton>
+                      <IconButton
+                        size="sm"
+                        title="Move down"
+                        className="h-5 w-5"
+                        onClick={(e) => { e.stopPropagation(); moveSlide(idx, 1) }}
+                      >
+                        <ChevronDown size={10} />
+                      </IconButton>
+                      <IconButton
+                        size="sm"
+                        title="Delete slide"
+                        className="h-5 w-5 hover:text-danger"
+                        onClick={(e) => { e.stopPropagation(); deleteSlide(idx) }}
+                      >
+                        <Trash2 size={10} />
+                      </IconButton>
                     </div>
                   </div>
                 )
               })}
             </div>
-            <div className="px-3 py-3 border-t border-gray-800 space-y-2">
+            {/* Meta controls — theme + transition, quiet selects. */}
+            <div className="px-3 py-3 border-t border-line space-y-2.5 bg-clay">
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Theme</label>
-                <select value={slidesData.theme} onChange={(e) => updateMeta('theme', e.target.value)} className="w-full bg-gray-800 text-gray-200 text-xs rounded-lg px-2 py-1.5 border border-gray-700 focus:outline-none">
+                <label className="text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow block mb-1">
+                  Theme
+                </label>
+                <select
+                  value={slidesData.theme}
+                  onChange={(e) => updateMeta('theme', e.target.value)}
+                  className={[
+                    'w-full bg-paper text-ink text-xs rounded-sm px-2 h-7',
+                    'border border-line hover:border-line-strong',
+                    'focus-visible:outline-none focus-visible:shadow-focus',
+                    'transition-colors duration-fast ease-out',
+                  ].join(' ')}
+                >
                   {THEMES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Transition</label>
-                <select value={slidesData.transition} onChange={(e) => updateMeta('transition', e.target.value)} className="w-full bg-gray-800 text-gray-200 text-xs rounded-lg px-2 py-1.5 border border-gray-700 focus:outline-none">
+                <label className="text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow block mb-1">
+                  Transition
+                </label>
+                <select
+                  value={slidesData.transition}
+                  onChange={(e) => updateMeta('transition', e.target.value)}
+                  className={[
+                    'w-full bg-paper text-ink text-xs rounded-sm px-2 h-7',
+                    'border border-line hover:border-line-strong',
+                    'focus-visible:outline-none focus-visible:shadow-focus',
+                    'transition-colors duration-fast ease-out',
+                  ].join(' ')}
+                >
                   {TRANSITIONS.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
             </div>
-          </div>
+          </aside>
 
           {/* Editor */}
           {activeSlide && (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="px-6 pt-4 pb-2 bg-white border-b border-gray-100">
+            <div className="flex-1 flex flex-col overflow-hidden bg-bg">
+              <div className="px-6 pt-4 pb-2 bg-paper border-b border-line">
                 <input
                   value={activeSlide.title}
                   onChange={(e) => updateSlideField(activeIdx, 'title', e.target.value)}
-                  className="w-full text-2xl font-bold text-gray-900 bg-transparent border-none outline-none placeholder-gray-300"
+                  className={[
+                    'w-full text-2xl font-bold tracking-tightish font-serif',
+                    'bg-transparent border-none outline-none',
+                    'text-ink placeholder:text-ink-faint',
+                  ].join(' ')}
                   placeholder="Slide title…"
+                  aria-label="Slide title"
                 />
               </div>
 
-              {/* Mini toolbar */}
-              <div className="flex items-center gap-1 px-4 py-1.5 bg-white border-b border-gray-100 flex-wrap">
-                {[
-                  { label: 'B', fn: () => editor.chain().focus().toggleBold().run(), active: editor.isActive('bold'), style: 'font-bold' },
-                  { label: 'I', fn: () => editor.chain().focus().toggleItalic().run(), active: editor.isActive('italic'), style: 'italic' },
-                  { label: 'U', fn: () => editor.chain().focus().toggleUnderline().run(), active: editor.isActive('underline'), style: 'underline' },
-                ].map(({ label, fn, active, style }) => (
-                  <button key={label} onClick={fn} className={`toolbar-btn w-7 h-7 text-sm ${style} ${active ? 'active' : ''}`}>{label}</button>
-                ))}
+              {/* Mini toolbar — token-driven, quiet ribbon (mirrors DocsToolbar). */}
+              <div
+                className="flex items-center gap-0.5 px-3 h-10 bg-paper border-b border-line flex-wrap"
+                role="toolbar"
+                aria-label="Slide formatting"
+              >
+                <Tooltip label="Bold (⌘B)">
+                  <IconButton
+                    size="sm"
+                    active={editor.isActive('bold')}
+                    onClick={() => editor.chain().focus().toggleBold().run()}
+                    aria-label="Bold"
+                  >
+                    <Bold size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Italic (⌘I)">
+                  <IconButton
+                    size="sm"
+                    active={editor.isActive('italic')}
+                    onClick={() => editor.chain().focus().toggleItalic().run()}
+                    aria-label="Italic"
+                  >
+                    <Italic size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Underline (⌘U)">
+                  <IconButton
+                    size="sm"
+                    active={editor.isActive('underline')}
+                    onClick={() => editor.chain().focus().toggleUnderline().run()}
+                    aria-label="Underline"
+                  >
+                    <UnderlineIcon size={14} />
+                  </IconButton>
+                </Tooltip>
                 <span className="toolbar-divider" />
-                <button onClick={() => editor.chain().focus().setTextAlign('left').run()} className="toolbar-btn text-xs px-1.5">≡L</button>
-                <button onClick={() => editor.chain().focus().setTextAlign('center').run()} className="toolbar-btn text-xs px-1.5">≡C</button>
-                <button onClick={() => editor.chain().focus().setTextAlign('right').run()} className="toolbar-btn text-xs px-1.5">≡R</button>
+                <Tooltip label="Align left">
+                  <IconButton
+                    size="sm"
+                    active={editor.isActive({ textAlign: 'left' })}
+                    onClick={() => editor.chain().focus().setTextAlign('left').run()}
+                    aria-label="Align left"
+                  >
+                    <AlignLeft size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Align center">
+                  <IconButton
+                    size="sm"
+                    active={editor.isActive({ textAlign: 'center' })}
+                    onClick={() => editor.chain().focus().setTextAlign('center').run()}
+                    aria-label="Align center"
+                  >
+                    <AlignCenter size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Align right">
+                  <IconButton
+                    size="sm"
+                    active={editor.isActive({ textAlign: 'right' })}
+                    onClick={() => editor.chain().focus().setTextAlign('right').run()}
+                    aria-label="Align right"
+                  >
+                    <AlignRight size={14} />
+                  </IconButton>
+                </Tooltip>
                 <span className="toolbar-divider" />
-                <button onClick={() => editor.chain().focus().toggleBulletList().run()} className="toolbar-btn text-xs px-2">• List</button>
-                <button onClick={() => imgInput.current?.click()} className="toolbar-btn text-xs px-2">Image</button>
-                <input ref={imgInput} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                <Tooltip label="Bullet list">
+                  <IconButton
+                    size="sm"
+                    active={editor.isActive('bulletList')}
+                    onClick={() => editor.chain().focus().toggleBulletList().run()}
+                    aria-label="Bullet list"
+                  >
+                    <List size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Insert image">
+                  <IconButton
+                    size="sm"
+                    onClick={() => imgInput.current?.click()}
+                    aria-label="Insert image"
+                  >
+                    <ImageIcon size={14} />
+                  </IconButton>
+                </Tooltip>
+                <input
+                  ref={imgInput}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleImageUpload}
+                />
                 <span className="toolbar-divider" />
-                <label className="toolbar-btn flex items-center gap-1 text-xs px-2 cursor-pointer">
-                  BG
-                  <input type="color" className="w-4 h-4 rounded cursor-pointer" value={activeSlide.background || '#1a1a2e'} onChange={(e) => updateSlideField(activeIdx, 'background', e.target.value)} />
+                {/* Slide background — quiet swatch input. */}
+                <label
+                  className="toolbar-btn flex items-center gap-1.5 cursor-pointer text-xs px-2"
+                  title="Slide background"
+                >
+                  <span className="text-2xs font-semibold tracking-eyebrow uppercase text-ink-faint">
+                    BG
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="inline-block w-4 h-4 rounded-xs border border-line"
+                    style={{ background: activeSlide.background || 'var(--paper)' }}
+                  />
+                  <input
+                    type="color"
+                    className="sr-only"
+                    value={activeSlide.background || '#1a1a2e'}
+                    onChange={(e) => updateSlideField(activeIdx, 'background', e.target.value)}
+                    aria-label="Slide background colour"
+                  />
                 </label>
               </div>
 
-              <div className="flex-1 overflow-auto p-6 bg-gray-50">
-                <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm p-8 min-h-64">
+              {/* Slide canvas — paper feel with subtle grain, mirrors DocsEditor.
+                  The slide itself sits on a card centred in the working area. */}
+              <div className="flex-1 overflow-auto px-6 py-8 bg-bg">
+                <article
+                  className="paper-grain mx-auto bg-paper border border-line rounded-lg shadow-e1 px-12 py-10 animate-fade-in"
+                  style={{ maxWidth: '900px', minHeight: '420px' }}
+                >
                   <EditorContent editor={editor} className="tiptap" />
-                </div>
+                </article>
               </div>
 
-              <div className="px-6 py-3 bg-yellow-50 border-t border-yellow-100 flex-shrink-0">
-                <label className="text-xs font-semibold text-yellow-700 block mb-1">Speaker Notes</label>
+              {/* Speaker notes — quiet warning-tinted strip (not yellow shouty). */}
+              <div className="px-6 py-3 bg-warning-bg border-t border-line flex-shrink-0">
+                <label
+                  htmlFor="slide-speaker-notes"
+                  className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-eyebrow text-warning mb-1"
+                >
+                  <StickyNote size={11} />
+                  Speaker notes
+                </label>
                 <textarea
+                  id="slide-speaker-notes"
                   value={activeSlide.notes}
                   onChange={(e) => updateSlideField(activeIdx, 'notes', e.target.value)}
-                  className="w-full h-16 text-sm bg-transparent border-none outline-none resize-none text-yellow-800 placeholder-yellow-400"
-                  placeholder="Add speaker notes…"
+                  className={[
+                    'w-full h-14 text-sm bg-transparent border-none outline-none resize-none',
+                    'text-ink-muted placeholder:text-ink-faint',
+                  ].join(' ')}
+                  placeholder="Notes for the presenter…"
                 />
               </div>
             </div>

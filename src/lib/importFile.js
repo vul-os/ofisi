@@ -219,9 +219,7 @@ export async function importFromUrl(localFile, navigate) {
   }
 
   // Fetch the file from the backend
-  const token = localStorage.getItem('session_token')
-  const headers = token ? { Authorization: `Bearer ${token}` } : {}
-  const res = await fetch(url, { headers })
+  const res = await fetch(url, { credentials: 'include' })
   if (!res.ok) throw new Error('Failed to fetch file')
 
   let content

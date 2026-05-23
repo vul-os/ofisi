@@ -4,45 +4,39 @@
 //   :sessionId is the fabric session id (e.g. "meeting:<id>") — the same
 //   value that createCall() receives.  CallView handles the WebRTC mesh.
 //
-// Flow:
-//   1. Lobby screen: user enters display name + optional vumail.
-//   2. Host sees a "Start meeting" button; others see "Ask to join" (lobby).
-//   3. Once admitted / started, CallView mounts with the room's sessionId.
-//   4. Per-room presence roster (participants who have joined).
-//
-// The "lobby/admit" model here is client-side: we trust the host identity
-// the user declares; a production deployment would couple to the fabric
-// session membership.
+// Design pass: warm paper lobby, serif headline ("Ready to join?"), camera
+// preview framed warmly via Card, invitee roster as warm-tint Card pills,
+// single accent join button.
 
-import { useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Video, Mic, MicOff, VideoOff, ArrowLeft, Users } from 'lucide-react'
+import {
+  Video, Mic, MicOff, VideoOff, ArrowLeft, Users, Calendar,
+} from 'lucide-react'
 import CallView from './CallView'
+import { Button, Card, Input, Tooltip } from '../../components/ui'
 
-// Attempt to fetch the meeting metadata for display (title, invitees, etc).
-// Non-blocking — the room works even without this info.
+// Attempt to fetch meeting metadata (title, invitees, etc).  Non-blocking.
 async function fetchMeetingMeta(sessionId) {
-  // session_id is "meeting:<id>" — strip prefix to get the meeting id.
   const id = sessionId.startsWith('meeting:') ? sessionId.slice('meeting:'.length) : null
   if (!id) return null
   try {
-    const r = await fetch(`/api/meetings/${encodeURIComponent(id)}/join`)
+    const r = await fetch(`/api/meetings/${encodeURIComponent(id)}/join`, {
+      credentials: 'include',
+    })
     if (r.ok) return r.json()
   } catch {}
   return null
 }
 
-// Simple random color for presence avatar
-function randomColor() {
-  const palette = [
-    '#6366f1','#8b5cf6','#ec4899','#f97316','#10b981','#0ea5e9','#f59e0b',
-  ]
+// Warm presence-tint palette — no Tailwind defaults.
+function pickColor() {
+  const palette = ['#0f6a6c', '#4f7a4d', '#c08436', '#b8453a', '#4a6b8a', '#6e5b8a']
   return palette[Math.floor(Math.random() * palette.length)]
 }
 
 export default function Room() {
   const { sessionId: rawSessionId } = useParams()
-  // react-router encodes the colon; decode it.
   const sessionId = decodeURIComponent(rawSessionId || '')
   const navigate = useNavigate()
 
@@ -52,81 +46,99 @@ export default function Room() {
   const [videoOn, setVideoOn] = useState(true)
   const [micOn, setMicOn] = useState(true)
   const [meta, setMeta] = useState(null)
-  const [metaLoaded, setMetaLoaded] = useState(false)
   const [identity, setIdentity] = useState(null)
+  const previewRef = useRef(null)
+  const previewStreamRef = useRef(null)
 
-  // Load meeting meta once on first render
-  useState(() => {
+  useEffect(() => {
+    let cancelled = false
     fetchMeetingMeta(sessionId).then((m) => {
-      setMeta(m)
-      setMetaLoaded(true)
+      if (!cancelled) setMeta(m)
     })
-  })
+    return () => { cancelled = true }
+  }, [sessionId])
+
+  // Local camera preview for the lobby — released when we leave the lobby.
+  useEffect(() => {
+    if (phase !== 'lobby' || !videoOn) {
+      const s = previewStreamRef.current
+      if (s) { s.getTracks().forEach((t) => t.stop()); previewStreamRef.current = null }
+      if (previewRef.current) previewRef.current.srcObject = null
+      return
+    }
+    let cancelled = false
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: false })
+      .then((stream) => {
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
+        previewStreamRef.current = stream
+        if (previewRef.current) previewRef.current.srcObject = stream
+      })
+      .catch(() => { /* preview is best-effort */ })
+    return () => {
+      cancelled = true
+      const s = previewStreamRef.current
+      if (s) { s.getTracks().forEach((t) => t.stop()); previewStreamRef.current = null }
+    }
+  }, [phase, videoOn])
 
   const handleJoin = useCallback(() => {
     if (!displayName.trim()) return
     const id = {
       displayName: displayName.trim(),
       vumail: vumail.trim() || null,
-      color: randomColor(),
-      peerId: null, // assigned by signaling layer
+      color: pickColor(),
+      peerId: null,
     }
     setIdentity(id)
     setPhase('call')
   }, [displayName, vumail])
 
-  const handleLeave = useCallback(() => {
-    setPhase('ended')
-  }, [])
-
-  const handleBack = useCallback(() => {
-    navigate('/meetings')
-  }, [navigate])
+  const handleLeave = useCallback(() => { setPhase('ended') }, [])
+  const handleBack = useCallback(() => { navigate('/meetings') }, [navigate])
 
   const meetingTitle = meta?.meeting?.title || sessionId
 
   if (phase === 'ended') {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gray-900 text-white gap-4">
-        <div className="text-2xl font-semibold">You have left the meeting</div>
-        <div className="text-gray-400 text-sm">{meetingTitle}</div>
-        <button
-          onClick={handleBack}
-          className="mt-4 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm"
-        >
-          Back to Meetings
-        </button>
+      <div className="flex flex-col items-center justify-center h-screen bg-bg text-ink gap-4 px-4">
+        <h2 className="text-2xl font-serif tracking-tightish">You have left the meeting.</h2>
+        <p className="text-sm text-ink-muted">{meetingTitle}</p>
+        <Button variant="primary" size="lg" onClick={handleBack} className="mt-2">
+          Back to meetings
+        </Button>
       </div>
     )
   }
 
   if (phase === 'call') {
     return (
-      <div className="flex flex-col h-screen bg-gray-900">
-        {/* Room header bar */}
-        <div className="flex-shrink-0 px-4 py-2 border-b border-gray-800 flex items-center gap-3 bg-gray-900 text-white text-sm">
-          <button
-            onClick={handleBack}
-            className="text-gray-400 hover:text-white"
-            title="Back to meetings"
-          >
-            <ArrowLeft size={16} />
-          </button>
-          <span className="font-medium truncate">{meetingTitle}</span>
+      <div className="flex flex-col h-screen" style={{ background: 'var(--ink)' }}>
+        <div className="flex-shrink-0 px-4 h-11 flex items-center gap-3 text-paper text-sm border-b border-paper/10">
+          <Tooltip label="Back to meetings" side="bottom">
+            <button
+              type="button"
+              onClick={handleBack}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-sm text-paper/70 hover:text-paper hover:bg-paper/10 transition-colors duration-fast"
+              aria-label="Back to meetings"
+            >
+              <ArrowLeft size={15} />
+            </button>
+          </Tooltip>
+          <span className="font-medium truncate tracking-tightish">{meetingTitle}</span>
           {meta?.meeting?.invitees?.length > 0 && (
-            <span className="ml-auto flex items-center gap-1 text-xs text-gray-400">
-              <Users size={12} />
+            <span className="ml-auto inline-flex items-center gap-1 text-2xs text-paper/60 tracking-tightish">
+              <Users size={11} />
               {meta.meeting.invitees.length} invited
             </span>
           )}
         </div>
 
-        {/* CallView fills remaining height */}
         <div className="flex-1 min-h-0">
           <CallView
             sessionId={sessionId}
             identity={identity}
-            video={videoOn && micOn !== undefined ? videoOn : true}
+            video={videoOn}
             onLeave={handleLeave}
           />
         </div>
@@ -134,108 +146,153 @@ export default function Room() {
     )
   }
 
-  // Lobby
+  // ── Lobby ────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-950 text-white px-4">
-      <div className="w-full max-w-sm bg-gray-900 rounded-2xl shadow-2xl p-6 space-y-5">
-        {/* Meeting info */}
-        <div className="text-center">
-          <div className="flex items-center justify-center mb-2">
-            <Video size={28} className="text-indigo-400" />
+    <div className="flex flex-col items-center justify-center min-h-screen bg-bg text-ink px-4 py-10">
+      <Card variant="raised" className="w-full max-w-md">
+        <Card.Body className="space-y-5">
+          {/* Headline */}
+          <div className="text-center space-y-1.5">
+            <p className="text-2xs text-ink-faint uppercase tracking-eyebrow font-semibold">
+              Meeting room
+            </p>
+            <h1 className="text-2xl font-serif tracking-tightish text-ink">
+              {meetingTitle}
+            </h1>
+            {(meta?.meeting?.host_vumail || meta?.meeting?.scheduled_at) && (
+              <p className="text-2xs text-ink-muted">
+                {meta?.meeting?.host_vumail && <>Hosted by {meta.meeting.host_vumail}</>}
+                {meta?.meeting?.host_vumail && meta?.meeting?.scheduled_at && ' · '}
+                {meta?.meeting?.scheduled_at && (
+                  <span className="inline-flex items-center gap-1">
+                    <Calendar size={10} className="text-ink-faint" />
+                    {new Date(meta.meeting.scheduled_at).toLocaleString()}
+                  </span>
+                )}
+              </p>
+            )}
           </div>
-          <h1 className="text-lg font-semibold">{meetingTitle}</h1>
-          {meta?.meeting?.host_vumail && (
-            <p className="text-xs text-gray-400 mt-0.5">
-              Hosted by {meta.meeting.host_vumail}
-            </p>
-          )}
-          {meta?.meeting?.scheduled_at && (
-            <p className="text-xs text-gray-400">
-              {new Date(meta.meeting.scheduled_at).toLocaleString()}
-            </p>
-          )}
-          {meta?.meeting?.invitees?.length > 0 && (
-            <div className="mt-2 flex flex-wrap justify-center gap-1">
-              {meta.meeting.invitees.slice(0, 5).map((inv) => (
-                <span
-                  key={inv}
-                  className="bg-indigo-900/60 text-indigo-300 text-xs px-2 py-0.5 rounded-full"
+
+          {/* Camera preview frame — warm paper border, calm shadow */}
+          <div
+            className="relative rounded-md overflow-hidden border border-line-strong bg-clay shadow-e1"
+            style={{ aspectRatio: '16 / 10' }}
+          >
+            {videoOn ? (
+              <video
+                ref={previewRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-2 text-ink-faint">
+                  <VideoOff size={28} />
+                  <span className="text-xs font-serif italic">Camera off</span>
+                </div>
+              </div>
+            )}
+            <div className="absolute bottom-2 left-2 right-2 flex items-center justify-center gap-2">
+              <Tooltip label={micOn ? 'Mute microphone' : 'Unmute microphone'} side="top">
+                <button
+                  type="button"
+                  onClick={() => setMicOn((v) => !v)}
+                  aria-label={micOn ? 'Mute microphone' : 'Unmute microphone'}
+                  className={[
+                    'inline-flex items-center justify-center w-9 h-9 rounded-pill',
+                    'transition-[background,color] duration-fast ease-out',
+                    micOn
+                      ? 'bg-paper/85 text-ink hover:bg-paper'
+                      : 'bg-danger text-white hover:opacity-90',
+                  ].join(' ')}
                 >
-                  {inv}
-                </span>
-              ))}
-              {meta.meeting.invitees.length > 5 && (
-                <span className="text-gray-500 text-xs px-1">
-                  +{meta.meeting.invitees.length - 5} more
-                </span>
-              )}
+                  {micOn ? <Mic size={15} /> : <MicOff size={15} />}
+                </button>
+              </Tooltip>
+              <Tooltip label={videoOn ? 'Turn off camera' : 'Turn on camera'} side="top">
+                <button
+                  type="button"
+                  onClick={() => setVideoOn((v) => !v)}
+                  aria-label={videoOn ? 'Turn off camera' : 'Turn on camera'}
+                  className={[
+                    'inline-flex items-center justify-center w-9 h-9 rounded-pill',
+                    'transition-[background,color] duration-fast ease-out',
+                    videoOn
+                      ? 'bg-paper/85 text-ink hover:bg-paper'
+                      : 'bg-danger text-white hover:opacity-90',
+                  ].join(' ')}
+                >
+                  {videoOn ? <Video size={15} /> : <VideoOff size={15} />}
+                </button>
+              </Tooltip>
+            </div>
+          </div>
+
+          {/* Invitee roster */}
+          {meta?.meeting?.invitees?.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-2xs text-ink-faint uppercase tracking-eyebrow font-semibold">
+                Invited
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {meta.meeting.invitees.slice(0, 6).map((inv) => (
+                  <span
+                    key={inv}
+                    className="inline-flex items-center gap-1 bg-accent-tint border border-line rounded-pill px-2 py-0.5 text-2xs text-ink-muted tracking-tightish"
+                  >
+                    {inv}
+                  </span>
+                ))}
+                {meta.meeting.invitees.length > 6 && (
+                  <span className="text-2xs text-ink-faint px-1 self-center">
+                    +{meta.meeting.invitees.length - 6} more
+                  </span>
+                )}
+              </div>
             </div>
           )}
-        </div>
 
-        {/* Camera/mic preview toggles (cosmetic — actual track state controlled in CallView) */}
-        <div className="flex justify-center gap-4">
-          <button
-            onClick={() => setMicOn((v) => !v)}
-            className={`w-11 h-11 rounded-full flex items-center justify-center transition ${
-              micOn ? 'bg-gray-700 hover:bg-gray-600' : 'bg-red-600 hover:bg-red-500'
-            }`}
-            title={micOn ? 'Mute microphone' : 'Unmute microphone'}
-          >
-            {micOn ? <Mic size={18} /> : <MicOff size={18} />}
-          </button>
-          <button
-            onClick={() => setVideoOn((v) => !v)}
-            className={`w-11 h-11 rounded-full flex items-center justify-center transition ${
-              videoOn ? 'bg-gray-700 hover:bg-gray-600' : 'bg-red-600 hover:bg-red-500'
-            }`}
-            title={videoOn ? 'Turn off camera' : 'Turn on camera'}
-          >
-            {videoOn ? <Video size={18} /> : <VideoOff size={18} />}
-          </button>
-        </div>
-
-        {/* Identity form */}
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Display name *</label>
-            <input
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          {/* Identity form */}
+          <div className="space-y-3">
+            <Input
+              label="Display name"
               placeholder="Your name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
               autoFocus
             />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Vumail (optional)</label>
-            <input
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            <Input
+              label="Vumail (optional)"
               placeholder="you@vulos"
               value={vumail}
               onChange={(e) => setVumail(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
             />
           </div>
-        </div>
 
-        <button
-          onClick={handleJoin}
-          disabled={!displayName.trim()}
-          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-sm font-medium transition"
-        >
-          Join now
-        </button>
+          <Button
+            variant="primary"
+            size="lg"
+            fullWidth
+            disabled={!displayName.trim()}
+            onClick={handleJoin}
+          >
+            Join now
+          </Button>
 
-        <button
-          onClick={handleBack}
-          className="w-full text-xs text-gray-500 hover:text-gray-300 flex items-center justify-center gap-1"
-        >
-          <ArrowLeft size={12} />
-          Back to meetings
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={handleBack}
+            className="w-full inline-flex items-center justify-center gap-1 text-2xs text-ink-faint hover:text-ink-muted transition-colors"
+          >
+            <ArrowLeft size={11} />
+            Back to meetings
+          </button>
+        </Card.Body>
+      </Card>
     </div>
   )
 }

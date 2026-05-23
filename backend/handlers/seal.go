@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -109,6 +110,12 @@ func (h *SealHandler) Download(c *gin.Context) {
 		return
 	}
 
+	// Validate SourceFileID before any filesystem access.
+	if !sourceFileIDRe.MatchString(env.SourceFileID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid source_file_id"})
+		return
+	}
+
 	// Return cached sealed PDF if already generated.
 	if existing, err := h.store.GetSealedPDF(envelopeID); err == nil && len(existing) > 0 {
 		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="sealed-%s.pdf"`, envelopeID))
@@ -165,6 +172,12 @@ func (h *SealHandler) Manifest(c *gin.Context) {
 
 	if !allSigned(env) && env.Status != models.EnvelopeStatusCompleted {
 		c.JSON(http.StatusConflict, gin.H{"error": "envelope is not yet fully signed"})
+		return
+	}
+
+	// Validate SourceFileID before any filesystem access.
+	if !sourceFileIDRe.MatchString(env.SourceFileID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid source_file_id"})
 		return
 	}
 
@@ -226,6 +239,11 @@ func (h *SealHandler) buildSealedPDF(env *models.Envelope) ([]byte, *AuditManife
 	return sealedBytes, manifest, nil
 }
 
+// sourceFileIDRe is the allowlist for sourceFileID: UUID/ULID/alphanumeric plus
+// hyphens and underscores, length 1-128. No path separators, dots, or other
+// characters are permitted.
+var sourceFileIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
+
 // loadSourcePDF finds the raw PDF bytes for SourceFileID.
 // It searches uploadsDir for a file matching the ID prefix.
 func (h *SealHandler) loadSourcePDF(sourceFileID string) ([]byte, error) {
@@ -233,20 +251,36 @@ func (h *SealHandler) loadSourcePDF(sourceFileID string) ([]byte, error) {
 		return nil, fmt.Errorf("source_file_id is empty")
 	}
 
+	// Validate against strict allowlist before any filesystem access.
+	if !sourceFileIDRe.MatchString(sourceFileID) {
+		return nil, fmt.Errorf("source_file_id contains invalid characters")
+	}
+
+	uploadsDir := filepath.Clean(h.uploadsDir)
+
 	// Try an exact match first (uploadsDir/<sourceFileID>).
-	direct := filepath.Join(h.uploadsDir, sourceFileID)
+	direct := filepath.Join(uploadsDir, sourceFileID)
+	// Confirm the resolved path stays within uploadsDir.
+	if !strings.HasPrefix(filepath.Clean(direct)+string(filepath.Separator), uploadsDir+string(filepath.Separator)) {
+		return nil, fmt.Errorf("source_file_id resolves outside uploads directory")
+	}
 	if data, err := os.ReadFile(direct); err == nil {
 		return data, nil
 	}
 
 	// Scan for any file whose name starts with sourceFileID.
-	entries, err := os.ReadDir(h.uploadsDir)
+	entries, err := os.ReadDir(uploadsDir)
 	if err != nil {
 		return nil, fmt.Errorf("read uploads dir: %w", err)
 	}
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), sourceFileID) {
-			data, err := os.ReadFile(filepath.Join(h.uploadsDir, e.Name()))
+			candidate := filepath.Join(uploadsDir, e.Name())
+			// Confirm each candidate stays within uploadsDir.
+			if !strings.HasPrefix(filepath.Clean(candidate)+string(filepath.Separator), uploadsDir+string(filepath.Separator)) {
+				continue
+			}
+			data, err := os.ReadFile(candidate)
 			if err == nil {
 				return data, nil
 			}

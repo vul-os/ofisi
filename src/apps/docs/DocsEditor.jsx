@@ -20,7 +20,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import CharacterCount from '@tiptap/extension-character-count'
 import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
-import { ArrowLeft, Save, Loader2, AlertCircle, History, Users, MessageSquare, Activity, GitBranch } from 'lucide-react'
+import { ArrowLeft, Save, Loader2, AlertCircle, History, Users, MessageSquare, Activity, GitBranch, Check, Circle } from 'lucide-react'
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
 import { readDraft, clearDraft } from '../../lib/draftStore'
@@ -33,6 +33,7 @@ import { DocsCollabSession } from '../../lib/crdt/index.js'
 import { getSuggestionStore } from '../../lib/crdt/suggestions.js'
 import { useLiveCursors } from '../../lib/useLiveCursors.js'
 import { DocsCursorLayer } from '../../components/RemoteCursors.jsx'
+import { Button, IconButton, Tooltip, Topbar } from '../../components/ui'
 
 // Imported files may carry _html; use that as editor content
 function resolveContent(content) {
@@ -531,155 +532,205 @@ export default function DocsEditor() {
   const wordCount = editor?.storage.characterCount?.words() ?? 0
   const charCount = editor?.storage.characterCount?.characters() ?? 0
 
-  const statusText = () => {
-    if (saveStatus.status === 'saving') return 'Saving…'
-    if (saveStatus.status === 'saved') return 'Saved'
-    if (saveStatus.status === 'error') return retryCount > 0 ? `Retry ${retryCount}/3…` : 'Save failed'
-    if (saveStatus.status === 'dirty') return 'Unsaved'
-    return ''
-  }
-
-  const statusColor = () => {
-    if (saveStatus.status === 'error') return 'text-red-500'
-    if (saveStatus.status === 'saving') return 'text-yellow-500'
-    if (saveStatus.status === 'saved') return 'text-green-500'
-    return 'text-gray-400'
-  }
+  // Discreet save status — a meta-line, never a banner.
+  // We render an icon + text inline with the title; colour is intentionally
+  // muted (the user shouldn't keep scanning to see "Saved" all the time).
+  const statusInfo = (() => {
+    switch (saveStatus.status) {
+      case 'saving':
+        return { text: 'Saving',  tone: 'muted',   icon: Loader2,     spin: true  }
+      case 'saved':
+        return { text: 'Saved',   tone: 'success', icon: Check,       spin: false }
+      case 'error':
+        return {
+          text: retryCount > 0 ? `Retrying ${retryCount}/3` : 'Save failed',
+          tone: 'danger',
+          icon: AlertCircle,
+          spin: false,
+        }
+      case 'dirty':
+        return { text: 'Unsaved', tone: 'muted',   icon: Circle,      spin: false }
+      default:
+        return null
+    }
+  })()
 
   if (!editor) {
-    return <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-indigo-500" size={24} /></div>
+    return (
+      <div className="flex-1 flex items-center justify-center bg-bg">
+        <Loader2 className="animate-spin text-accent" size={22} />
+      </div>
+    )
   }
 
+  const peerCount = Object.values(collabPeers)
+    .filter((s) => s === 'connected' || s === 'relay').length
+  const pendingSuggestions = suggestions.filter((s) => s.state === 'pending').length
+  const StatusIcon = statusInfo?.icon
+
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-white">
-      {/* Draft restore banner */}
+    <div className="flex-1 flex flex-col overflow-hidden bg-bg">
+      {/* Draft-restore banner — only banner we keep, because it requires action */}
       {draft && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-amber-50 border-b border-amber-200 text-sm text-amber-800">
-          <AlertCircle size={16} className="text-amber-500 flex-shrink-0" />
-          <span className="flex-1">Unsaved changes from a previous session were found.</span>
-          <button
-            onClick={handleRestoreDraft}
-            className="px-3 py-1 bg-amber-600 text-white rounded-md text-xs font-medium hover:bg-amber-700 transition"
-          >
-            Restore
-          </button>
-          <button
-            onClick={handleDiscardDraft}
-            className="px-3 py-1 border border-amber-400 text-amber-700 rounded-md text-xs font-medium hover:bg-amber-100 transition"
-          >
-            Discard
-          </button>
-        </div>
-      )}
-
-      {/* Save error banner */}
-      {saveStatus.status === 'error' && !draft && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-red-50 border-b border-red-200 text-sm text-red-700">
-          <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
-          <span className="flex-1">Save failed — {saveStatus.error || 'network error'}. Retrying…</span>
-        </div>
-      )}
-
-      {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 bg-white">
-        <button onClick={() => navigate('/docs')} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition">
-          <ArrowLeft size={18} />
-        </button>
-        <div className="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
-          <svg viewBox="0 0 24 24" className="w-4 h-4 text-indigo-600 fill-current"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 15h8v2H8zm0-4h8v2H8zm0-4h5v2H8z"/></svg>
-        </div>
-        <input
-          value={title}
-          onChange={(e) => handleTitleChange(e.target.value)}
-          className="flex-1 text-base font-semibold text-gray-900 bg-transparent border-none outline-none hover:bg-gray-50 focus:bg-gray-50 rounded px-2 py-0.5"
-          placeholder="Untitled Document"
-        />
-        <span className={`text-xs hidden sm:block ${statusColor()}`}>{statusText()}</span>
-        {/* Collab peer indicator (OFFICE-22) */}
-        {Object.values(collabPeers).some((s) => s === 'connected' || s === 'relay') && (
-          <span
-            title={`${Object.values(collabPeers).filter((s) => s === 'connected' || s === 'relay').length} peer(s) connected`}
-            className="flex items-center gap-1 text-xs text-green-600 px-1.5 py-0.5 bg-green-50 rounded-full"
-          >
-            <Users size={12} />
-            {Object.values(collabPeers).filter((s) => s === 'connected' || s === 'relay').length}
+        <div className="flex items-center gap-3 px-4 py-2 bg-warning-bg border-b border-line text-xs text-warning animate-fade-in">
+          <AlertCircle size={14} className="flex-shrink-0" />
+          <span className="flex-1 text-ink-muted">
+            Unsaved changes from a previous session were found.
           </span>
-        )}
-        <button
-          onClick={() => setShowHistory(v => !v)}
-          title="Version history"
-          className={`p-1.5 rounded-lg transition ${showHistory ? 'bg-indigo-100 text-indigo-600' : 'hover:bg-gray-100 text-gray-500'}`}
-        >
-          <History size={16} />
-        </button>
-        <button
-          onClick={() => setShowActivity(v => !v)}
-          title="Activity feed"
-          className={`p-1.5 rounded-lg transition ${showActivity ? 'bg-indigo-100 text-indigo-600' : 'hover:bg-gray-100 text-gray-500'}`}
-        >
-          <Activity size={16} />
-        </button>
-        <button
-          onClick={() => setShowComments(v => !v)}
-          title="Comments"
-          className={`p-1.5 rounded-lg transition ${showComments ? 'bg-indigo-100 text-indigo-600' : 'hover:bg-gray-100 text-gray-500'}`}
-        >
-          <MessageSquare size={16} />
-        </button>
-        {/* OFFICE-27: Suggestion mode toggle */}
-        <button
-          onClick={handleToggleSuggestionMode}
-          title={suggestionMode ? 'Exit suggestion mode' : 'Suggestion mode (track changes)'}
-          className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition ${suggestionMode ? 'bg-green-100 text-green-700 ring-1 ring-green-400' : 'hover:bg-gray-100 text-gray-500'}`}
-        >
-          <GitBranch size={14} />
-          {suggestionMode ? 'Suggesting' : 'Suggest'}
-        </button>
-        {!suggestionMode && suggestions.filter(s => s.state === 'pending').length > 0 && (
-          <button
-            onClick={() => setShowSuggestions(v => !v)}
-            title="View suggestions"
-            className={`p-1.5 rounded-lg transition ${showSuggestions ? 'bg-green-100 text-green-700' : 'hover:bg-gray-100 text-gray-500'}`}
-          >
-            <GitBranch size={16} />
-          </button>
-        )}
-        <button
-          onClick={handleSave}
-          disabled={saveStatus.status === 'saving'}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-60 transition"
-        >
-          {saveStatus.status === 'saving' ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          Save
-        </button>
-      </div>
-      {/* OFFICE-27: Suggestion mode banner */}
+          <Button variant="primary" size="sm" onClick={handleRestoreDraft}>Restore</Button>
+          <Button variant="secondary" size="sm" onClick={handleDiscardDraft}>Discard</Button>
+        </div>
+      )}
+
+      {/*
+        Save errors are reported in the meta-line of the topbar (statusInfo);
+        we deliberately do NOT show a big red banner — that's a Mercury-style
+        restraint: errors stay surfaced, never alarming, with action via Save.
+      */}
+
+      {/* Top bar — composed from the design system */}
+      <Topbar
+        leading={
+          <Tooltip label="Back to Docs">
+            <IconButton size="sm" onClick={() => navigate('/docs')}>
+              <ArrowLeft size={15} />
+            </IconButton>
+          </Tooltip>
+        }
+        title={
+          <input
+            value={title}
+            onChange={(e) => handleTitleChange(e.target.value)}
+            placeholder="Untitled document"
+            className={[
+              'flex-1 min-w-0 text-sm font-semibold tracking-tightish',
+              'bg-transparent border border-transparent rounded-sm px-2 py-1',
+              'text-ink placeholder:text-ink-faint',
+              'hover:border-line focus:border-line-strong focus:bg-paper',
+              'transition-[border-color,background] duration-fast ease-out outline-none',
+            ].join(' ')}
+          />
+        }
+        meta={
+          <>
+            {statusInfo && (
+              <span
+                className={[
+                  'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
+                  statusInfo.tone === 'success' ? 'text-success' :
+                  statusInfo.tone === 'danger'  ? 'text-danger' :
+                                                  'text-ink-faint',
+                ].join(' ')}
+                title={saveStatus.error || ''}
+              >
+                {StatusIcon && (
+                  <StatusIcon
+                    size={11}
+                    className={statusInfo.spin ? 'animate-spin' : ''}
+                  />
+                )}
+                {statusInfo.text}
+              </span>
+            )}
+            {peerCount > 0 && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-pill bg-accent-tint text-accent-press"
+                title={`${peerCount} peer(s) connected`}
+              >
+                <Users size={11} />
+                {peerCount}
+              </span>
+            )}
+          </>
+        }
+        actions={
+          <>
+            <Tooltip label="Version history">
+              <IconButton size="sm" active={showHistory} onClick={() => setShowHistory((v) => !v)}>
+                <History size={14} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip label="Activity">
+              <IconButton size="sm" active={showActivity} onClick={() => setShowActivity((v) => !v)}>
+                <Activity size={14} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip label="Comments">
+              <IconButton size="sm" active={showComments} onClick={() => setShowComments((v) => !v)}>
+                <MessageSquare size={14} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip label={suggestionMode ? 'Exit suggestion mode' : 'Suggestion mode (track changes)'}>
+              <button
+                onClick={handleToggleSuggestionMode}
+                className={[
+                  'inline-flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium',
+                  'tracking-tightish transition-colors duration-fast ease-out',
+                  suggestionMode
+                    ? 'bg-success-bg text-success border border-success'
+                    : 'text-ink-muted hover:bg-accent-tint hover:text-ink',
+                ].join(' ')}
+              >
+                <GitBranch size={13} />
+                {suggestionMode ? 'Suggesting' : 'Suggest'}
+              </button>
+            </Tooltip>
+            {!suggestionMode && pendingSuggestions > 0 && (
+              <Tooltip label={`${pendingSuggestions} pending suggestion${pendingSuggestions === 1 ? '' : 's'}`}>
+                <IconButton size="sm" active={showSuggestions} onClick={() => setShowSuggestions((v) => !v)}>
+                  <GitBranch size={14} />
+                </IconButton>
+              </Tooltip>
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleSave}
+              disabled={saveStatus.status === 'saving'}
+            >
+              {saveStatus.status === 'saving'
+                ? <Loader2 size={13} className="animate-spin" />
+                : <Save size={13} />}
+              Save
+            </Button>
+          </>
+        }
+      />
+
+      {/* Suggestion-mode hint strip — quiet, not alarming */}
       {suggestionMode && (
-        <div className="flex items-center gap-2 px-4 py-1.5 bg-green-50 border-b border-green-200 text-xs text-green-800">
-          <GitBranch size={13} className="text-green-600 flex-shrink-0" />
-          <span className="flex-1">Suggestion mode — edits are recorded as proposals, not applied directly.</span>
-          <button
-            onClick={() => setShowSuggestions(v => !v)}
-            className="px-2 py-0.5 rounded border border-green-400 hover:bg-green-100 transition font-medium"
-          >
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-success-bg border-b border-line text-xs text-success animate-fade-in">
+          <GitBranch size={12} className="flex-shrink-0" />
+          <span className="flex-1 text-ink-muted tracking-tightish">
+            Suggestion mode — edits are recorded as proposals.
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => setShowSuggestions((v) => !v)}>
             {showSuggestions ? 'Hide' : 'Review'}
-          </button>
+          </Button>
         </div>
       )}
 
       <DocsToolbar editor={editor} title={title} />
 
-      {/* Editor + optional history panel */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Page canvas */}
-        <div className="flex-1 overflow-auto bg-gray-100">
-          <div className="max-w-[816px] min-h-full mx-auto bg-white shadow-sm my-6 px-16 py-16 rounded-lg">
-            {/* Cursor host: relative wrapper so DocsCursorLayer can position absolutely */}
-            <div className="tiptap-cursor-host relative">
+      {/* Editor canvas + side panels */}
+      <div className="flex-1 flex overflow-hidden bg-bg">
+        {/*
+          Page canvas — the document feels like paper:
+            - warm paper background under a measured (~720px) writing column
+            - generous side margins and vertical padding
+            - subtle 1-px line on the page edge, no heavy shadow
+            - .paper-grain adds a near-imperceptible letterpress tooth
+        */}
+        <div className="flex-1 overflow-auto px-6 py-10">
+          <article
+            className="paper-grain mx-auto bg-paper border border-line rounded-lg shadow-e1 px-14 py-16"
+            style={{ maxWidth: '760px' }}
+          >
+            <div className="tiptap-cursor-host relative animate-fade-in">
               <EditorContent editor={editor} className="tiptap" />
               <DocsCursorLayer editor={editor} remoteCursors={remoteCursors} />
             </div>
-          </div>
+          </article>
         </div>
 
         {/* History panel (OFFICE-08) */}
@@ -743,10 +794,11 @@ export default function DocsEditor() {
         )}
       </div>
 
-      <div className="flex items-center justify-end gap-4 px-4 py-1 bg-white border-t border-gray-100 text-xs text-gray-400">
+      <footer className="flex items-center justify-end gap-4 px-4 h-7 bg-paper border-t border-line text-2xs text-ink-faint tracking-tightish">
         <span>{wordCount} words</span>
+        <span className="opacity-40">·</span>
         <span>{charCount} characters</span>
-      </div>
+      </footer>
     </div>
   )
 }

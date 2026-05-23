@@ -1,11 +1,11 @@
 const BASE = '/api'
 
 async function request(path, options = {}) {
-  const token = localStorage.getItem('session_token')
   const headers = { 'Content-Type': 'application/json', ...options.headers }
-  if (token) headers['Authorization'] = `Bearer ${token}`
 
-  const res = await fetch(BASE + path, { ...options, headers })
+  // Session is managed via an httpOnly cookie set by the backend on login.
+  // credentials: 'include' ensures the browser sends it automatically.
+  const res = await fetch(BASE + path, { ...options, headers, credentials: 'include' })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw Object.assign(new Error(err.error || 'Request failed'), err)
@@ -123,12 +123,10 @@ export const api = {
     request(`/sign/${token}/decline`, { method: 'POST', body: '{}' }),
 
   uploadImage: async (file) => {
-    const token = localStorage.getItem('session_token')
     const form = new FormData()
     form.append('file', file)
-    const headers = {}
-    if (token) headers['Authorization'] = `Bearer ${token}`
-    const res = await fetch(BASE + '/upload', { method: 'POST', headers, body: form })
+    // Cookie sent automatically via credentials: 'include'.
+    const res = await fetch(BASE + '/upload', { method: 'POST', body: form, credentials: 'include' })
     if (!res.ok) throw new Error('Upload failed')
     return res.json()
   },

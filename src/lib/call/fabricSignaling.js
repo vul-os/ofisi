@@ -101,10 +101,7 @@ export async function joinSignalingSession(sessionId, identity) {
 // public-STUN default. Server endpoint mirrors what the OS fabric uses.
 export async function fetchIceServers() {
   try {
-    const token = localStorage.getItem('session_token')
-    const headers = {}
-    if (token) headers['Authorization'] = `Bearer ${token}`
-    const r = await fetch('/api/turn/credentials', { headers })
+    const r = await fetch('/api/turn/credentials', { credentials: 'include' })
     if (r.ok) {
       const body = await r.json()
       if (Array.isArray(body.iceServers) && body.iceServers.length) return body.iceServers

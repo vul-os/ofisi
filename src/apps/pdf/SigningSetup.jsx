@@ -4,49 +4,55 @@ import * as pdfjsLib from 'pdfjs-dist'
 import {
   ArrowLeft, Plus, Trash2, X, Save, ChevronLeft, ChevronRight,
   User, FileSignature, Type as TypeIcon, Calendar, Pen, AlignLeft,
-  CheckSquare, Square, ToggleLeft, ToggleRight, Upload,
+  CheckSquare, Square, Upload,
 } from 'lucide-react'
 import { api } from '../../lib/api.js'
+import { Button, IconButton, Input, Card, Tabs, Topbar, Tooltip } from '../../components/ui'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
   import.meta.url
 ).href
 
+/*
+ * SigningSetup — "Prepare to Sign" editor.
+ *
+ * Aesthetic direction:
+ *   - Warm paper canvas, oat sidebar, quiet topbar.
+ *   - Field type chips as IconButtons w/ serif labels.
+ *   - Signers as Cards with a colour stripe (their signer-color) — name in
+ *     serif italic, email below in serif italic, role chip below.
+ *   - Sequential / parallel chosen via underline Tabs.
+ *   - Field overlays use single-accent palette; only the SIGNER stripe carries
+ *     their personal color, so the page never reads like a rainbow.
+ */
+
 function genId() {
   return Math.random().toString(36).slice(2, 11)
 }
 
-// Signer color palette — one color per signer for visual distinction.
+// Signer colour palette — warm, used only for per-signer stripes and chips
+// (the field overlays remain in the single accent palette).
 const SIGNER_COLORS = [
-  '#4f8ef7', '#7c3aed', '#10b981', '#f59e0b', '#ef4444',
-  '#06b6d4', '#d946ef', '#84cc16', '#f97316', '#6366f1',
+  '#0f6a6c', // teal-600
+  '#c08436', // honey
+  '#4f7a4d', // sage
+  '#4a6b8a', // dusty navy
+  '#b8453a', // persimmon
+  '#7b5ea0', // muted plum
+  '#a07845', // amber-brown
+  '#5e7a5e', // moss
+  '#a06038', // burnt sienna
+  '#6b6457', // oat-600
 ]
 
-// Field type definitions.
 const FIELD_TYPES = [
   { type: 'signature', label: 'Signature', icon: FileSignature, w: 200, h: 60 },
   { type: 'initial',   label: 'Initial',   icon: Pen,           w: 100, h: 50 },
-  { type: 'date',      label: 'Date',       icon: Calendar,      w: 130, h: 36 },
-  { type: 'name',      label: 'Full Name',  icon: User,          w: 180, h: 36 },
-  { type: 'text',      label: 'Text',       icon: AlignLeft,     w: 200, h: 36 },
+  { type: 'date',      label: 'Date',      icon: Calendar,      w: 130, h: 36 },
+  { type: 'name',      label: 'Full Name', icon: User,          w: 180, h: 36 },
+  { type: 'text',      label: 'Text',      icon: AlignLeft,     w: 200, h: 36 },
 ]
-
-const FIELD_BG = {
-  signature: 'rgba(79,142,247,.15)',
-  initial:   'rgba(124,58,237,.15)',
-  date:      'rgba(16,185,129,.15)',
-  name:      'rgba(245,158,11,.15)',
-  text:      'rgba(107,114,128,.12)',
-}
-
-const FIELD_BORDER = {
-  signature: '#4f8ef7',
-  initial:   '#7c3aed',
-  date:      '#10b981',
-  name:      '#f59e0b',
-  text:      '#9ca3af',
-}
 
 export default function SigningSetup() {
   const navigate = useNavigate()
@@ -218,6 +224,15 @@ export default function SigningSetup() {
     } catch {}
   }
 
+  // ── Esc cancels active place type ───────────────────────────
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' && activePlaceType) setActivePlaceType(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [activePlaceType])
+
   // ── Signer management ────────────────────────────────────────
   const addSigner = () => {
     const newSigner = {
@@ -349,296 +364,422 @@ export default function SigningSetup() {
   const selectedField = selectedFieldId ? fields.find(f => f.id === selectedFieldId) : null
   const signerForField = (f) => signers.find(s => s.id === f?.signerId)
 
-  const signerColor = (signerId) => {
-    const s = signers.find(x => x.id === signerId)
-    return s?.color || '#9ca3af'
-  }
-
   // ── Render ───────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0f1117', fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden' }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
-        ::-webkit-scrollbar { width: 5px; height: 5px; }
-        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
-        .field-drag { cursor: move; }
-        .signer-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; }
-      `}</style>
+    <div className="flex-1 flex flex-col bg-bg text-ink overflow-hidden">
 
-      {/* TOP BAR */}
-      <div style={{ background: '#0d1117', borderBottom: '1px solid rgba(255,255,255,.06)', height: 52, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', flexShrink: 0 }}>
-        <button onClick={() => navigate(-1)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 6, border: 'none', background: 'transparent', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}
-          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,.07)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-        >
-          <ArrowLeft size={15} /> Back
-        </button>
+      {/* TOP BAR — quiet, design-system Topbar */}
+      <Topbar
+        leading={
+          <>
+            <Tooltip label="Back">
+              <IconButton size="sm" onClick={() => navigate(-1)}>
+                <ArrowLeft size={15} />
+              </IconButton>
+            </Tooltip>
+            <span aria-hidden className="h-5 w-px bg-line" />
+            <div className="flex items-center gap-2 text-ink">
+              <div className="w-7 h-7 rounded-md bg-accent text-white flex items-center justify-center">
+                <FileSignature size={14} />
+              </div>
+              <span className="text-sm font-semibold tracking-tightish">Prepare to Sign</span>
+            </div>
+          </>
+        }
+        title={
+          <input
+            value={envelopeTitle}
+            onChange={e => setEnvelopeTitle(e.target.value)}
+            placeholder="Envelope title…"
+            className={[
+              'flex-1 max-w-md h-8 px-3 rounded-md',
+              'bg-bg-elev2 border border-line text-ink text-sm tracking-tightish',
+              'outline-none transition-colors duration-fast ease-out',
+              'focus:border-accent focus:shadow-focus',
+              'placeholder:text-ink-faint placeholder:font-serif placeholder:italic',
+            ].join(' ')}
+          />
+        }
+        actions={
+          <>
+            <Tooltip label="Open PDF">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload size={13} /> Open PDF
+              </Button>
+            </Tooltip>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={saveEnvelope}
+              disabled={saving || !pdfJsDoc}
+            >
+              <Save size={13} /> {saving ? 'Saving…' : 'Save envelope'}
+            </Button>
+          </>
+        }
+      />
 
-        <div style={{ width: 1, height: 22, background: 'rgba(255,255,255,.1)' }} />
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#f9fafb', fontWeight: 600, fontSize: 15 }}>
-          <div style={{ width: 28, height: 28, background: 'linear-gradient(135deg,#7c3aed,#4f8ef7)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <FileSignature size={14} color="#fff" />
-          </div>
-          Prepare to Sign
-        </div>
-
-        {/* Envelope title */}
-        <input
-          value={envelopeTitle}
-          onChange={e => setEnvelopeTitle(e.target.value)}
-          placeholder="Envelope title…"
-          style={{ flex: 1, maxWidth: 320, padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.05)', color: '#f9fafb', fontSize: 13, outline: 'none', marginLeft: 8 }}
-        />
-
-        <div style={{ flex: 1 }} />
-
-        {/* Order mode toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.04)', borderRadius: 6, padding: '3px 4px' }}>
-          {['sequential', 'parallel'].map(mode => (
-            <button key={mode} onClick={() => setOrderMode(mode)}
-              style={{ padding: '4px 12px', borderRadius: 4, border: 'none', background: orderMode === mode ? 'rgba(79,142,247,.25)' : 'transparent', color: orderMode === mode ? '#4f8ef7' : '#9ca3af', cursor: 'pointer', fontSize: 12, fontWeight: 500, textTransform: 'capitalize' }}
-            >{mode}</button>
-          ))}
-        </div>
-
-        <button onClick={() => fileInputRef.current?.click()}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, border: 'none', background: 'rgba(255,255,255,.07)', color: '#d1d5db', cursor: 'pointer', fontSize: 13, fontWeight: 500 }}
-        >
-          <Upload size={14} /> Open PDF
-        </button>
-
-        <button onClick={saveEnvelope} disabled={saving || !pdfJsDoc}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 18px', borderRadius: 6, border: 'none', background: pdfJsDoc && !saving ? '#7c3aed' : '#1f2937', color: pdfJsDoc && !saving ? '#fff' : '#4b5563', cursor: pdfJsDoc && !saving ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 600 }}
-        >
-          <Save size={14} /> {saving ? 'Saving…' : 'Save Envelope'}
-        </button>
-      </div>
-
-      {/* FIELD TYPE TOOLBAR */}
-      <div style={{ background: '#161b27', borderBottom: '1px solid rgba(255,255,255,.05)', height: 46, display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px', flexShrink: 0 }}>
-        <span style={{ color: '#6b7280', fontSize: 12, fontWeight: 600, marginRight: 4 }}>Place field:</span>
-        {FIELD_TYPES.map(({ type, label, icon: Icon }) => (
-          <button key={type} onClick={() => setActivePlaceType(prev => prev === type ? null : type)}
-            title={`Place ${label} field`}
-            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 5, border: `1px solid ${activePlaceType === type ? FIELD_BORDER[type] : 'transparent'}`, background: activePlaceType === type ? FIELD_BG[type] : 'rgba(255,255,255,.04)', color: activePlaceType === type ? FIELD_BORDER[type] : '#9ca3af', cursor: 'pointer', fontSize: 12, fontWeight: 500, transition: 'all .12s' }}
-            onMouseEnter={e => { if (activePlaceType !== type) { e.currentTarget.style.background = 'rgba(255,255,255,.08)'; e.currentTarget.style.color = '#fff' } }}
-            onMouseLeave={e => { if (activePlaceType !== type) { e.currentTarget.style.background = 'rgba(255,255,255,.04)'; e.currentTarget.style.color = '#9ca3af' } }}
-          >
-            <Icon size={13} /> {label}
-          </button>
-        ))}
+      {/* FIELD TYPE TOOLBAR — chips as IconButtons w/ serif labels */}
+      <div className="bg-paper border-b border-line h-12 flex items-center gap-1.5 px-3 flex-shrink-0">
+        <span className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase mr-2">
+          Place field
+        </span>
+        {FIELD_TYPES.map(({ type, label, icon: Icon }) => {
+          const active = activePlaceType === type
+          return (
+            <Tooltip key={type} label={`Place ${label} field`}>
+              <button
+                type="button"
+                onClick={() => setActivePlaceType(prev => prev === type ? null : type)}
+                className={[
+                  'inline-flex items-center gap-1.5 h-8 px-3 rounded-md',
+                  'transition-[background,color,box-shadow] duration-fast ease-out',
+                  'focus-visible:outline-none focus-visible:shadow-focus',
+                  active
+                    ? 'bg-accent-tint-2 text-accent-press border border-accent'
+                    : 'bg-bg-elev2 border border-line text-ink-muted hover:bg-accent-tint hover:text-ink',
+                ].join(' ')}
+              >
+                <Icon size={13} />
+                <span className="font-serif text-sm italic tracking-tightish">{label}</span>
+              </button>
+            </Tooltip>
+          )
+        })}
         {activePlaceType && (
-          <span style={{ color: '#f59e0b', fontSize: 12, marginLeft: 8 }}>
-            Click on the PDF to place a <b>{FIELD_TYPES.find(f => f.type === activePlaceType)?.label}</b> field — or press Esc to cancel
+          <span className="ml-2 text-2xs text-warning font-serif italic">
+            Click on the PDF to place a{' '}
+            <b className="not-italic font-medium">
+              {FIELD_TYPES.find(f => f.type === activePlaceType)?.label}
+            </b>{' '}
+            field — or press Esc to cancel
           </span>
         )}
+        <div className="flex-1" />
+        {/* Signing order Tabs — sequential / parallel */}
+        <Tabs
+          value={orderMode}
+          onChange={setOrderMode}
+          items={[
+            { value: 'sequential', label: 'Sequential' },
+            { value: 'parallel',   label: 'Parallel' },
+          ]}
+        />
       </div>
 
       {/* WORKSPACE */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div className="flex-1 flex overflow-hidden">
 
-        {/* LEFT: Page thumbnails */}
-        <div style={{ width: 160, background: '#111827', borderRight: '1px solid rgba(255,255,255,.04)', display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 12px 6px', borderBottom: '1px solid rgba(255,255,255,.05)' }}>
-            <span style={{ color: '#6b7280', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em' }}>Pages</span>
+        {/* LEFT: page thumbnails */}
+        <aside className="w-44 bg-bg-elev2 border-r border-line flex flex-col flex-shrink-0 overflow-hidden">
+          <div className="px-3 py-2.5 border-b border-line">
+            <span className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+              Pages
+            </span>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5">
             {!pdfJsDoc ? (
-              <div style={{ color: '#374151', fontSize: 12, textAlign: 'center', padding: '20px 8px' }}>Open a PDF to start</div>
+              <p className="text-2xs text-ink-faint text-center py-6 font-serif italic">
+                Open a PDF to start
+              </p>
             ) : (
               Array.from({ length: totalPages }, (_, i) => i + 1).map(n => {
                 const pageFieldCount = fields.filter(f => f.page === n).length
+                const isActive = currentPage === n
                 return (
-                  <div key={n} onClick={() => setCurrentPage(n)}
-                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 5, borderRadius: 5, cursor: 'pointer', background: currentPage === n ? 'rgba(79,142,247,.12)' : 'transparent', transition: 'background .12s' }}
-                    onMouseEnter={e => { if (currentPage !== n) e.currentTarget.style.background = 'rgba(255,255,255,.04)' }}
-                    onMouseLeave={e => { if (currentPage !== n) e.currentTarget.style.background = 'transparent' }}
+                  <div
+                    key={n}
+                    onClick={() => setCurrentPage(n)}
+                    className={[
+                      'relative flex flex-col items-center gap-1 p-1.5 rounded-md cursor-pointer',
+                      'transition-colors duration-fast ease-out',
+                      isActive
+                        ? 'bg-accent-tint'
+                        : 'hover:bg-paper',
+                    ].join(' ')}
                   >
-                    <div style={{ position: 'relative', background: 'white', borderRadius: 3, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,.4)', border: `2px solid ${currentPage === n ? '#4f8ef7' : 'transparent'}`, width: '100%' }}>
-                      <canvas ref={el => { if (el) thumbnailRefs.current[n] = el }} style={{ display: 'block', width: '100%' }} />
+                    {/* Accent left-rail for selected page */}
+                    <span
+                      aria-hidden
+                      className={[
+                        'absolute left-0 top-1 bottom-1 w-[2px] rounded-r-full transition-colors duration-fast',
+                        isActive ? 'bg-accent' : 'bg-transparent',
+                      ].join(' ')}
+                    />
+                    <div
+                      className={[
+                        'relative w-full rounded-xs overflow-hidden bg-paper border',
+                        'shadow-e1 transition-colors duration-fast',
+                        isActive ? 'border-accent' : 'border-line',
+                      ].join(' ')}
+                    >
+                      <canvas
+                        ref={el => { if (el) thumbnailRefs.current[n] = el }}
+                        className="block w-full"
+                      />
                       {pageFieldCount > 0 && (
-                        <div style={{ position: 'absolute', top: 3, right: 3, background: '#7c3aed', color: '#fff', borderRadius: 10, fontSize: 9, fontWeight: 700, padding: '1px 5px' }}>{pageFieldCount}</div>
+                        <span className="absolute top-1 right-1 bg-accent text-white rounded-pill text-2xs font-semibold tracking-tightish px-1.5 py-0">
+                          {pageFieldCount}
+                        </span>
                       )}
                     </div>
-                    <span style={{ color: currentPage === n ? '#4f8ef7' : '#6b7280', fontSize: 11 }}>{n}</span>
+                    <span
+                      className={[
+                        'text-2xs tracking-tightish',
+                        isActive ? 'text-accent-press font-medium' : 'text-ink-faint',
+                      ].join(' ')}
+                    >
+                      {n}
+                    </span>
                   </div>
                 )
               })
             )}
           </div>
-        </div>
+        </aside>
 
         {/* CENTER: PDF canvas */}
-        <div ref={canvasAreaRef}
-          style={{ flex: 1, overflow: 'auto', background: '#1e2330', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 28, position: 'relative' }}
+        <div
+          ref={canvasAreaRef}
+          className="flex-1 overflow-auto bg-bg paper-grain flex flex-col items-center px-8 py-8 relative"
           onDragOver={e => { e.preventDefault(); setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
           onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) loadPDF(f) }}
         >
           {!pdfJsDoc ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, width: '100%', maxWidth: 500, margin: 'auto', border: `2px dashed ${dragOver ? '#7c3aed' : '#374151'}`, borderRadius: 16, background: 'rgba(255,255,255,.02)', padding: 60, cursor: 'pointer', transition: 'all .2s' }}
+            <div
               onClick={() => fileInputRef.current?.click()}
+              className={[
+                'flex flex-col items-center justify-center gap-4 w-full max-w-lg my-auto',
+                'border-2 border-dashed rounded-lg bg-paper paper-grain py-14 px-10 cursor-pointer',
+                'transition-colors duration-fast ease-out',
+                dragOver
+                  ? 'border-accent bg-accent-tint'
+                  : 'border-line-strong hover:border-accent hover:bg-accent-tint',
+              ].join(' ')}
             >
-              <div style={{ width: 64, height: 64, background: 'rgba(124,58,237,.1)', borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Upload size={28} color="#7c3aed" />
+              <div className="w-14 h-14 rounded-md bg-accent-tint flex items-center justify-center">
+                <Upload size={24} className="text-accent" />
               </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ color: '#f9fafb', fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Open a PDF to set up signing</div>
-                <div style={{ color: '#6b7280', fontSize: 14 }}>Drag & drop or click to browse</div>
+              <div className="text-center">
+                <h2 className="font-serif text-xl text-ink leading-tight">
+                  Open a PDF to set up signing
+                </h2>
+                <p className="text-sm text-ink-muted mt-1 font-serif italic">
+                  Drag & drop here, or click to browse.
+                </p>
               </div>
             </div>
           ) : (
             <>
-              <div style={{ position: 'relative', boxShadow: '0 12px 48px rgba(0,0,0,.5)', cursor: activePlaceType ? 'crosshair' : 'default' }}
+              <div
                 onClick={handleCanvasClick}
+                className="relative shadow-e2 rounded-sm overflow-hidden bg-paper animate-fade-in"
+                style={{ cursor: activePlaceType ? 'crosshair' : 'default' }}
               >
                 {loadingPdf && (
-                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-                    <div style={{ width: 28, height: 28, border: '3px solid #7c3aed', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
+                  <div className="absolute inset-0 bg-paper/70 flex items-center justify-center z-50">
+                    <div className="w-7 h-7 border-2 border-accent border-t-transparent rounded-full animate-spin" />
                   </div>
                 )}
-                <canvas ref={pageCanvasRef} style={{ display: 'block' }} />
+                <canvas ref={pageCanvasRef} className="block" />
 
-                {/* Field overlay */}
+                {/* Field overlay — single accent palette; signer stripe carries color */}
                 {currentPageFields.map(field => {
                   const signer = signerForField(field)
-                  const color = signer?.color || FIELD_BORDER[field.type]
+                  const stripeColor = signer?.color || 'var(--ink-faint)'
                   const isSelected = selectedFieldId === field.id
+                  const ft = FIELD_TYPES.find(f => f.type === field.type)
                   return (
-                    <div key={field.id}
-                      className="field-drag"
+                    <div
+                      key={field.id}
                       onMouseDown={e => onFieldMouseDown(e, field)}
+                      className={[
+                        'absolute flex flex-col items-center justify-center gap-1',
+                        'rounded-sm cursor-move select-none',
+                        'transition-[box-shadow,background-color] duration-fast ease-out',
+                        isSelected
+                          ? 'bg-accent-tint-2 border-2 border-accent shadow-e1'
+                          : 'bg-accent-tint border-2 border-accent/60 hover:border-accent',
+                      ].join(' ')}
                       style={{
-                        position: 'absolute',
                         left: field.x, top: field.y,
                         width: field.w, height: field.h,
-                        border: `2px solid ${isSelected ? color : color + '99'}`,
-                        background: FIELD_BG[field.type],
-                        borderRadius: 4,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 2,
-                        cursor: 'move',
-                        userSelect: 'none',
-                        boxShadow: isSelected ? `0 0 0 2px ${color}55` : 'none',
                         zIndex: isSelected ? 10 : 5,
-                        transition: 'box-shadow .1s',
                       }}
                     >
-                      <span style={{ fontSize: 10, fontWeight: 700, color, opacity: .9, letterSpacing: '.04em' }}>
-                        {FIELD_TYPES.find(f => f.type === field.type)?.label}
+                      {/* Signer color stripe — the only place colour varies */}
+                      {signer && (
+                        <span
+                          aria-hidden
+                          className="absolute left-0 top-0 bottom-0 w-[3px]"
+                          style={{ background: stripeColor }}
+                        />
+                      )}
+                      <span className="text-2xs font-semibold tracking-eyebrow uppercase text-accent-press select-none">
+                        {ft?.label}
                       </span>
                       {signer && (
-                        <span style={{ fontSize: 9, color: signer.color, background: signer.color + '22', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>
+                        <span
+                          className="text-2xs font-serif italic tracking-tightish"
+                          style={{ color: stripeColor }}
+                        >
                           {signer.name}
                         </span>
                       )}
                       {!field.required && (
-                        <span style={{ fontSize: 8, color: '#9ca3af' }}>optional</span>
+                        <span className="text-2xs text-ink-faint font-serif italic">optional</span>
                       )}
 
-                      {/* Delete button (shown on hover/select) */}
+                      {/* Delete chip */}
                       {isSelected && (
                         <button
                           onMouseDown={e => { e.stopPropagation(); removeField(field.id) }}
-                          style={{ position: 'absolute', top: -10, right: -10, width: 20, height: 20, background: '#ef4444', border: '2px solid #0f1117', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'white', fontWeight: 700, zIndex: 20 }}
-                        >×</button>
+                          aria-label="Delete field"
+                          className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-danger text-white border-2 border-paper flex items-center justify-center shadow-e1 hover:bg-danger/90 z-20"
+                        >
+                          <X size={11} />
+                        </button>
                       )}
                     </div>
                   )
                 })}
               </div>
 
-              {/* Page nav */}
+              {/* Page nav — quiet */}
               {totalPages > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 20 }}>
-                  <button onClick={() => { if (currentPage > 1) setCurrentPage(p => p - 1) }} disabled={currentPage <= 1}
-                    style={{ width: 34, height: 34, borderRadius: 6, border: 'none', background: currentPage <= 1 ? '#1f2937' : '#374151', color: currentPage <= 1 ? '#4b5563' : '#d1d5db', cursor: currentPage <= 1 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  ><ChevronLeft size={17} /></button>
-                  <span style={{ color: '#9ca3af', fontSize: 13, background: '#1f2937', padding: '5px 14px', borderRadius: 6 }}>
+                <div className="flex items-center gap-3 mt-5">
+                  <IconButton
+                    size="sm"
+                    onClick={() => { if (currentPage > 1) setCurrentPage(p => p - 1) }}
+                    disabled={currentPage <= 1}
+                  >
+                    <ChevronLeft size={15} />
+                  </IconButton>
+                  <span className="text-xs text-ink-muted tracking-tightish bg-paper border border-line rounded-md px-3 py-1">
                     Page {currentPage} of {totalPages}
                   </span>
-                  <button onClick={() => { if (currentPage < totalPages) setCurrentPage(p => p + 1) }} disabled={currentPage >= totalPages}
-                    style={{ width: 34, height: 34, borderRadius: 6, border: 'none', background: currentPage >= totalPages ? '#1f2937' : '#374151', color: currentPage >= totalPages ? '#4b5563' : '#d1d5db', cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  ><ChevronRight size={17} /></button>
+                  <IconButton
+                    size="sm"
+                    onClick={() => { if (currentPage < totalPages) setCurrentPage(p => p + 1) }}
+                    disabled={currentPage >= totalPages}
+                  >
+                    <ChevronRight size={15} />
+                  </IconButton>
                 </div>
               )}
             </>
           )}
         </div>
 
-        {/* RIGHT PANEL */}
-        <div style={{ width: 260, background: '#0d1117', borderLeft: '1px solid rgba(255,255,255,.06)', display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+        {/* RIGHT RAIL — signers + field properties */}
+        <aside className="w-72 bg-bg-elev2 border-l border-line flex flex-col flex-shrink-0 overflow-hidden">
 
           {/* Signers section */}
-          <div style={{ borderBottom: '1px solid rgba(255,255,255,.06)', padding: '10px 12px 6px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <span style={{ color: '#9ca3af', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>Signers</span>
-              <button onClick={addSigner}
-                style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', borderRadius: 4, border: 'none', background: 'rgba(79,142,247,.15)', color: '#4f8ef7', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
-              ><Plus size={11} /> Add</button>
+          <div className="border-b border-line">
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-line">
+              <span className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+                Signers
+              </span>
+              <Button variant="ghost" size="sm" onClick={addSigner}>
+                <Plus size={12} /> Add
+              </Button>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+            <div className="px-3 py-3 flex flex-col gap-2 max-h-72 overflow-y-auto">
               {signers.length === 0 ? (
-                <div style={{ color: '#4b5563', fontSize: 12, padding: '8px 0' }}>No signers yet — click Add</div>
-              ) : signers.map((signer, idx) => (
-                <div key={signer.id} style={{ background: 'rgba(255,255,255,.04)', borderRadius: 6, padding: '6px 8px', border: `1px solid ${signer.color}33` }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: signer.color, flexShrink: 0 }} />
-                    <input value={signer.name} onChange={e => updateSigner(signer.id, { name: e.target.value })}
-                      placeholder="Signer name"
-                      style={{ flex: 1, background: 'transparent', border: 'none', color: '#f9fafb', fontSize: 12, fontWeight: 500, outline: 'none', fontFamily: 'inherit' }}
-                    />
-                    <button onClick={() => removeSigner(signer.id)}
-                      style={{ width: 16, height: 16, border: 'none', background: 'transparent', color: '#4b5563', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
-                      onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
-                      onMouseLeave={e => e.currentTarget.style.color = '#4b5563'}
-                    ><X size={12} /></button>
-                  </div>
-                  <input value={signer.email} onChange={e => updateSigner(signer.id, { email: e.target.value })}
-                    placeholder="email@example.com"
-                    type="email"
-                    style={{ width: '100%', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 4, color: '#9ca3af', fontSize: 11, padding: '3px 6px', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                <p className="text-2xs text-ink-faint font-serif italic">
+                  No signers yet — click Add.
+                </p>
+              ) : signers.map((signer) => (
+                <Card key={signer.id} className="relative overflow-hidden">
+                  {/* Colour stripe — the per-signer accent */}
+                  <span
+                    aria-hidden
+                    className="absolute left-0 top-0 bottom-0 w-1"
+                    style={{ background: signer.color }}
                   />
-                  {orderMode === 'sequential' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                      <span style={{ color: '#4b5563', fontSize: 10 }}>Order:</span>
-                      <input type="number" min={1} max={signers.length}
-                        value={signer.order}
-                        onChange={e => updateSigner(signer.id, { order: parseInt(e.target.value) || 1 })}
-                        style={{ width: 40, background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 4, color: '#9ca3af', fontSize: 11, padding: '2px 4px', outline: 'none', fontFamily: 'inherit', textAlign: 'center' }}
+                  <div className="pl-3 pr-2 py-2.5 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={signer.name}
+                        onChange={e => updateSigner(signer.id, { name: e.target.value })}
+                        placeholder="Signer name"
+                        className="flex-1 bg-transparent border-none outline-none text-sm font-serif italic text-ink placeholder:text-ink-faint tracking-tightish"
                       />
+                      <Tooltip label="Remove signer">
+                        <IconButton
+                          size="sm"
+                          onClick={() => removeSigner(signer.id)}
+                          className="hover:bg-danger-bg hover:text-danger"
+                        >
+                          <X size={12} />
+                        </IconButton>
+                      </Tooltip>
                     </div>
-                  )}
-                </div>
+                    <input
+                      value={signer.email}
+                      onChange={e => updateSigner(signer.id, { email: e.target.value })}
+                      placeholder="email@example.com"
+                      type="email"
+                      className="w-full bg-paper border border-line rounded-sm px-2 py-1 text-2xs font-serif italic text-ink-muted placeholder:text-ink-faint outline-none focus:border-accent focus:shadow-focus transition-colors"
+                    />
+                    {orderMode === 'sequential' && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-2xs text-ink-faint tracking-tightish">
+                          Order
+                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={signers.length}
+                          value={signer.order}
+                          onChange={e => updateSigner(signer.id, { order: parseInt(e.target.value) || 1 })}
+                          className="w-12 bg-paper border border-line rounded-sm px-1.5 py-0.5 text-2xs text-ink text-center outline-none focus:border-accent focus:shadow-focus"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </Card>
               ))}
             </div>
           </div>
 
-          {/* Field details (selected) */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
-            <div style={{ marginBottom: 8 }}>
-              <span style={{ color: '#9ca3af', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>
-                {selectedField ? 'Field Properties' : 'Fields'}
+          {/* Field properties / list */}
+          <div className="flex-1 overflow-y-auto px-3 py-3">
+            <div className="mb-2">
+              <span className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+                {selectedField ? 'Field properties' : 'Fields'}
               </span>
             </div>
 
             {selectedField ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Type badge */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: FIELD_BG[selectedField.type], borderRadius: 6, border: `1px solid ${FIELD_BORDER[selectedField.type]}66` }}>
-                  {(() => { const ft = FIELD_TYPES.find(f => f.type === selectedField.type); const Icon = ft?.icon; return Icon ? <Icon size={13} color={FIELD_BORDER[selectedField.type]} /> : null })()}
-                  <span style={{ fontSize: 12, fontWeight: 600, color: FIELD_BORDER[selectedField.type] }}>
-                    {FIELD_TYPES.find(f => f.type === selectedField.type)?.label} — Page {selectedField.page}
+              <div className="flex flex-col gap-3">
+                {/* Type badge — single accent */}
+                <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-accent-tint border border-accent/40">
+                  {(() => {
+                    const ft = FIELD_TYPES.find(f => f.type === selectedField.type)
+                    const Icon = ft?.icon
+                    return Icon ? <Icon size={13} className="text-accent" /> : null
+                  })()}
+                  <span className="text-xs font-medium text-accent-press tracking-tightish">
+                    {FIELD_TYPES.find(f => f.type === selectedField.type)?.label}
+                    <span className="text-ink-faint font-normal"> · Page {selectedField.page}</span>
                   </span>
                 </div>
 
                 {/* Assign signer */}
                 <div>
-                  <label style={{ display: 'block', color: '#6b7280', fontSize: 11, marginBottom: 4 }}>Assigned Signer</label>
-                  <select value={selectedField.signerId || ''}
+                  <label className="block text-2xs text-ink-muted font-medium mb-1 tracking-tightish">
+                    Assigned signer
+                  </label>
+                  <select
+                    value={selectedField.signerId || ''}
                     onChange={e => updateField(selectedField.id, { signerId: e.target.value || null })}
-                    style={{ width: '100%', background: '#1f2937', border: '1px solid rgba(255,255,255,.1)', borderRadius: 5, color: '#e5e7eb', fontSize: 12, padding: '5px 8px', outline: 'none', fontFamily: 'inherit' }}
+                    className="w-full bg-paper border border-line rounded-sm px-2 py-1.5 text-xs text-ink outline-none focus:border-accent focus:shadow-focus transition-colors"
                   >
                     <option value="">— Unassigned —</option>
                     {signers.map(s => (
@@ -647,70 +788,99 @@ export default function SigningSetup() {
                   </select>
                 </div>
 
-                {/* Required toggle */}
-                <div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
-                    <button onClick={() => updateField(selectedField.id, { required: !selectedField.required })}
-                      style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: selectedField.required ? '#4f8ef7' : '#4b5563', display: 'flex', alignItems: 'center' }}
-                    >
-                      {selectedField.required ? <CheckSquare size={16} /> : <Square size={16} />}
-                    </button>
-                    <span style={{ fontSize: 12, color: selectedField.required ? '#e5e7eb' : '#6b7280' }}>
-                      Required
-                    </span>
-                  </label>
-                </div>
+                {/* Required toggle — clear control */}
+                <button
+                  type="button"
+                  onClick={() => updateField(selectedField.id, { required: !selectedField.required })}
+                  className="flex items-center gap-2 text-left group"
+                >
+                  <span
+                    className={[
+                      'w-4 h-4 rounded-xs flex items-center justify-center flex-shrink-0 border-2',
+                      'transition-colors duration-fast ease-out',
+                      selectedField.required
+                        ? 'bg-accent border-accent'
+                        : 'bg-paper border-line-strong group-hover:border-accent',
+                    ].join(' ')}
+                  >
+                    {selectedField.required && <CheckSquare size={10} className="text-white" />}
+                  </span>
+                  <span
+                    className={[
+                      'text-xs tracking-tightish',
+                      selectedField.required ? 'text-ink' : 'text-ink-muted',
+                    ].join(' ')}
+                  >
+                    Required
+                  </span>
+                </button>
 
                 {/* Position / size */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                <div className="grid grid-cols-2 gap-2">
                   {[['x', 'X'], ['y', 'Y'], ['w', 'W'], ['h', 'H']].map(([key, label]) => (
                     <div key={key}>
-                      <label style={{ display: 'block', color: '#6b7280', fontSize: 10, marginBottom: 2 }}>{label} (px)</label>
-                      <input type="number" value={Math.round(selectedField[key])}
+                      <label className="block text-2xs text-ink-faint mb-1 tracking-tightish">
+                        {label} (px)
+                      </label>
+                      <input
+                        type="number"
+                        value={Math.round(selectedField[key])}
                         onChange={e => updateField(selectedField.id, { [key]: parseFloat(e.target.value) || 0 })}
-                        style={{ width: '100%', background: '#1f2937', border: '1px solid rgba(255,255,255,.1)', borderRadius: 4, color: '#e5e7eb', fontSize: 11, padding: '4px 6px', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                        className="w-full bg-paper border border-line rounded-sm px-2 py-1 text-2xs text-ink outline-none focus:border-accent focus:shadow-focus"
                       />
                     </div>
                   ))}
                 </div>
 
-                <button onClick={() => removeField(selectedField.id)}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '7px 0', background: 'rgba(239,68,68,.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,.2)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,.2)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,.1)'}
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  fullWidth
+                  onClick={() => removeField(selectedField.id)}
                 >
                   <Trash2 size={12} /> Delete field
-                </button>
+                </Button>
               </div>
             ) : (
               <div>
-                {/* Field list */}
                 {fields.length === 0 ? (
-                  <div style={{ color: '#4b5563', fontSize: 12, lineHeight: 1.6 }}>
+                  <p className="text-2xs text-ink-faint font-serif italic leading-snug">
                     No fields yet.<br />
                     Use the toolbar above to place Signature, Date, Name, or Text fields onto the PDF.
-                  </div>
+                  </p>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div className="flex flex-col gap-1">
                     {fields.map(f => {
                       const signer = signerForField(f)
-                      const color = signer?.color || FIELD_BORDER[f.type]
+                      const stripeColor = signer?.color || 'var(--ink-faint)'
                       return (
-                        <div key={f.id} onClick={() => { setCurrentPage(f.page); setSelectedFieldId(f.id) }}
-                          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', borderRadius: 5, cursor: 'pointer', background: 'rgba(255,255,255,.04)', border: `1px solid ${color}33`, transition: 'background .1s' }}
-                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,.08)'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,.04)'}
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => { setCurrentPage(f.page); setSelectedFieldId(f.id) }}
+                          className="relative flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-sm bg-paper border border-line hover:border-line-strong hover:bg-bg-elev2 transition-colors"
                         >
-                          <div style={{ width: 8, height: 8, borderRadius: 2, background: color, flexShrink: 0 }} />
-                          <span style={{ fontSize: 11, color: '#e5e7eb', flex: 1 }}>
+                          <span
+                            aria-hidden
+                            className="absolute left-0 top-1 bottom-1 w-[2px] rounded-r-full"
+                            style={{ background: stripeColor }}
+                          />
+                          <span className="text-xs text-ink flex-1 text-left tracking-tightish">
                             {FIELD_TYPES.find(ft => ft.type === f.type)?.label}
-                            <span style={{ color: '#6b7280' }}> p.{f.page}</span>
+                            <span className="text-ink-faint"> · p.{f.page}</span>
                           </span>
                           {signer && (
-                            <span style={{ fontSize: 9, color: signer.color, fontWeight: 600 }}>{signer.name}</span>
+                            <span
+                              className="text-2xs font-serif italic"
+                              style={{ color: stripeColor }}
+                            >
+                              {signer.name}
+                            </span>
                           )}
-                          {!f.required && <span style={{ fontSize: 9, color: '#4b5563' }}>opt</span>}
-                        </div>
+                          {!f.required && (
+                            <span className="text-2xs text-ink-faint font-serif italic">opt</span>
+                          )}
+                        </button>
                       )
                     })}
                   </div>
@@ -718,20 +888,26 @@ export default function SigningSetup() {
 
                 {/* Summary */}
                 {fields.length > 0 && (
-                  <div style={{ marginTop: 12, padding: '8px', background: 'rgba(255,255,255,.03)', borderRadius: 6 }}>
-                    <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>Summary</div>
+                  <div className="mt-4 px-3 py-2.5 rounded-md bg-paper border border-line">
+                    <div className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase mb-1.5">
+                      Summary
+                    </div>
                     {signers.map(s => {
                       const count = fields.filter(f => f.signerId === s.id).length
-                      const unassigned = fields.filter(f => !f.signerId).length
                       return (
-                        <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#9ca3af', marginBottom: 2 }}>
-                          <span style={{ color: s.color }}>{s.name}</span>
+                        <div
+                          key={s.id}
+                          className="flex justify-between text-xs text-ink-muted mb-0.5 tracking-tightish"
+                        >
+                          <span style={{ color: s.color }} className="font-serif italic">
+                            {s.name}
+                          </span>
                           <span>{count} field{count !== 1 ? 's' : ''}</span>
                         </div>
                       )
                     })}
                     {fields.filter(f => !f.signerId).length > 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#ef4444', marginTop: 2 }}>
+                      <div className="flex justify-between text-xs text-danger mt-1 tracking-tightish">
                         <span>Unassigned</span>
                         <span>{fields.filter(f => !f.signerId).length}</span>
                       </div>
@@ -741,19 +917,23 @@ export default function SigningSetup() {
               </div>
             )}
           </div>
-        </div>
+        </aside>
       </div>
 
-      {/* Toast */}
+      {/* Toast — quiet inline pill */}
       {toast && (
-        <div style={{ position: 'fixed', bottom: 44, left: '50%', transform: 'translateX(-50%)', background: '#1f2937', color: '#f9fafb', padding: '10px 20px', borderRadius: 24, fontSize: 13, boxShadow: '0 8px 32px rgba(0,0,0,.3)', zIndex: 2000, pointerEvents: 'none' }}>
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 bg-ink text-paper px-4 py-2 rounded-md shadow-e2 text-xs tracking-tightish animate-fade-in">
           {toast}
         </div>
       )}
 
-      <input ref={fileInputRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={e => { if (e.target.files[0]) loadPDF(e.target.files[0]); e.target.value = '' }} />
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf"
+        className="hidden"
+        onChange={e => { if (e.target.files[0]) loadPDF(e.target.files[0]); e.target.value = '' }}
+      />
     </div>
   )
 }

@@ -13,6 +13,10 @@ const keepGitkeep = {
 }
 
 export default defineConfig({
+  test: {
+    environment: 'jsdom',
+    globals: true,
+  },
   plugins: [react(), keepGitkeep],
   build: {
     outDir: 'dist',

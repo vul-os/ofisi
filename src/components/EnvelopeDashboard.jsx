@@ -4,51 +4,87 @@ import {
   RefreshCw, Bell, Trash2, ChevronDown, ChevronUp, Users,
 } from 'lucide-react'
 import { api } from '../lib/api.js'
+import { Button, Card, IconButton, Tooltip } from './ui'
 
 // OFFICE-45: Envelope Dashboard — per-envelope progress panel.
 // Lists all signing envelopes with signer-level status, sequential/parallel
 // mode badge, and action buttons: remind, cancel.
+//
+// Aesthetic direction — warm paper, single accent, warm signal hues
+// (sage/honey/persimmon) for status; quiet horizontal progress bar; expandable
+// per-signer rows with serif name + email.
 
 const STATUS_META = {
-  draft:     { label: 'Draft',     color: 'bg-gray-100 text-gray-600',   icon: Clock },
-  sent:      { label: 'Sent',      color: 'bg-blue-100 text-blue-700',   icon: Clock },
-  completed: { label: 'Complete',  color: 'bg-green-100 text-green-700', icon: CheckCircle2 },
-  declined:  { label: 'Declined',  color: 'bg-red-100 text-red-700',     icon: XCircle },
-  voided:    { label: 'Voided',    color: 'bg-orange-100 text-orange-700', icon: AlertCircle },
+  draft:     { label: 'Draft',     tone: 'neutral', icon: Clock },
+  sent:      { label: 'Sent',      tone: 'info',    icon: Clock },
+  completed: { label: 'Complete',  tone: 'success', icon: CheckCircle2 },
+  declined:  { label: 'Declined',  tone: 'danger',  icon: XCircle },
+  voided:    { label: 'Voided',    tone: 'warning', icon: AlertCircle },
+}
+
+const TONE_CLASSES = {
+  neutral: 'bg-bg-elev2 text-ink-muted',
+  info:    'bg-info-bg text-info',
+  success: 'bg-success-bg text-success',
+  danger:  'bg-danger-bg text-danger',
+  warning: 'bg-warning-bg text-warning',
 }
 
 const SIGNER_STATUS_META = {
-  pending:  { label: 'Pending',  dot: 'bg-gray-400' },
-  sent:     { label: 'Sent',     dot: 'bg-blue-500' },
-  viewed:   { label: 'Viewed',   dot: 'bg-yellow-500' },
-  signed:   { label: 'Signed',   dot: 'bg-green-500' },
-  declined: { label: 'Declined', dot: 'bg-red-500' },
+  pending:  { label: 'Pending',  dot: 'bg-line-strong' },
+  sent:     { label: 'Sent',     dot: 'bg-info' },
+  viewed:   { label: 'Viewed',   dot: 'bg-warning' },
+  signed:   { label: 'Signed',   dot: 'bg-success' },
+  declined: { label: 'Declined', dot: 'bg-danger' },
 }
 
 function StatusBadge({ status }) {
   const meta = STATUS_META[status] || STATUS_META.draft
   const Icon = meta.icon
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${meta.color}`}>
+    <span
+      className={[
+        'inline-flex items-center gap-1 px-2 py-0.5 rounded-pill text-2xs font-semibold tracking-tightish',
+        TONE_CLASSES[meta.tone],
+      ].join(' ')}
+    >
       <Icon size={11} />
       {meta.label}
     </span>
   )
 }
 
+function ProgressBar({ value }) {
+  const pct = Math.max(0, Math.min(100, Math.round(value)))
+  return (
+    <div className="w-full h-1 rounded-pill bg-bg-elev2 overflow-hidden">
+      <div
+        className="h-full bg-accent transition-[width] duration-slow ease-spring"
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  )
+}
+
 function SignerRow({ signer }) {
   const meta = SIGNER_STATUS_META[signer.status] || SIGNER_STATUS_META.pending
   return (
-    <div className="flex items-center gap-2 py-1">
+    <div className="flex items-center gap-2 py-1.5">
       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${meta.dot}`} />
-      <span className="text-sm text-gray-700 flex-1 truncate">
+      <span className="font-serif italic text-sm text-ink flex-1 truncate">
         {signer.name || signer.email}
         {signer.email && signer.name && (
-          <span className="ml-1 text-xs text-gray-400">&lt;{signer.email}&gt;</span>
+          <span className="ml-1.5 text-2xs text-ink-faint not-italic font-sans">
+            {signer.email}
+          </span>
         )}
       </span>
-      <span className="text-xs text-gray-400 w-16 text-right">#{signer.order}</span>
-      <span className="text-xs font-medium text-gray-500 w-16 text-right">{meta.label}</span>
+      <span className="text-2xs text-ink-faint tracking-tightish">
+        #{signer.order}
+      </span>
+      <span className="text-2xs font-medium text-ink-muted tracking-tightish w-16 text-right">
+        {meta.label}
+      </span>
     </div>
   )
 }
@@ -76,78 +112,123 @@ function EnvelopeRow({ envelope, onRemind, onCancel, onRefresh }) {
     if (expanded && !status) loadStatus()
   }, [expanded, status, loadStatus])
 
-  const active = envelope.status !== 'completed' && envelope.status !== 'voided' && envelope.status !== 'declined'
+  const active = envelope.status !== 'completed'
+    && envelope.status !== 'voided'
+    && envelope.status !== 'declined'
+
+  // Quiet per-envelope progress: count signed signers if status loaded;
+  // else fall back to a heuristic from the envelope's own status.
+  let progressPct = 0
+  if (status?.signers?.length) {
+    const total = status.signers.length
+    const done = status.signers.filter(s => s.status === 'signed').length
+    progressPct = (done / total) * 100
+  } else if (envelope.status === 'completed') {
+    progressPct = 100
+  } else if (envelope.status === 'sent') {
+    progressPct = 8 // a faint indication of "in flight"
+  }
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
+    <Card className="overflow-hidden transition-colors duration-fast ease-out">
       {/* Header row */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-white hover:bg-gray-50 cursor-pointer"
-           onClick={() => setExpanded(e => !e)}>
-        <FileSignature size={16} className="text-indigo-500 flex-shrink-0" />
-        <span className="font-medium text-gray-800 flex-1 truncate text-sm">{envelope.title}</span>
-
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-          envelope.order_mode === 'sequential'
-            ? 'bg-indigo-100 text-indigo-700'
-            : 'bg-teal-100 text-teal-700'
-        }`}>
-          {envelope.order_mode === 'sequential' ? 'Sequential' : 'Parallel'}
-        </span>
+      <div
+        className="flex items-center gap-3 px-4 py-3 hover:bg-bg-elev2 cursor-pointer"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <FileSignature size={15} className="text-accent flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-ink truncate text-sm tracking-tightish">
+              {envelope.title}
+            </span>
+            <span
+              className={[
+                'text-2xs px-1.5 py-0.5 rounded-xs font-medium tracking-tightish',
+                envelope.order_mode === 'sequential'
+                  ? 'bg-accent-tint text-accent-press'
+                  : 'bg-bg-elev2 text-ink-muted',
+              ].join(' ')}
+            >
+              {envelope.order_mode === 'sequential' ? 'Sequential' : 'Parallel'}
+            </span>
+          </div>
+          <div className="mt-2 max-w-xs">
+            <ProgressBar value={progressPct} />
+          </div>
+        </div>
 
         <StatusBadge status={envelope.status} />
 
-        <div className="flex items-center gap-1 ml-1">
+        <div className="flex items-center gap-0.5 ml-1" onClick={e => e.stopPropagation()}>
           {active && (
             <>
-              <button
-                onClick={e => { e.stopPropagation(); onRemind(envelope.id) }}
-                title="Send reminders"
-                className="p-1 rounded hover:bg-yellow-50 text-yellow-600 hover:text-yellow-700"
-              >
-                <Bell size={14} />
-              </button>
-              <button
-                onClick={e => { e.stopPropagation(); onCancel(envelope.id) }}
-                title="Cancel / void envelope"
-                className="p-1 rounded hover:bg-red-50 text-red-500 hover:text-red-700"
-              >
-                <Trash2 size={14} />
-              </button>
+              <Tooltip label="Send reminders">
+                <IconButton
+                  size="sm"
+                  onClick={() => onRemind(envelope.id)}
+                  className="hover:bg-warning-bg hover:text-warning"
+                >
+                  <Bell size={13} />
+                </IconButton>
+              </Tooltip>
+              <Tooltip label="Cancel envelope">
+                <IconButton
+                  size="sm"
+                  onClick={() => onCancel(envelope.id)}
+                  className="hover:bg-danger-bg hover:text-danger"
+                >
+                  <Trash2 size={13} />
+                </IconButton>
+              </Tooltip>
             </>
           )}
-          <button
-            onClick={e => { e.stopPropagation(); loadStatus(); onRefresh() }}
-            title="Refresh"
-            className="p-1 rounded hover:bg-gray-100 text-gray-400"
-          >
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-          </button>
-          {expanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+          <Tooltip label="Refresh">
+            <IconButton
+              size="sm"
+              onClick={() => { loadStatus(); onRefresh() }}
+            >
+              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+            </IconButton>
+          </Tooltip>
+          {expanded
+            ? <ChevronUp size={14} className="text-ink-faint" />
+            : <ChevronDown size={14} className="text-ink-faint" />}
         </div>
       </div>
 
       {/* Expanded signer list */}
       {expanded && (
-        <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
-          {loading && <p className="text-xs text-gray-400 py-1">Loading…</p>}
-          {error && <p className="text-xs text-red-500 py-1">{error}</p>}
+        <div className="border-t border-line px-4 py-3 bg-bg-elev2 animate-fade-in">
+          {loading && (
+            <p className="text-2xs text-ink-faint py-1 font-serif italic">Loading…</p>
+          )}
+          {error && (
+            <p className="text-2xs text-danger py-1">{error}</p>
+          )}
           {status && (
             <div>
-              <div className="flex items-center gap-1 mb-2 text-xs text-gray-500">
-                <Users size={12} />
-                <span>{status.signers.length} signer{status.signers.length !== 1 ? 's' : ''}</span>
+              <div className="flex items-center gap-1.5 mb-2 text-2xs text-ink-faint tracking-eyebrow uppercase font-semibold">
+                <Users size={11} />
+                <span>
+                  {status.signers.length} signer{status.signers.length !== 1 ? 's' : ''}
+                </span>
               </div>
-              {status.signers.map(sg => (
-                <SignerRow key={sg.id} signer={sg} />
-              ))}
+              <div className="divide-y divide-line">
+                {status.signers.map(sg => (
+                  <SignerRow key={sg.id} signer={sg} />
+                ))}
+              </div>
             </div>
           )}
           {!loading && !status && !error && (
-            <p className="text-xs text-gray-400">No signer data — click refresh.</p>
+            <p className="text-2xs text-ink-faint font-serif italic">
+              No signer data — click refresh.
+            </p>
           )}
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -199,48 +280,59 @@ export default function EnvelopeDashboard() {
   }, [showToast, loadEnvelopes])
 
   return (
-    <div className="max-w-2xl mx-auto py-6 px-4">
-      {/* Toast */}
+    <div className="max-w-3xl mx-auto py-8 px-4">
+      {/* Toast — quiet, paper-on-ink */}
       {toast && (
-        <div className={`fixed top-4 right-4 z-50 px-4 py-2 rounded-lg shadow-md text-sm font-medium ${
-          toast.type === 'success' ? 'bg-green-600 text-white'
-          : toast.type === 'error' ? 'bg-red-600 text-white'
-          : 'bg-gray-800 text-white'
-        }`}>
+        <div
+          className={[
+            'fixed top-4 right-4 z-50 px-4 py-2 rounded-md shadow-e2 text-xs font-medium tracking-tightish animate-fade-in',
+            toast.type === 'success' ? 'bg-success text-white'
+              : toast.type === 'error' ? 'bg-danger text-white'
+              : 'bg-ink text-paper',
+          ].join(' ')}
+        >
           {toast.msg}
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-          <FileSignature size={18} className="text-indigo-500" />
-          Signing Envelopes
-        </h2>
-        <button
-          onClick={loadEnvelopes}
-          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
-        >
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-          Refresh
-        </button>
-      </div>
+      <header className="mb-6">
+        <p className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase mb-1">
+          Signing
+        </p>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="font-serif text-2xl text-ink tracking-tightish flex items-center gap-2.5">
+            Envelopes
+          </h1>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={loadEnvelopes}
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </Button>
+        </div>
+      </header>
 
       {loading && (
         <div className="flex justify-center py-12">
-          <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
         </div>
       )}
 
       {error && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+        <div className="text-sm text-danger bg-danger-bg border border-line rounded-md px-4 py-3 flex items-center gap-2">
+          <AlertCircle size={14} className="shrink-0" />
           {error}
         </div>
       )}
 
       {!loading && !error && envelopes.length === 0 && (
-        <div className="text-center py-16 text-gray-400">
-          <FileSignature size={40} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No signing envelopes yet.</p>
+        <div className="text-center py-20">
+          <FileSignature size={36} className="mx-auto mb-3 text-ink-faint opacity-50" />
+          <p className="font-serif italic text-ink-muted">
+            No signing envelopes yet.
+          </p>
         </div>
       )}
 

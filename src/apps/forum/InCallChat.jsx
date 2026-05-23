@@ -5,6 +5,10 @@
  * (api.forumSendMessage) and the CRDT MessageStore, so chat persists in Forum
  * history after the call ends.
  *
+ * Design pass: themed against the call surface (warm ink background,
+ * accent-tint own-bubble, paper text), shares the slide-in animation with
+ * the right-rail panels.
+ *
  * Props:
  *   channelId   — Forum channel/thread id tied to this call session
  *   threadParent — optional parent message id (for meeting-room threads)
@@ -26,7 +30,6 @@ export default function InCallChat({ channelId, threadParent = '', identity, onC
   const pollRef = useRef(null)
   const store = getDefaultStore()
 
-  // Load + merge messages from the channel/thread
   const loadMessages = useCallback(async () => {
     if (!channelId) return
     try {
@@ -47,13 +50,12 @@ export default function InCallChat({ channelId, threadParent = '', identity, onC
             updated_at: m.updated_at,
           },
           applied_at: m.updated_at,
-        }))
+        })),
       )
     } catch (_) {
       // Offline-tolerant: show whatever is in the local CRDT store
     }
     const all = store.listMessages(channelId)
-    // When threadParent is set, show only that thread; otherwise show the full channel
     const visible = threadParent
       ? all.filter((m) => m.thread_parent === threadParent || m.id === threadParent)
       : all
@@ -66,7 +68,6 @@ export default function InCallChat({ channelId, threadParent = '', identity, onC
     return () => clearInterval(pollRef.current)
   }, [loadMessages])
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
@@ -76,7 +77,6 @@ export default function InCallChat({ channelId, threadParent = '', identity, onC
     if (!text || !channelId) return
     setSending(true)
     try {
-      // Optimistic: add to local CRDT store immediately
       const authorId = identity?.vumail || identity?.displayName || 'you'
       store.send(channelId, authorId, text, threadParent)
       setMessages(
@@ -85,14 +85,12 @@ export default function InCallChat({ channelId, threadParent = '', identity, onC
           .filter((m) =>
             threadParent
               ? m.thread_parent === threadParent || m.id === threadParent
-              : true
+              : true,
           )
-          .filter((m) => m.state !== 'deleted')
+          .filter((m) => m.state !== 'deleted'),
       )
       setBody('')
-      // Persist to the server so it appears in Forum history
       await api.forumSendMessage(channelId, text, threadParent)
-      // Reload to pick up server-assigned ids / clock values
       await loadMessages()
     } catch (e) {
       console.error('[InCallChat] send failed', e)
@@ -108,53 +106,64 @@ export default function InCallChat({ channelId, threadParent = '', identity, onC
         handleSend()
       }
     },
-    [handleSend]
+    [handleSend],
   )
 
   return (
-    <aside className="w-72 flex flex-col border-l border-gray-800 bg-gray-900 text-white text-sm">
+    <aside
+      className="w-72 flex flex-col border-l border-paper/10 text-paper text-sm animate-slide-in-right"
+      style={{ background: 'var(--ink)' }}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 shrink-0">
-        <span className="font-semibold text-gray-200">In-call chat</span>
+      <div className="flex items-center justify-between px-3 h-11 border-b border-paper/10 shrink-0">
+        <span className="font-semibold text-paper tracking-tightish">In-call chat</span>
         {onClose && (
           <button
+            type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-white"
+            className="inline-flex items-center justify-center w-7 h-7 rounded-sm text-paper/60 hover:text-paper hover:bg-paper/10 transition-colors duration-fast"
             title="Close chat"
+            aria-label="Close chat"
           >
             <X size={14} />
           </button>
         )}
       </div>
 
-      {/* Message list */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {messages.length === 0 && (
-          <p className="text-gray-500 text-xs text-center mt-4">
-            No messages yet. Chat here — messages persist in Forum after the call.
+          <p className="text-paper/50 text-xs text-center mt-4 font-serif italic">
+            No messages yet. Chat here — it persists in Forum after the call.
           </p>
         )}
         {messages.map((m) => (
-          <ChatMessage key={m.id} message={m} selfId={identity?.vumail || identity?.displayName} />
+          <ChatMessage
+            key={m.id}
+            message={m}
+            selfId={identity?.vumail || identity?.displayName}
+          />
         ))}
         <div ref={bottomRef} />
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 px-3 py-2 border-t border-gray-800 flex gap-2 items-end">
+      <div className="shrink-0 px-3 py-2 border-t border-paper/10 flex gap-2 items-end">
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           onKeyDown={handleKey}
           placeholder="Message…"
           rows={2}
-          className="flex-1 resize-none bg-gray-800 text-white placeholder-gray-500 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="flex-1 resize-none bg-paper/5 text-paper placeholder-paper/40 rounded-sm px-2 py-1.5 text-xs border border-paper/10 focus:outline-none focus:border-accent focus:shadow-focus transition-[border-color,box-shadow] duration-fast"
         />
         <button
+          type="button"
           onClick={handleSend}
           disabled={!body.trim() || sending}
-          className="p-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded flex items-center justify-center"
+          className="inline-flex items-center justify-center w-9 h-9 rounded-sm bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-[background,opacity] duration-fast"
           title="Send"
+          aria-label="Send"
         >
           <Send size={14} />
         </button>
@@ -166,14 +175,17 @@ export default function InCallChat({ channelId, threadParent = '', identity, onC
 function ChatMessage({ message, selfId }) {
   const isSelf = message.author_id === selfId
   return (
-    <div className={`flex flex-col ${isSelf ? 'items-end' : 'items-start'}`}>
-      <span className="text-[10px] text-gray-500 mb-0.5">
+    <div className={`flex flex-col ${isSelf ? 'items-end' : 'items-start'} gap-0.5`}>
+      <span className="text-[10px] text-paper/50 tracking-tightish">
         {isSelf ? 'You' : message.author_id}
       </span>
       <div
-        className={`max-w-[90%] px-2 py-1 rounded text-xs leading-relaxed whitespace-pre-wrap break-words ${
-          isSelf ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-100'
-        }`}
+        className={[
+          'max-w-[90%] px-2.5 py-1.5 rounded-md text-xs leading-relaxed whitespace-pre-wrap break-words tracking-tightish',
+          isSelf
+            ? 'bg-accent text-white'
+            : 'bg-paper/10 text-paper border border-paper/10',
+        ].join(' ')}
       >
         {message.body}
       </div>

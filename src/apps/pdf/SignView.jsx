@@ -21,21 +21,39 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).href
 
-const FIELD_COLORS = {
-  signature: 'border-indigo-500 bg-indigo-50',
-  initial:   'border-purple-500 bg-purple-50',
-  date:      'border-emerald-500 bg-emerald-50',
-  name:      'border-sky-500 bg-sky-50',
-  text:      'border-amber-500 bg-amber-50',
-}
-
-const FIELD_LABELS = {
+/*
+ * SignView — public signer page.
+ *
+ * Aesthetic direction:
+ *   The signer has no Vulos account; this page is their first (and possibly
+ *   only) impression of the product.  Lean into "quiet, trustworthy paper":
+ *     - oat/paper background, not slate
+ *     - serif for the document context (signer name, doc title)
+ *     - ONE accent (deep teal) on every "Sign here" affordance — so the path
+ *       through the document is obvious without being shouty
+ *     - all field types share the accent; differentiation is the LABEL, not
+ *       a rainbow of borders (the previous design read like a kindergarten).
+ */
+const FIELD_LABELS_AND_HUE = {
+  // Single accent for all fields keeps the page calm.  We vary the label only.
   signature: 'Signature',
   initial:   'Initial',
   date:      'Date',
-  name:      'Full Name',
+  name:      'Full name',
   text:      'Text',
 }
+
+// Kept for backwards-compat in case any code reads from it; new layout uses
+// the unified `field-affordance` style.
+const FIELD_COLORS = {
+  signature: 'border-accent bg-accent-tint',
+  initial:   'border-accent bg-accent-tint',
+  date:      'border-accent bg-accent-tint',
+  name:      'border-accent bg-accent-tint',
+  text:      'border-accent bg-accent-tint',
+}
+
+const FIELD_LABELS = FIELD_LABELS_AND_HUE
 
 const TYPED_FONTS = [
   { label: 'Elegant', value: '"Dancing Script", cursive' },
@@ -86,13 +104,13 @@ function DrawPad({ onDataUrl }) {
         ref={canvasRef}
         width={400}
         height={120}
-        className="w-full border border-gray-300 rounded-lg bg-white touch-none"
+        className="w-full border border-line rounded-md bg-paper touch-none"
         style={{ maxHeight: 120 }}
       />
       <button
         type="button"
         onClick={clear}
-        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
+        className="flex items-center gap-1 text-xs text-ink-muted hover:text-ink transition-colors"
       >
         <RefreshCw className="w-3 h-3" /> Clear
       </button>
@@ -132,7 +150,7 @@ function TypedPad({ signerName, onDataUrl }) {
         value={text}
         onChange={e => setText(e.target.value)}
         placeholder="Type your name"
-        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        className="w-full bg-paper border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent focus:shadow-focus transition-colors"
       />
 
       {/* font picker */}
@@ -142,10 +160,10 @@ function TypedPad({ signerName, onDataUrl }) {
             key={f.label}
             type="button"
             onClick={() => setFontIdx(i)}
-            className={`px-3 py-1 text-sm rounded-full border transition-colors ${
+            className={`px-3 py-1 text-sm rounded-pill border transition-colors ${
               fontIdx === i
-                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                : 'border-gray-200 text-gray-600 hover:border-gray-400'
+                ? 'border-accent bg-accent-tint text-accent-press'
+                : 'border-line text-ink-muted hover:border-line-strong'
             }`}
             style={{ fontFamily: f.value }}
           >
@@ -159,7 +177,7 @@ function TypedPad({ signerName, onDataUrl }) {
         ref={canvasRef}
         width={400}
         height={80}
-        className="w-full border border-gray-200 rounded-lg bg-white"
+        className="w-full border border-line rounded-md bg-paper"
         style={{ fontFamily: TYPED_FONTS[fontIdx].value }}
       />
     </div>
@@ -184,13 +202,13 @@ function UploadPad({ onDataUrl }) {
 
   return (
     <div className="space-y-3">
-      <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg py-6 cursor-pointer hover:border-indigo-400 transition-colors bg-gray-50">
-        <Upload className="w-6 h-6 text-gray-400 mb-1" />
-        <span className="text-sm text-gray-500">Click to upload PNG/JPG</span>
+      <label className="flex flex-col items-center justify-center border border-dashed border-line-strong rounded-md py-6 cursor-pointer hover:border-accent hover:bg-accent-tint transition-colors bg-bg-elev2">
+        <Upload className="w-6 h-6 text-ink-faint mb-1" />
+        <span className="text-sm text-ink-muted">Click to upload PNG / JPG</span>
         <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={onFile} />
       </label>
       {preview && (
-        <img src={preview} alt="uploaded signature" className="max-h-20 object-contain rounded border border-gray-200" />
+        <img src={preview} alt="uploaded signature" className="max-h-20 object-contain rounded-sm border border-line" />
       )}
     </div>
   )
@@ -214,23 +232,24 @@ function FieldFillModal({ field, signerName, onSave, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in"
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      style={{ background: 'rgba(26, 25, 22, 0.36)', backdropFilter: 'blur(2px)' }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="font-semibold text-gray-900 text-sm">
-            Fill {FIELD_LABELS[field.type] ?? field.type} field
-            {field.required && <span className="ml-1 text-red-500">*</span>}
+      <div className="bg-paper rounded-xl shadow-e3 border border-line w-full max-w-lg overflow-hidden animate-scale-in">
+        <div className="px-5 py-3.5 border-b border-line flex items-center justify-between">
+          <h3 className="font-semibold text-ink text-md tracking-tightish">
+            Fill {FIELD_LABELS[field.type] ?? field.type}
+            {field.required && <span className="ml-1 text-danger">*</span>}
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+          <button onClick={onClose} className="text-ink-faint hover:text-ink text-lg leading-none transition-colors">&times;</button>
         </div>
 
         <div className="p-5 space-y-4">
-          {/* signature / initial: draw / type / upload tabs */}
+          {/* signature / initial: draw / type / upload — segmented control */}
           {isSignatureOrInitial && (
             <>
-              <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+              <div className="flex p-0.5 bg-bg-elev2 rounded-md border border-line">
                 {[
                   { id: 'draw',   label: 'Draw',   icon: Pen },
                   { id: 'type',   label: 'Type',   icon: Type },
@@ -240,10 +259,10 @@ function FieldFillModal({ field, signerName, onSave, onClose }) {
                     key={id}
                     type="button"
                     onClick={() => { setMode(id); setDataUrl(null) }}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm transition-colors ${
+                    className={`flex-1 flex items-center justify-center gap-1.5 h-8 text-xs font-medium rounded-sm transition-all ${
                       mode === id
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                        ? 'bg-paper text-ink shadow-e1'
+                        : 'bg-transparent text-ink-muted hover:text-ink'
                     }`}
                   >
                     <Icon className="w-3.5 h-3.5" />
@@ -261,12 +280,12 @@ function FieldFillModal({ field, signerName, onSave, onClose }) {
           {/* date: auto-filled, editable */}
           {field.type === 'date' && (
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">Date</label>
+              <label className="text-xs text-ink-muted font-medium mb-1.5 block tracking-tightish">Date</label>
               <input
                 type="text"
                 value={textValue}
                 onChange={e => setTextValue(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="w-full bg-paper border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent focus:shadow-focus transition-colors"
               />
             </div>
           )}
@@ -274,7 +293,7 @@ function FieldFillModal({ field, signerName, onSave, onClose }) {
           {/* name / text */}
           {(field.type === 'name' || field.type === 'text') && (
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">
+              <label className="text-xs text-ink-muted font-medium mb-1.5 block tracking-tightish">
                 {FIELD_LABELS[field.type]}
               </label>
               <input
@@ -282,17 +301,17 @@ function FieldFillModal({ field, signerName, onSave, onClose }) {
                 value={textValue}
                 onChange={e => setTextValue(e.target.value)}
                 placeholder={field.type === 'name' ? 'Your full name' : 'Enter text'}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="w-full bg-paper border border-line rounded-md px-3 py-2 text-sm outline-none focus:border-accent focus:shadow-focus transition-colors"
               />
             </div>
           )}
         </div>
 
-        <div className="px-5 py-4 border-t border-gray-100 flex justify-end gap-2">
+        <div className="px-5 py-3 border-t border-line bg-bg-elev2 flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
+            className="h-8 px-3 text-sm text-ink-muted bg-paper border border-line rounded-md hover:bg-bg-elev2 hover:border-line-strong transition-colors"
           >
             Cancel
           </button>
@@ -300,7 +319,7 @@ function FieldFillModal({ field, signerName, onSave, onClose }) {
             type="button"
             onClick={save}
             disabled={!canSave}
-            className="px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="h-8 px-3 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Apply
           </button>
@@ -436,105 +455,171 @@ export default function SignView() {
 
   // ── render helpers ────────────────────────────────────────────
 
+  // Shared centred-frame layout for the four "informational" states.
+  // Force light data-theme on these surfaces — a public signer page should
+  // always feel like warm paper, regardless of the visitor's OS dark mode.
+  const StatusFrame = ({ children }) => (
+    <div data-theme="light" className="h-screen flex flex-col items-center justify-center gap-4 bg-bg px-4 paper-grain">
+      {children}
+    </div>
+  )
+
   if (state === 'loading') {
     return (
-      <div className="h-screen flex flex-col items-center justify-center gap-3 bg-gray-50">
-        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-        <p className="text-sm text-gray-500">Loading your signing session…</p>
-      </div>
+      <StatusFrame>
+        <Loader2 className="w-7 h-7 text-accent animate-spin" />
+        <p className="text-sm text-ink-muted font-serif italic">Loading your signing session…</p>
+      </StatusFrame>
     )
   }
 
   if (state === 'locked') {
     return (
-      <div className="h-screen flex flex-col items-center justify-center gap-4 bg-gray-50 px-4">
-        <Lock className="w-12 h-12 text-amber-400" />
-        <h1 className="text-xl font-semibold text-gray-800">Not your turn yet</h1>
-        <p className="text-sm text-gray-500 text-center max-w-sm">
+      <StatusFrame>
+        <Lock className="w-10 h-10 text-warning" />
+        <h1 className="font-serif text-2xl text-ink">Not your turn yet</h1>
+        <p className="text-sm text-ink-muted text-center max-w-sm leading-snug">
           A prior signer must complete their signature before this link becomes active.
           You'll be notified when it's your turn.
         </p>
-      </div>
+      </StatusFrame>
     )
   }
 
   if (state === 'error') {
     return (
-      <div className="h-screen flex flex-col items-center justify-center gap-4 bg-gray-50 px-4">
-        <AlertCircle className="w-12 h-12 text-red-400" />
-        <h1 className="text-xl font-semibold text-gray-800">Link unavailable</h1>
-        <p className="text-sm text-gray-500 text-center max-w-sm">{errorMsg}</p>
-      </div>
+      <StatusFrame>
+        <AlertCircle className="w-10 h-10 text-danger" />
+        <h1 className="font-serif text-2xl text-ink">Link unavailable</h1>
+        <p className="text-sm text-ink-muted text-center max-w-sm leading-snug">{errorMsg}</p>
+      </StatusFrame>
     )
   }
 
   if (state === 'done') {
     return (
-      <div className="h-screen flex flex-col items-center justify-center gap-4 bg-gray-50 px-4">
-        <CheckCircle className="w-16 h-16 text-emerald-500" />
-        <h1 className="text-2xl font-semibold text-gray-800">Signed successfully</h1>
-        <p className="text-sm text-gray-500 text-center max-w-sm">
+      <StatusFrame>
+        <div className="w-14 h-14 rounded-full bg-success-bg flex items-center justify-center">
+          <CheckCircle className="w-8 h-8 text-success" />
+        </div>
+        <h1 className="font-serif text-3xl text-ink">Signed.</h1>
+        <p className="text-sm text-ink-muted text-center max-w-sm leading-snug">
           Your signature has been submitted and recorded. You may close this window.
         </p>
-      </div>
+        <p className="mt-6 text-2xs text-ink-faint tracking-eyebrow uppercase">
+          Vulos Office
+        </p>
+      </StatusFrame>
     )
   }
 
-  // state === 'ready'
+  // ── state === 'ready' ─────────────────────────────────────────────────
+  // Public surface — force light theme so the page always feels like paper,
+  // and dial back the colour vocabulary: one accent for "act here", a single
+  // sage success colour for "done", everything else warm neutral.
+
+  const filledCount = fields.filter((f) => isFilled(f.id)).length
+  const progressPct = fields.length ? Math.round((filledCount / fields.length) * 100) : 0
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* ── header ── */}
-      <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
-        <FileText className="w-5 h-5 text-indigo-500 shrink-0" />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-900 truncate">
-            Signing request for <span className="text-indigo-600">{view.signer_name}</span>
-          </p>
-          <p className="text-xs text-gray-400">
-            {fields.length} field{fields.length !== 1 ? 's' : ''} assigned to you
-          </p>
+    <div data-theme="light" className="min-h-screen bg-bg paper-grain">
+      {/* ── Header — quiet, doc-first ── */}
+      <header className="bg-paper border-b border-line">
+        <div className="max-w-4xl mx-auto px-6 py-5 flex items-center gap-4">
+          <div className="w-10 h-10 rounded-md bg-accent text-white flex items-center justify-center flex-shrink-0">
+            <FileText className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase mb-0.5">
+              Signature requested
+            </p>
+            {/* The signer's name is the document — use the serif. */}
+            <h1 className="font-serif text-xl text-ink truncate leading-tight">
+              {view.signer_name}
+            </h1>
+          </div>
+          <div className="hidden sm:flex flex-col items-end gap-1 flex-shrink-0">
+            <span className="text-2xs text-ink-faint tracking-eyebrow uppercase">
+              {filledCount} of {fields.length} complete
+            </span>
+            {/* Tiny progress bar — calm, never alarming. */}
+            <div className="w-32 h-1 rounded-pill bg-bg-elev2 overflow-hidden">
+              <div
+                className="h-full bg-accent transition-[width] duration-slow ease-spring"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          </div>
         </div>
-        <span className="text-xs text-gray-400 shrink-0">Vulos Office</span>
       </header>
 
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+      <div className="max-w-4xl mx-auto px-6 py-8 space-y-8">
 
-        {/* ── field checklist ── */}
-        <section className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-            Your assigned fields
-          </h2>
+        {/* ── Field checklist ── Quiet card, all fields share the accent label */}
+        <section className="bg-paper rounded-lg border border-line overflow-hidden animate-fade-in">
+          <div className="px-4 py-3 border-b border-line flex items-center justify-between">
+            <h2 className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+              Fields to complete
+            </h2>
+            <span className="text-2xs text-ink-faint">
+              {fields.length} {fields.length === 1 ? 'field' : 'fields'}
+            </span>
+          </div>
+
           {fields.length === 0 ? (
-            <p className="text-sm text-gray-400">No fields assigned to you.</p>
+            <p className="text-sm text-ink-faint font-serif italic px-4 py-6">
+              No fields assigned to you.
+            </p>
           ) : (
-            <ul className="divide-y divide-gray-100">
-              {fields.map((f) => (
-                <li key={f.id} className="flex items-center gap-3 py-2">
-                  <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${FIELD_COLORS[f.type] ?? 'border-gray-300 bg-gray-50'}`}
+            <ul className="divide-y divide-line">
+              {fields.map((f, idx) => {
+                const filled = isFilled(f.id)
+                return (
+                  <li
+                    key={f.id}
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-bg-elev2 transition-colors"
                   >
-                    {FIELD_LABELS[f.type] ?? f.type}
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    Page {f.page} &nbsp;·&nbsp; ({Math.round(f.x)}, {Math.round(f.y)})
-                  </span>
-                  {f.required && (
-                    <span className="text-xs text-red-500 font-medium">Required</span>
-                  )}
-                  <div className="ml-auto flex items-center gap-2">
-                    {isFilled(f.id)
-                      ? <Check className="w-4 h-4 text-emerald-500" />
-                      : null}
+                    {/* Step indicator: number, or check when filled */}
+                    <span
+                      className={[
+                        'w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0',
+                        'text-2xs font-semibold tracking-tightish transition-colors',
+                        filled
+                          ? 'bg-success text-white'
+                          : 'bg-bg-elev2 text-ink-muted border border-line',
+                      ].join(' ')}
+                    >
+                      {filled ? <Check className="w-3 h-3" /> : idx + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-ink font-medium tracking-tightish">
+                          {FIELD_LABELS[f.type] ?? f.type}
+                        </span>
+                        {f.required && (
+                          <span className="text-2xs text-danger">required</span>
+                        )}
+                      </div>
+                      <span className="text-2xs text-ink-faint">
+                        Page {f.page}
+                      </span>
+                    </div>
                     <button
                       type="button"
                       onClick={() => setActiveField(f)}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                      className={[
+                        'h-7 px-3 text-xs font-medium rounded-md tracking-tightish',
+                        'transition-colors duration-fast ease-out',
+                        filled
+                          ? 'text-ink-muted border border-line hover:bg-bg-elev2'
+                          : 'text-white bg-accent hover:bg-accent-hover',
+                      ].join(' ')}
                     >
-                      {isFilled(f.id) ? 'Edit' : 'Fill'}
+                      {filled ? 'Edit' : 'Fill'}
                     </button>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                )
+              })}
             </ul>
           )}
         </section>
@@ -542,7 +627,7 @@ export default function SignView() {
         {/* ── PDF viewer with field overlays ── */}
         <section className="space-y-4">
           {pdfLoading && (
-            <div className="flex items-center gap-2 text-sm text-gray-400">
+            <div className="flex items-center gap-2 text-sm text-ink-faint font-serif italic">
               <Loader2 className="w-4 h-4 animate-spin" />
               Loading document…
             </div>
@@ -553,7 +638,7 @@ export default function SignView() {
             return (
               <div
                 key={pageNum}
-                className="relative bg-white shadow-sm rounded-lg overflow-hidden"
+                className="relative bg-paper border border-line shadow-e1 rounded-lg overflow-hidden mx-auto animate-fade-in"
                 style={{ width, maxWidth: '100%' }}
               >
                 <img
@@ -569,11 +654,13 @@ export default function SignView() {
                     <div
                       key={f.id}
                       onClick={() => setActiveField(f)}
-                      className={`absolute border-2 rounded flex items-center justify-center cursor-pointer
-                        ${filled
-                          ? 'border-emerald-400 bg-emerald-50/60'
-                          : `${FIELD_COLORS[f.type] ?? 'border-gray-400 bg-gray-50'} bg-opacity-60`}
-                        hover:brightness-95 transition-all`}
+                      className={[
+                        'absolute border rounded-sm flex items-center justify-center cursor-pointer',
+                        'transition-all duration-fast ease-out',
+                        filled
+                          ? 'border-success bg-success-bg'
+                          : 'border-accent bg-accent-tint hover:bg-accent-tint-2 hover:border-accent-press',
+                      ].join(' ')}
                       style={{ left: f.x, top: f.y, width: f.w, height: f.h }}
                     >
                       {filled && isImg ? (
@@ -583,11 +670,11 @@ export default function SignView() {
                           style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                         />
                       ) : filled ? (
-                        <span className="text-xs font-medium text-gray-700 px-1 truncate w-full text-center">
+                        <span className="text-xs font-medium text-ink px-1 truncate w-full text-center">
                           {fieldValues[f.id]}
                         </span>
                       ) : (
-                        <span className="text-xs font-medium opacity-70 select-none px-1 truncate">
+                        <span className="text-2xs font-semibold tracking-eyebrow uppercase text-accent-press select-none px-1 truncate">
                           {FIELD_LABELS[f.type] ?? f.type}{f.required ? ' *' : ''}
                         </span>
                       )}
@@ -599,12 +686,19 @@ export default function SignView() {
           })}
         </section>
 
-        {/* ── consent + submit ── */}
-        <section className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+        {/* ── Consent + submit ── */}
+        <section className="bg-paper rounded-lg border border-line p-5 space-y-4 animate-fade-in">
           <label className="flex items-start gap-3 cursor-pointer">
-            <div className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-              consent ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'
-            }`}>
+            {/* Custom checkbox — accent-tinted when on; sage box otherwise */}
+            <div
+              className={[
+                'mt-0.5 w-4 h-4 rounded-xs flex items-center justify-center flex-shrink-0',
+                'transition-all duration-fast ease-out',
+                consent
+                  ? 'bg-accent border-2 border-accent'
+                  : 'bg-paper border-2 border-line-strong',
+              ].join(' ')}
+            >
               {consent && <Check className="w-2.5 h-2.5 text-white" />}
             </div>
             <input
@@ -613,22 +707,22 @@ export default function SignView() {
               checked={consent}
               onChange={e => setConsent(e.target.checked)}
             />
-            <span className="text-sm text-gray-600">
-              I consent to signing this document electronically. My electronic signature
-              is legally equivalent to a handwritten signature.
+            <span className="text-sm text-ink-muted leading-snug">
+              I consent to signing this document electronically. My electronic
+              signature is legally equivalent to a handwritten signature.
             </span>
           </label>
 
           {requiredFields.length > 0 && !allRequiredFilled && (
-            <p className="text-xs text-amber-600 flex items-center gap-1">
-              <AlertCircle className="w-3.5 h-3.5" />
+            <p className="text-xs text-warning flex items-center gap-1.5 bg-warning-bg rounded-sm px-2 py-1.5">
+              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
               Please fill all required fields before submitting.
             </p>
           )}
 
           {submitError && (
-            <p className="text-xs text-red-600 flex items-center gap-1">
-              <AlertCircle className="w-3.5 h-3.5" />
+            <p className="text-xs text-danger flex items-center gap-1.5 bg-danger-bg rounded-sm px-2 py-1.5">
+              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
               {submitError}
             </p>
           )}
@@ -637,17 +731,20 @@ export default function SignView() {
             type="button"
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-indigo-600
-              hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed
-              transition-colors flex items-center justify-center gap-2"
+            className="w-full py-3 rounded-md text-sm font-semibold text-white bg-accent
+              hover:bg-accent-hover active:bg-accent-press disabled:opacity-40 disabled:cursor-not-allowed
+              transition-colors duration-fast ease-out flex items-center justify-center gap-2 shadow-e1 tracking-tightish"
           >
             {submitting
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting…</>
-              : <><CheckCircle className="w-4 h-4" /> Submit Signature</>}
+              : <><CheckCircle className="w-4 h-4" /> Submit signature</>}
           </button>
         </section>
 
-        <div className="pb-8" />
+        {/* Quiet footer — establishes provenance without screaming */}
+        <p className="text-2xs text-ink-faint text-center tracking-eyebrow uppercase pb-8">
+          Powered by Vulos Office
+        </p>
       </div>
 
       {/* ── field fill modal ── */}

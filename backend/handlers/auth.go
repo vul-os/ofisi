@@ -136,11 +136,28 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("session", signed, int(expiry.Seconds()), "/", "", false, true)
-	c.JSON(http.StatusOK, models.LoginResponse{Token: signed, Message: "logged in"})
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "session",
+		Value:    signed,
+		MaxAge:   int(expiry.Seconds()),
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		// Secure should be true in production (HTTPS). Set via env/config if needed.
+	})
+	// Return only a success message — never expose the token in the response body
+	// so JavaScript cannot read it.
+	c.JSON(http.StatusOK, models.LoginResponse{Message: "logged in"})
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	c.SetCookie("session", "", -1, "/", "", false, true)
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "session",
+		Value:    "",
+		MaxAge:   -1,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }

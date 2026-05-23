@@ -37,10 +37,15 @@ function Sep() {
 }
 
 function Group({ label, children }) {
+  // Group label uses the eyebrow tracking — Vercel-style typographic discipline.
   return (
-    <div className="flex flex-col items-center border-r border-gray-200 pr-3 mr-1 last:border-0">
+    <div className="flex flex-col items-center border-r border-line pr-3 mr-1 last:border-0">
       <div className="flex items-center gap-0.5 flex-wrap">{children}</div>
-      {label && <span className="text-[9px] text-gray-400 mt-0.5 tracking-wide">{label}</span>}
+      {label && (
+        <span className="text-[9px] text-ink-faint mt-0.5 tracking-eyebrow uppercase">
+          {label}
+        </span>
+      )}
     </div>
   )
 }
@@ -75,8 +80,12 @@ export default function DocsToolbar({ editor, title, onSave, saving }) {
   ) || HEADINGS[0]
 
   return (
-    <div className="bg-white border-b border-gray-200">
-      {/* Ribbon toolbar — Word style */}
+    /*
+     * Toolbar: sticky-but-quiet.  We keep the existing "ribbon" layout (group →
+     * label) but pull every colour through the token layer so the bar reads as
+     * paper, not as a separate floating panel.
+     */
+    <div className="bg-paper border-b border-line">
       <div className="flex items-start gap-0 px-3 py-1.5 flex-wrap min-h-[52px]">
 
         {/* Undo / Redo */}
@@ -92,12 +101,12 @@ export default function DocsToolbar({ editor, title, onSave, saving }) {
               <span className="flex-1 text-left truncate">{currentHeading.label}</span>
               <ChevronDown size={11} />
             </button>
-            <div className="absolute left-0 top-full mt-0.5 w-40 bg-white border border-gray-200 rounded-xl shadow-xl z-30 py-1 hidden group-hover:block">
+            <div className="absolute left-0 top-full mt-0.5 w-40 bg-paper border border-line rounded-md shadow-e2 z-30 py-1 hidden group-hover:block animate-scale-in">
               {HEADINGS.map(({ label, value, style }) => (
                 <button
                   key={value}
                   onClick={() => value === 0 ? editor.chain().focus().setParagraph().run() : editor.chain().focus().toggleHeading({ level: value }).run()}
-                  className={`w-full text-left px-3 py-1.5 hover:bg-gray-50 ${style} ${currentHeading.value === value ? 'text-indigo-600' : 'text-gray-800'}`}
+                  className={`w-full text-left px-3 py-1.5 hover:bg-accent-tint ${style} ${currentHeading.value === value ? 'text-accent' : 'text-ink-muted'}`}
                 >
                   {label}
                 </button>
@@ -149,7 +158,7 @@ export default function DocsToolbar({ editor, title, onSave, saving }) {
           {editor.isActive('table') && (
             <div className="relative group">
               <button className="toolbar-btn text-xs px-2">Table ▾</button>
-              <div className="absolute left-0 top-full mt-0.5 w-44 bg-white border border-gray-200 rounded-xl shadow-xl z-30 py-1 hidden group-hover:block text-xs">
+              <div className="absolute left-0 top-full mt-0.5 w-44 bg-paper border border-line rounded-md shadow-e2 z-30 py-1 hidden group-hover:block text-xs animate-scale-in">
                 {[
                   ['Add row above', () => editor.chain().focus().addRowBefore().run()],
                   ['Add row below', () => editor.chain().focus().addRowAfter().run()],
@@ -159,28 +168,30 @@ export default function DocsToolbar({ editor, title, onSave, saving }) {
                   ['Delete column', () => editor.chain().focus().deleteColumn().run()],
                   ['Delete table', () => editor.chain().focus().deleteTable().run()],
                 ].map(([lbl, fn]) => (
-                  <button key={lbl} onClick={fn} className="w-full text-left px-3 py-1.5 hover:bg-gray-50 text-gray-700">{lbl}</button>
+                  <button key={lbl} onClick={fn} className="w-full text-left px-3 py-1.5 hover:bg-accent-tint text-ink-muted">{lbl}</button>
                 ))}
               </div>
             </div>
           )}
         </Group>
 
-        {/* Export — right-aligned */}
+        {/* Export — right-aligned. Quiet secondary button (not primary accent) so
+            it doesn't compete with the topbar's Save button. */}
         <div className="ml-auto flex items-center self-center">
           <div className="relative group">
-            <button className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition shadow-sm">
-              <Download size={13} /> Export ▾
+            <button className="inline-flex items-center gap-1.5 h-7 px-2.5 bg-paper border border-line rounded-md text-xs font-medium text-ink-muted hover:border-line-strong hover:text-ink transition-colors">
+              <Download size={12} /> Export
+              <ChevronDown size={11} className="opacity-60" />
             </button>
-            <div className="absolute right-0 top-full mt-0.5 w-44 bg-white border border-gray-200 rounded-xl shadow-xl z-30 py-1 hidden group-hover:block text-sm">
-              <button onClick={() => exportToDocx(editor, title)} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-gray-700 flex items-center gap-2">
-                <span className="text-blue-600 font-bold text-xs w-8">DOCX</span> Word Document
+            <div className="absolute right-0 top-full mt-0.5 w-44 bg-paper border border-line rounded-md shadow-e2 z-30 py-1 hidden group-hover:block text-sm animate-scale-in">
+              <button onClick={() => exportToDocx(editor, title)} className="w-full text-left px-3 py-2 hover:bg-accent-tint text-ink-muted flex items-center gap-2">
+                <span className="text-2xs font-bold tracking-eyebrow text-accent w-9">DOCX</span> Word document
               </button>
-              <button onClick={() => exportToPdf(title)} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-gray-700 flex items-center gap-2">
-                <span className="text-red-600 font-bold text-xs w-8">PDF</span> PDF Document
+              <button onClick={() => exportToPdf(title)} className="w-full text-left px-3 py-2 hover:bg-accent-tint text-ink-muted flex items-center gap-2">
+                <span className="text-2xs font-bold tracking-eyebrow text-danger w-9">PDF</span> PDF document
               </button>
-              <button onClick={() => exportToMarkdown(editor, title)} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-gray-700 flex items-center gap-2">
-                <span className="text-gray-600 font-bold text-xs w-8">MD</span> Markdown
+              <button onClick={() => exportToMarkdown(editor, title)} className="w-full text-left px-3 py-2 hover:bg-accent-tint text-ink-muted flex items-center gap-2">
+                <span className="text-2xs font-bold tracking-eyebrow text-ink-faint w-9">MD</span> Markdown
               </button>
             </div>
           </div>

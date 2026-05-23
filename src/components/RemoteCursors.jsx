@@ -164,7 +164,7 @@ export function DocsCursorLayer({ editor, remoteCursors }) {
             }}
           />
 
-          {/* Name label */}
+          {/* Name label — serif italic per design system */}
           <span
             style={{
               position: 'absolute',
@@ -172,13 +172,17 @@ export function DocsCursorLayer({ editor, remoteCursors }) {
               left: left - 1,
               background: peer.color,
               color: '#fff',
-              fontSize: 10,
-              fontWeight: 600,
+              fontFamily: 'var(--font-serif)',
+              fontStyle: 'italic',
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: 'var(--tracking-tight)',
               lineHeight: '16px',
-              padding: '1px 5px',
-              borderRadius: '3px 3px 3px 0',
+              padding: '1px 6px',
+              borderRadius: '4px 4px 4px 0',
               whiteSpace: 'nowrap',
               userSelect: 'none',
+              boxShadow: '0 1px 2px rgba(36,28,16,0.18)',
             }}
           >
             {peer.displayName || initials(peer.displayName)}
@@ -241,7 +245,7 @@ export function SheetsCursorLayer({ remoteCursors, getCellRect }) {
                 boxSizing: 'border-box',
               }}
             />
-            {/* Name badge above the cell */}
+            {/* Name badge — serif italic per design system */}
             <span
               style={{
                 position: 'absolute',
@@ -249,13 +253,17 @@ export function SheetsCursorLayer({ remoteCursors, getCellRect }) {
                 left: rect.left,
                 background: peer.color,
                 color: '#fff',
-                fontSize: 10,
-                fontWeight: 600,
+                fontFamily: 'var(--font-serif)',
+                fontStyle: 'italic',
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: 'var(--tracking-tight)',
                 lineHeight: '16px',
-                padding: '1px 5px',
-                borderRadius: '3px 3px 3px 0',
+                padding: '1px 6px',
+                borderRadius: '4px 4px 4px 0',
                 whiteSpace: 'nowrap',
                 userSelect: 'none',
+                boxShadow: '0 1px 2px rgba(36,28,16,0.18)',
               }}
             >
               {peer.displayName || '?'}

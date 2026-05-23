@@ -14,7 +14,10 @@
 
     <!-- PWA / Android -->
     <link rel="manifest" href="/site.webmanifest" />
-    <meta name="theme-color" content="#1e1e2e" />
+    <!-- theme-color tracks the paper background (light) and ink (dark) so
+         the mobile chrome doesn't fight the warm-neutral palette. -->
+    <meta name="theme-color" content="#fbf9f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#131110" media="(prefers-color-scheme: dark)" />
 
     <!-- Primary Meta -->
     <title>Vulos Office</title>
@@ -27,10 +30,15 @@
     <meta property="og:description" content="Vulos Office — documents, sheets, and slides in one place." />
     <meta property="og:image" content="/android-chrome-512x512.png" />
 
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <!--
+      Fonts: we use the OS's grotesque + serif via the ui-sans-serif /
+      ui-serif font keywords (configured in src/design/tokens.css).
+      This gives a distinctive, characterful look without shipping a webfont
+      and avoids the Inter sameness of generic React apps.
+
+      Optional upgrade: self-host "Inter Display" + "Source Serif Pro" if a
+      brand wants stricter consistency across OSes. See src/design/DESIGN.md.
+    -->
   </head>
   <body>
     <div id="root"></div>

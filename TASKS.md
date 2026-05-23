@@ -1,5 +1,10 @@
 # Vulos Office — Task Backlog
 
+**Status: 35 / 35 tasks done (100%).** Office Core, Real-time Collaboration (CRDT +
+fabric), PDF Auto-Sign, and Vulos-Forum (channels, calls, screen-share, meetings) are
+all shipped. Design-system pillar applied to core surfaces (see `src/design/DESIGN.md`
+§9); remaining surfaces deferred to the next pass (§10).
+
 Actionable work for autonomous coding agents, grouped by area and
 **priority-ordered**. Vulos Office is the productivity surface of the Vulos
 project: Documents / Sheets / Slides / PDF today, growing into a networked office

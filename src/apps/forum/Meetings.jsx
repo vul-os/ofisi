@@ -1,24 +1,24 @@
 // Meetings.jsx — OFFICE-65: Scheduled meetings dashboard.
 //
-// Shows a list of rooms/scheduled meetings, lets the host create new ones,
+// Shows scheduled/active/ended meeting rooms, lets the host create new ones,
 // and provides a copy-to-clipboard join link per meeting.
 // Clicking "Join" navigates to /room/<sessionId> which renders Room.jsx.
 //
-// Props: none — fetches from /api/meetings on mount.
+// Design pass: warm paper dashboard, Cards for each meeting, Modal for create,
+// Tooltip-driven "copied" confirmation, sage/honey/dusty-navy status pills.
 
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Calendar, Clock, Copy, Plus, Trash2, Video, Users, CheckCircle, XCircle,
+  Calendar, Clock, Copy, Plus, Trash2, Video, Users, Check,
 } from 'lucide-react'
+import { Button, Card, IconButton, Input, Modal, Topbar } from '../../components/ui'
 
 const API = '/api/meetings'
 
 async function apiFetch(path, opts = {}) {
-  const token = localStorage.getItem('session_token')
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  const res = await fetch(path, { ...opts, headers })
+  const res = await fetch(path, { ...opts, headers, credentials: 'include' })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.error || `HTTP ${res.status}`)
@@ -35,11 +35,23 @@ function formatDt(isoStr) {
   })
 }
 
-function statusColor(s) {
-  if (s === 'active') return 'text-emerald-500'
-  if (s === 'ended') return 'text-gray-400'
-  if (s === 'cancelled') return 'text-red-400'
-  return 'text-amber-400' // scheduled
+// Warm-signal status pill (sage / honey / dusty navy / persimmon).
+function StatusPill({ status }) {
+  const map = {
+    active:    { label: 'Active',    bg: 'var(--signal-success-bg)', fg: 'var(--signal-success)' },
+    scheduled: { label: 'Scheduled', bg: 'var(--signal-warning-bg)', fg: 'var(--signal-warning)' },
+    ended:     { label: 'Ended',     bg: 'var(--bg-elev-2)',         fg: 'var(--ink-faint)'      },
+    cancelled: { label: 'Cancelled', bg: 'var(--signal-error-bg)',   fg: 'var(--signal-error)'   },
+  }
+  const tone = map[status] || map.scheduled
+  return (
+    <span
+      className="inline-flex items-center px-2 py-0.5 rounded-pill text-2xs font-medium uppercase tracking-eyebrow"
+      style={{ background: tone.bg, color: tone.fg }}
+    >
+      {tone.label}
+    </span>
+  )
 }
 
 export default function Meetings() {
@@ -75,7 +87,6 @@ export default function Meetings() {
   }, [])
 
   const handleJoin = useCallback((m) => {
-    // Navigate to the Room component — SPA-side route.
     navigate(`/room/${encodeURIComponent(m.session_id)}`)
   }, [navigate])
 
@@ -96,45 +107,54 @@ export default function Meetings() {
   }, [])
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      {/* Header */}
-      <div className="px-6 py-4 border-b flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-          <Video size={20} className="text-indigo-500" />
-          Meeting Rooms
-        </h1>
-        <button
-          onClick={() => setCreating(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg"
-        >
-          <Plus size={14} />
-          New Room
-        </button>
-      </div>
+    <div className="flex flex-col h-full bg-bg">
+      {/* Topbar — Vulos Office pattern */}
+      <Topbar
+        title={
+          <h1 className="inline-flex items-center gap-2 text-md font-semibold text-ink tracking-tightish">
+            <Video size={16} className="text-accent" />
+            Meetings
+          </h1>
+        }
+        actions={
+          <Button variant="primary" onClick={() => setCreating(true)}>
+            <Plus size={14} />
+            New room
+          </Button>
+        }
+      />
 
-      {/* Create modal */}
-      {creating && (
-        <CreateModal onCreated={handleCreated} onClose={() => setCreating(false)} />
-      )}
+      <CreateModal
+        open={creating}
+        onCreated={handleCreated}
+        onClose={() => setCreating(false)}
+      />
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto px-6 py-6">
         {loading && (
-          <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+          <div className="flex items-center justify-center h-32 text-ink-faint text-sm font-serif italic">
             Loading…
           </div>
         )}
         {error && !loading && (
-          <div className="text-red-500 text-sm">{error}</div>
+          <p className="text-danger text-sm bg-danger-bg border border-line rounded-md px-3 py-2">
+            {error}
+          </p>
         )}
         {!loading && !error && meetings.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-40 text-gray-400 text-sm gap-2">
-            <Video size={32} className="opacity-30" />
-            <span>No rooms yet. Create one to get started.</span>
+          <div className="flex flex-col items-center justify-center h-64 gap-3">
+            <Video size={36} className="text-ink-faint opacity-50" />
+            <p className="text-sm text-ink-muted font-serif italic">
+              No rooms yet. Create one to get started.
+            </p>
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              <Plus size={14} />
+              New room
+            </Button>
           </div>
         )}
         {!loading && meetings.length > 0 && (
-          <ul className="space-y-3">
+          <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3 max-w-5xl">
             {meetings.map((m) => (
               <MeetingCard
                 key={m.id}
@@ -154,87 +174,114 @@ export default function Meetings() {
 
 function MeetingCard({ meeting: m, copied, onJoin, onCopyLink, onDelete }) {
   return (
-    <li className="border rounded-xl p-4 flex items-start justify-between gap-4 hover:bg-gray-50 transition">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium text-gray-900 truncate">{m.title}</span>
-          <span className={`text-xs font-medium capitalize ${statusColor(m.status)}`}>
-            {m.status}
-          </span>
-        </div>
+    <li className="list-none">
+      <Card className="transition-colors duration-fast ease-out hover:border-line-strong">
+        <Card.Body className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-md font-semibold text-ink tracking-tightish truncate">
+                {m.title}
+              </h2>
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                <StatusPill status={m.status} />
+                {m.scheduled_at && (
+                  <span className="inline-flex items-center gap-1 text-2xs text-ink-muted tracking-tightish">
+                    <Calendar size={11} className="text-ink-faint" />
+                    {formatDt(m.scheduled_at)}
+                  </span>
+                )}
+                {m.duration_min > 0 && (
+                  <span className="inline-flex items-center gap-1 text-2xs text-ink-muted tracking-tightish">
+                    <Clock size={11} className="text-ink-faint" />
+                    {m.duration_min} min
+                  </span>
+                )}
+              </div>
+            </div>
 
-        <div className="mt-1 flex flex-wrap gap-3 text-xs text-gray-500">
-          {m.scheduled_at && (
-            <span className="flex items-center gap-1">
-              <Calendar size={11} />
-              {formatDt(m.scheduled_at)}
-              {m.duration_min > 0 && (
-                <span className="flex items-center gap-1 ml-1">
-                  <Clock size={11} />
-                  {m.duration_min} min
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {/* Tooltip-driven copy confirmation */}
+              <span className="relative inline-flex">
+                <IconButton
+                  size="sm"
+                  title="Copy join link"
+                  onClick={() => onCopyLink(m)}
+                  className={copied ? 'text-success' : ''}
+                >
+                  {copied ? <Check size={14} /> : <Copy size={14} />}
+                </IconButton>
+                {copied && (
+                  <span
+                    role="status"
+                    className="pointer-events-none absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap px-2 py-1 rounded-sm text-2xs font-medium tracking-tightish bg-ink text-paper shadow-e2 animate-fade-in"
+                  >
+                    Link copied
+                  </span>
+                )}
+              </span>
+              <IconButton
+                size="sm"
+                title="Delete room"
+                onClick={() => onDelete(m.id)}
+                className="hover:bg-danger-bg hover:text-danger"
+              >
+                <Trash2 size={14} />
+              </IconButton>
+            </div>
+          </div>
+
+          {(m.host_vumail ||
+            (Array.isArray(m.invitees) && m.invitees.length > 0)) && (
+            <div className="flex flex-wrap items-center gap-2 text-2xs">
+              {m.host_vumail && (
+                <span className="text-ink-muted">
+                  <span className="text-ink-faint uppercase tracking-eyebrow mr-1">Host</span>
+                  {m.host_vumail}
                 </span>
               )}
-            </span>
+              {Array.isArray(m.invitees) && m.invitees.length > 0 && (
+                <span className="inline-flex items-center gap-1 text-ink-muted">
+                  <Users size={11} className="text-ink-faint" />
+                  {m.invitees.length} invitee{m.invitees.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
           )}
-          {m.host_vumail && (
-            <span className="flex items-center gap-1">
-              Host: {m.host_vumail}
-            </span>
-          )}
+
           {Array.isArray(m.invitees) && m.invitees.length > 0 && (
-            <span className="flex items-center gap-1">
-              <Users size={11} />
-              {m.invitees.length} invitee{m.invitees.length !== 1 ? 's' : ''}
-            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {m.invitees.slice(0, 6).map((inv) => (
+                <span
+                  key={inv}
+                  className="inline-flex items-center bg-accent-tint border border-line rounded-pill px-2 py-0.5 text-2xs text-ink-muted tracking-tightish"
+                >
+                  {inv}
+                </span>
+              ))}
+              {m.invitees.length > 6 && (
+                <span className="text-2xs text-ink-faint self-center">
+                  +{m.invitees.length - 6}
+                </span>
+              )}
+            </div>
           )}
-        </div>
-
-        {Array.isArray(m.invitees) && m.invitees.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {m.invitees.map((inv) => (
-              <span
-                key={inv}
-                className="bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full"
-              >
-                {inv}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <button
-          onClick={() => onCopyLink(m)}
-          title="Copy join link"
-          className="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
-        >
-          {copied ? <CheckCircle size={16} className="text-emerald-500" /> : <Copy size={16} />}
-        </button>
-        <button
-          onClick={() => onJoin(m)}
-          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg flex items-center gap-1"
-        >
-          <Video size={13} />
-          Join
-        </button>
-        <button
-          onClick={() => onDelete(m.id)}
-          title="Delete room"
-          className="p-2 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition"
-        >
-          <Trash2 size={15} />
-        </button>
-      </div>
+        </Card.Body>
+        <Card.Footer className="justify-end">
+          <Button variant="primary" onClick={() => onJoin(m)}>
+            <Video size={13} />
+            Join
+          </Button>
+        </Card.Footer>
+      </Card>
     </li>
   )
 }
 
-function CreateModal({ onCreated, onClose }) {
+function CreateModal({ open, onCreated, onClose }) {
   const [form, setForm] = useState({
     title: '',
     host_vumail: '',
-    invitees_raw: '',   // comma-separated
+    invitees_raw: '',
     scheduled_at: '',
     duration_min: 60,
   })
@@ -266,6 +313,8 @@ function CreateModal({ onCreated, onClose }) {
         body: JSON.stringify(body),
       })
       onCreated(m)
+      // Reset for next time
+      setForm({ title: '', host_vumail: '', invitees_raw: '', scheduled_at: '', duration_min: 60 })
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -274,95 +323,60 @@ function CreateModal({ onCreated, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-gray-900">New Meeting Room</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <XCircle size={20} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Title *</label>
-            <input
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              placeholder="Weekly Sync"
-              value={form.title}
-              onChange={(e) => update('title', e.target.value)}
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Your vumail</label>
-            <input
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              placeholder="you@vulos"
-              value={form.host_vumail}
-              onChange={(e) => update('host_vumail', e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Invitees (comma-separated vumail addresses)
-            </label>
-            <input
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              placeholder="alice@vulos, bob@vulos"
-              value={form.invitees_raw}
-              onChange={(e) => update('invitees_raw', e.target.value)}
-            />
-          </div>
-
+    <Modal open={open} onClose={onClose} title="New meeting room" size="md">
+      <form onSubmit={handleSubmit}>
+        <Modal.Body className="space-y-4">
+          <Input
+            label="Title"
+            placeholder="Weekly sync"
+            value={form.title}
+            onChange={(e) => update('title', e.target.value)}
+            autoFocus
+            required
+          />
+          <Input
+            label="Your vumail"
+            placeholder="you@vulos"
+            value={form.host_vumail}
+            onChange={(e) => update('host_vumail', e.target.value)}
+          />
+          <Input
+            label="Invitees"
+            hint="Comma-separated vumail addresses"
+            placeholder="alice@vulos, bob@vulos"
+            value={form.invitees_raw}
+            onChange={(e) => update('invitees_raw', e.target.value)}
+          />
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
+              <label className="block text-xs text-ink-muted font-medium mb-1.5 tracking-tightish">
                 Scheduled time (optional)
               </label>
               <input
                 type="datetime-local"
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                 value={form.scheduled_at}
                 onChange={(e) => update('scheduled_at', e.target.value)}
+                className="w-full h-9 px-3 text-sm bg-paper border border-line rounded-md text-ink outline-none focus:border-accent focus:shadow-focus transition-[border-color,box-shadow] duration-fast ease-out"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Duration (min)
-              </label>
-              <input
-                type="number"
-                min="0"
-                max="480"
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                value={form.duration_min}
-                onChange={(e) => update('duration_min', parseInt(e.target.value, 10) || 0)}
-              />
-            </div>
+            <Input
+              type="number"
+              min={0}
+              max={480}
+              label="Duration (min)"
+              value={form.duration_min}
+              onChange={(e) => update('duration_min', parseInt(e.target.value, 10) || 0)}
+            />
           </div>
-
-          {err && <p className="text-red-500 text-xs">{err}</p>}
-
-          <div className="flex justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-sm rounded-lg"
-            >
-              {busy ? 'Creating…' : 'Create Room'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+          {err && <p className="text-danger text-xs">{err}</p>}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
+          <Button variant="primary" type="submit" disabled={busy || !form.title.trim()}>
+            {busy ? 'Creating…' : 'Create room'}
+          </Button>
+        </Modal.Footer>
+      </form>
+    </Modal>
   )
 }

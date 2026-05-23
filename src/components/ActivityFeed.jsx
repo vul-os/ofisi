@@ -1,56 +1,82 @@
 /**
  * ActivityFeed — OFFICE-28
  *
- * A side panel with two tabs:
- *   1. Activity  — chronological list of edits / comments / signings / snapshots
- *   2. Snapshots — all named snapshots; create a new named snapshot; restore
+ * Design treatment:
+ *   - Tabs primitive for Activity / Snapshots.
+ *   - Date separators in serif italic small-caps.
+ *   - Event kind icons in accent-tint backgrounds (warm signal colours).
+ *   - Named-snapshot creation form using Input + Button primitives.
+ *   - Restore confirmation via Modal.
  *
  * Props:
- *   fileId    string   — the document ID
- *   onRestore fn       — called with the restored File object after a successful restore
- *   onClose   fn       — called when the panel is closed
+ *   fileId    string  — document ID
+ *   onRestore fn      — called with restored File object
+ *   onClose   fn      — close the panel
  */
 
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Activity, Bookmark, X, Loader2, AlertCircle, RotateCcw,
-  Plus, CheckCircle, ChevronRight, Edit3, MessageSquare, Shield,
+  Activity, Bookmark, Loader2, AlertCircle, RotateCcw,
+  Plus, CheckCircle, Edit3, MessageSquare, Shield,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { Tabs, Button, IconButton, Input, Modal } from './ui'
 
-// ---- helpers ---------------------------------------------------------------
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatRelative(dateStr) {
   const d = new Date(dateStr)
   const now = new Date()
   const diffMs = now - d
   const diffSec = Math.floor(diffMs / 1000)
-  if (diffSec < 60) return 'just now'
+  if (diffSec < 60)  return 'just now'
   const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m ago`
+  if (diffMin < 60)  return `${diffMin}m ago`
   const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
+  if (diffHr < 24)   return `${diffHr}h ago`
   const diffDay = Math.floor(diffHr / 24)
-  if (diffDay < 30) return `${diffDay}d ago`
+  if (diffDay < 30)  return `${diffDay}d ago`
   return d.toLocaleDateString()
 }
 
-const KIND_ICON = {
-  edit:     <Edit3     size={12} className="text-indigo-400" />,
-  comment:  <MessageSquare size={12} className="text-blue-400" />,
-  sign:     <Shield    size={12} className="text-emerald-400" />,
-  snapshot: <Bookmark  size={12} className="text-amber-500"  />,
+function formatDay(dateStr) {
+  const d = new Date(dateStr)
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) return 'Today'
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
 }
 
-const KIND_BADGE = {
-  edit:     'bg-indigo-50 text-indigo-600',
-  comment:  'bg-blue-50 text-blue-600',
-  sign:     'bg-emerald-50 text-emerald-600',
-  snapshot: 'bg-amber-50 text-amber-700',
+// Event kind icons + warm-token colour
+const KIND_CONFIG = {
+  edit:     { icon: Edit3,         iconCn: 'text-accent',   bgCn: 'bg-accent-tint'   },
+  comment:  { icon: MessageSquare, iconCn: 'text-info',     bgCn: 'bg-info-bg'       },
+  sign:     { icon: Shield,        iconCn: 'text-success',  bgCn: 'bg-success-bg'    },
+  snapshot: { icon: Bookmark,      iconCn: 'text-warning',  bgCn: 'bg-warning-bg'    },
 }
 
-// ---- sub-components --------------------------------------------------------
+function KindBadge({ kind }) {
+  const k = KIND_CONFIG[kind] || KIND_CONFIG.edit
+  return (
+    <span className={`text-2xs font-semibold px-1.5 py-px rounded-xs capitalize tracking-tightish ${k.bgCn} ${k.iconCn}`}>
+      {kind}
+    </span>
+  )
+}
 
+function KindDot({ kind }) {
+  const k = KIND_CONFIG[kind] || KIND_CONFIG.edit
+  const KIcon = k.icon
+  return (
+    <span className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${k.bgCn}`}>
+      <KIcon size={12} className={k.iconCn} />
+    </span>
+  )
+}
+
+// ─── ActivityList ─────────────────────────────────────────────────────────────
 function ActivityList({ fileId }) {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
@@ -61,7 +87,6 @@ function ActivityList({ fileId }) {
     setError(null)
     try {
       const data = await api.getActivity(fileId)
-      // Show newest first in the feed
       setEvents([...data].reverse())
     } catch (e) {
       setError(e.message || 'Failed to load activity')
@@ -74,53 +99,90 @@ function ActivityList({ fileId }) {
 
   if (loading) return (
     <div className="flex items-center justify-center py-12">
-      <Loader2 size={20} className="animate-spin text-indigo-400" />
+      <Loader2 size={18} className="animate-spin text-accent" />
     </div>
   )
 
   if (error) return (
     <div className="flex flex-col items-center gap-2 py-10 px-4 text-center">
-      <AlertCircle size={20} className="text-red-400" />
-      <p className="text-xs text-red-500">{error}</p>
-      <button onClick={load} className="text-xs text-indigo-600 underline hover:text-indigo-800">Retry</button>
+      <AlertCircle size={18} className="text-danger" />
+      <p className="text-xs text-danger">{error}</p>
+      <Button variant="link" size="sm" onClick={load}>Retry</Button>
     </div>
   )
 
   if (events.length === 0) return (
-    <div className="py-10 px-4 text-center">
-      <p className="text-xs text-gray-400">No activity yet.</p>
-      <p className="text-xs text-gray-400 mt-1">Edits, comments, and signings appear here.</p>
+    <div className="py-12 px-4 text-center">
+      <p className="font-serif text-sm text-ink-muted italic">No activity yet.</p>
+      <p className="text-2xs text-ink-faint mt-1.5 leading-snug">
+        Edits, comments, and signings appear here.
+      </p>
     </div>
   )
 
+  // Group events by day for date separators
+  let lastDay = null
+  const rows = []
+  for (const ev of events) {
+    const day = formatDay(ev.timestamp)
+    if (day !== lastDay) {
+      lastDay = day
+      rows.push({ type: 'separator', day })
+    }
+    rows.push({ type: 'event', ev })
+  }
+
   return (
-    <ul className="divide-y divide-gray-50">
-      {events.map((ev) => (
-        <li key={ev.id} className="px-4 py-3 hover:bg-gray-50 transition">
-          <div className="flex items-start gap-2">
-            <span className="mt-0.5 flex-shrink-0">{KIND_ICON[ev.kind] || KIND_ICON.edit}</span>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs text-gray-800 leading-snug">{ev.summary}</p>
-              {ev.author && (
-                <p className="text-[11px] text-gray-400 mt-0.5">by {ev.author}</p>
-              )}
-              <p className="text-[11px] text-gray-400 mt-0.5">{formatRelative(ev.timestamp)}</p>
+    <div className="py-2">
+      {rows.map((row, i) => {
+        if (row.type === 'separator') {
+          return (
+            <div
+              key={`sep-${i}`}
+              className="flex items-center gap-3 px-4 py-2"
+            >
+              {/* Serif italic small-caps date separator */}
+              <span
+                className="text-2xs text-ink-faint tracking-wide font-serif italic"
+                style={{ fontVariant: 'small-caps' }}
+              >
+                {row.day}
+              </span>
+              <span className="flex-1 h-px bg-line" />
             </div>
-            <span className={`flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded capitalize ${KIND_BADGE[ev.kind] || KIND_BADGE.edit}`}>
-              {ev.kind}
-            </span>
+          )
+        }
+        const { ev } = row
+        return (
+          <div
+            key={ev.id}
+            className="flex items-start gap-2.5 px-4 py-2.5 hover:bg-accent-tint transition-colors duration-fast group"
+          >
+            <KindDot kind={ev.kind} />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-ink leading-snug tracking-tightish">{ev.summary}</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                {ev.author && (
+                  <span className="text-2xs text-ink-faint">by {ev.author}</span>
+                )}
+                <span className="text-2xs text-ink-faint">{formatRelative(ev.timestamp)}</span>
+              </div>
+            </div>
+            <KindBadge kind={ev.kind} />
           </div>
-        </li>
-      ))}
-    </ul>
+        )
+      })}
+    </div>
   )
 }
 
+// ─── SnapshotsTab ─────────────────────────────────────────────────────────────
 function SnapshotsTab({ fileId, onRestore }) {
   const [versions, setVersions] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [restoring, setRestoring] = useState(null)
+  const [confirmVersion, setConfirmVersion] = useState(null)
   const [labelInput, setLabelInput] = useState('')
   const [creating, setCreating] = useState(false)
   const [toast, setToast] = useState(null)
@@ -161,10 +223,11 @@ function SnapshotsTab({ fileId, onRestore }) {
     }
   }
 
-  const handleRestore = async (vid) => {
-    setRestoring(vid)
+  const doRestore = async (v) => {
+    setConfirmVersion(null)
+    setRestoring(v.id)
     try {
-      const updated = await api.restoreVersion(fileId, vid)
+      const updated = await api.restoreVersion(fileId, v.id)
       showToast('Version restored')
       onRestore?.(updated)
       await load()
@@ -175,193 +238,234 @@ function SnapshotsTab({ fileId, onRestore }) {
     }
   }
 
-  // Named snapshots only (versions with a label)
-  const named = versions.filter((v) => v.label)
-  // All versions for the "auto-saves" list
-  const auto = versions.filter((v) => !v.label)
+  const named = versions.filter(v => v.label)
+  const auto  = versions.filter(v => !v.label)
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Create named snapshot */}
-      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-        <p className="text-xs font-semibold text-gray-600 mb-2">Create named snapshot</p>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={labelInput}
-            onChange={(e) => setLabelInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
-            placeholder="e.g. v1 final draft"
-            className="flex-1 text-xs border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-          />
-          <button
-            onClick={handleCreate}
-            disabled={creating || !labelInput.trim()}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition"
+    <>
+      <div className="flex flex-col h-full">
+        {/* Create named snapshot — Input + Button primitives */}
+        <div className="px-4 py-3 border-b border-line bg-bg-elev2 flex-shrink-0">
+          <p className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase mb-2">
+            Pin this state
+          </p>
+          <div className="flex gap-2">
+            <Input
+              value={labelInput}
+              onChange={e => setLabelInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleCreate() }}
+              placeholder="e.g. v1 final draft"
+              size="sm"
+              className="flex-1"
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleCreate}
+              disabled={creating || !labelInput.trim()}
+            >
+              {creating ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+              Save
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {loading && (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 size={18} className="animate-spin text-accent" />
+            </div>
+          )}
+
+          {error && !loading && (
+            <div className="flex flex-col items-center gap-2 py-8 px-4 text-center">
+              <AlertCircle size={18} className="text-danger" />
+              <p className="text-xs text-danger">{error}</p>
+              <Button variant="link" size="sm" onClick={load}>Retry</Button>
+            </div>
+          )}
+
+          {!loading && !error && (
+            <>
+              {/* Named snapshots */}
+              {named.length > 0 && (
+                <div>
+                  <p className="px-4 pt-3 pb-1 text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+                    Named
+                  </p>
+                  <ul className="divide-y divide-line">
+                    {named.map((v, idx) => (
+                      <VersionRow
+                        key={v.id}
+                        v={v}
+                        idx={idx}
+                        restoring={restoring}
+                        onRestoreClick={setConfirmVersion}
+                        isNamed
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {named.length === 0 && (
+                <div className="px-4 py-8 text-center">
+                  <Bookmark size={18} className="mx-auto text-ink-faint mb-2" />
+                  <p className="font-serif text-sm text-ink-muted italic">No named snapshots yet.</p>
+                  <p className="text-2xs text-ink-faint mt-1 leading-snug">
+                    Give a name above to pin this state.
+                  </p>
+                </div>
+              )}
+
+              {/* Auto-saves */}
+              {auto.length > 0 && (
+                <div>
+                  <p className="px-4 pt-3 pb-1 text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+                    Auto-saves
+                  </p>
+                  <ul className="divide-y divide-line">
+                    {auto.map((v, idx) => (
+                      <VersionRow
+                        key={v.id}
+                        v={v}
+                        idx={idx}
+                        restoring={restoring}
+                        onRestoreClick={setConfirmVersion}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Toast */}
+        {toast && (
+          <div
+            className={[
+              'mx-3 mb-3 flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium text-paper animate-rise-in',
+              toast.ok ? 'bg-ink' : 'bg-danger',
+            ].join(' ')}
           >
-            {creating ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
-            Save
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        {loading && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 size={18} className="animate-spin text-indigo-400" />
+            <CheckCircle size={12} />
+            {toast.msg}
           </div>
-        )}
-
-        {error && !loading && (
-          <div className="flex flex-col items-center gap-2 py-8 px-4 text-center">
-            <AlertCircle size={18} className="text-red-400" />
-            <p className="text-xs text-red-500">{error}</p>
-            <button onClick={load} className="text-xs text-indigo-600 underline">Retry</button>
-          </div>
-        )}
-
-        {!loading && !error && (
-          <>
-            {/* Named snapshots */}
-            {named.length > 0 && (
-              <div>
-                <p className="px-4 pt-3 pb-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Named</p>
-                <ul className="divide-y divide-gray-50">
-                  {named.map((v, idx) => (
-                    <VersionRow
-                      key={v.id}
-                      v={v}
-                      idx={idx}
-                      restoring={restoring}
-                      onRestore={handleRestore}
-                      isNamed
-                    />
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {named.length === 0 && (
-              <div className="px-4 py-6 text-center">
-                <Bookmark size={20} className="mx-auto text-gray-300 mb-2" />
-                <p className="text-xs text-gray-400">No named snapshots yet.</p>
-                <p className="text-xs text-gray-400 mt-0.5">Give a name above to pin this state.</p>
-              </div>
-            )}
-
-            {/* Auto-saves */}
-            {auto.length > 0 && (
-              <div>
-                <p className="px-4 pt-3 pb-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Auto-saves</p>
-                <ul className="divide-y divide-gray-50">
-                  {auto.map((v, idx) => (
-                    <VersionRow
-                      key={v.id}
-                      v={v}
-                      idx={idx}
-                      restoring={restoring}
-                      onRestore={handleRestore}
-                    />
-                  ))}
-                </ul>
-              </div>
-            )}
-          </>
         )}
       </div>
 
-      {toast && (
-        <div className={`mx-3 mb-3 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-white ${toast.ok ? 'bg-gray-800' : 'bg-red-600'}`}>
-          {toast.ok ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
-          {toast.msg}
-        </div>
-      )}
-    </div>
+      {/* Restore confirmation */}
+      <Modal
+        open={!!confirmVersion}
+        onClose={() => setConfirmVersion(null)}
+        title="Restore this version?"
+        size="sm"
+      >
+        <Modal.Body>
+          <p className="text-sm text-ink-muted leading-relaxed">
+            Replace the current document with{' '}
+            <span className="text-ink font-medium">
+              {confirmVersion?.label || confirmVersion?.name || 'this version'}
+            </span>
+            {' '}from{' '}
+            <span className="text-ink font-medium">
+              {confirmVersion ? formatRelative(confirmVersion.created_at) : ''}
+            </span>?
+          </p>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" size="md" onClick={() => setConfirmVersion(null)}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="md" onClick={() => doRestore(confirmVersion)}>
+            <RotateCcw size={13} /> Restore
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </>
   )
 }
 
-function VersionRow({ v, idx, restoring, onRestore, isNamed = false }) {
+// ─── VersionRow (shared between HistoryPanel & SnapshotsTab) ─────────────────
+function VersionRow({ v, idx, restoring, onRestoreClick, isNamed = false }) {
   return (
-    <li className="px-4 py-3 hover:bg-gray-50 group transition">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          {isNamed && (
-            <div className="flex items-center gap-1 mb-0.5">
-              <Bookmark size={11} className="text-amber-500 flex-shrink-0" />
-              <p className="text-xs font-semibold text-amber-700 truncate">{v.label}</p>
-            </div>
-          )}
-          <p className="text-xs text-gray-700 truncate" title={v.name}>{v.name}</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">
+    <li className="flex items-start gap-3 px-4 py-2.5 hover:bg-accent-tint group transition-colors duration-fast">
+      {isNamed ? (
+        <Bookmark size={13} className="text-warning flex-shrink-0 mt-0.5" />
+      ) : (
+        <span className="w-2 h-2 rounded-full bg-line-strong flex-shrink-0 mt-1.5 group-hover:bg-accent transition-colors" />
+      )}
+      <div className="flex-1 min-w-0">
+        {isNamed && (
+          <p className="text-xs font-semibold text-warning truncate tracking-tightish">{v.label}</p>
+        )}
+        <p className="text-xs text-ink truncate tracking-tightish" title={v.name}>{v.name}</p>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-2xs text-ink-faint tracking-tightish">
             {formatRelative(v.created_at)}
-            {idx === 0 && !isNamed && (
-              <span className="ml-2 bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded text-[10px] font-semibold">
-                latest
-              </span>
-            )}
-          </p>
+          </span>
+          {idx === 0 && !isNamed && (
+            <span className="text-2xs font-semibold text-accent bg-accent-tint px-1.5 py-px rounded-pill tracking-tightish">
+              latest
+            </span>
+          )}
         </div>
-        <button
-          onClick={() => onRestore(v.id)}
-          disabled={restoring === v.id}
-          title="Restore this version"
-          className="flex-shrink-0 flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition opacity-0 group-hover:opacity-100 disabled:opacity-50"
-        >
-          {restoring === v.id ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
-          Restore
-        </button>
       </div>
+      <button
+        onClick={() => onRestoreClick(v)}
+        disabled={restoring === v.id}
+        className={[
+          'flex items-center gap-1 h-6 px-2 text-2xs font-medium rounded-sm',
+          'text-accent-press hover:bg-accent-tint-2',
+          'opacity-0 group-hover:opacity-100 transition-[opacity,background] duration-fast',
+          'disabled:opacity-40 disabled:cursor-not-allowed',
+        ].join(' ')}
+      >
+        {restoring === v.id ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
+        Restore
+      </button>
     </li>
   )
 }
 
-// ---- main export -----------------------------------------------------------
+// ─── ActivityFeed (main export) ───────────────────────────────────────────────
+const PANEL_TABS = [
+  { value: 'activity',  label: 'Activity'  },
+  { value: 'snapshots', label: 'Snapshots' },
+]
 
 export default function ActivityFeed({ fileId, onRestore, onClose }) {
-  const [tab, setTab] = useState('activity') // 'activity' | 'snapshots'
+  const [tab, setTab] = useState('activity')
 
   return (
-    <div className="w-72 flex flex-col border-l border-gray-200 bg-white h-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setTab('activity')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition ${
-              tab === 'activity'
-                ? 'bg-indigo-100 text-indigo-700'
-                : 'text-gray-500 hover:bg-gray-200'
-            }`}
-          >
-            <Activity size={12} />
-            Activity
-          </button>
-          <button
-            onClick={() => setTab('snapshots')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition ${
-              tab === 'snapshots'
-                ? 'bg-indigo-100 text-indigo-700'
-                : 'text-gray-500 hover:bg-gray-200'
-            }`}
-          >
-            <Bookmark size={12} />
-            Snapshots
-          </button>
+    <div className="w-72 flex flex-col border-l border-line bg-paper h-full overflow-hidden animate-slide-in-right">
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-line bg-bg-elev2 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Activity size={13} className="text-ink-faint" />
+          <span className="text-sm font-semibold text-ink tracking-tightish">Activity</span>
         </div>
         {onClose && (
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition"
-            title="Close"
-          >
-            <X size={14} />
-          </button>
+          <IconButton size="sm" onClick={onClose} title="Close">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+              <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </IconButton>
         )}
       </div>
 
-      {/* Body */}
+      {/* ── Tabs — Tabs primitive ── */}
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        items={PANEL_TABS}
+        className="flex-shrink-0 bg-paper"
+      />
+
+      {/* ── Body ── */}
       <div className="flex-1 overflow-y-auto">
-        {tab === 'activity' && <ActivityList fileId={fileId} />}
+        {tab === 'activity'  && <ActivityList fileId={fileId} />}
         {tab === 'snapshots' && <SnapshotsTab fileId={fileId} onRestore={onRestore} />}
       </div>
     </div>

@@ -1,18 +1,33 @@
+/**
+ * CallView — Forum 1:1 + group voice/video call surface.
+ *
+ * Design pass:
+ *   - Backdrop: warm ink (`bg-ink` paired with paper text) rather than slate.
+ *   - Active speaker: quiet 2px accent outline (no garish emerald).
+ *   - Transport badge (P2P vs Relay): tiny accent-tint pill (or warning when relay).
+ *   - Controls: IconButtons in a dock-style cluster; leave is the only persimmon.
+ *   - Screen-share area: kept at 55% height per spec.
+ *
+ * Props:
+ *   sessionId    — fabric session id for this call (channel id, DM id, room id)
+ *   channelId    — Forum channel/thread id for persisted in-call chat (OFFICE-66)
+ *   threadParent — optional thread-parent message id for meeting-room threads
+ *   identity     — { displayName, vumail, color }
+ *   video        — start with camera on (default true)
+ *   onLeave      — called after the call tears down
+ */
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Users, Wifi, WifiOff, MessageSquare, Monitor, MonitorOff } from 'lucide-react'
+import {
+  Mic, MicOff, Video, VideoOff, PhoneOff, Users,
+  Wifi, WifiOff, MessageSquare, Monitor, MonitorOff,
+} from 'lucide-react'
 import { createCall } from '../../lib/call/rtc'
 import InCallChat from './InCallChat.jsx'
+import { Tooltip } from '../../components/ui'
 
-// CallView — Forum 1:1 + group voice/video call surface.
-// Props:
-//   sessionId    — fabric session id for this call (channel id, DM id, room id)
-//   channelId    — Forum channel/thread id for persisted in-call chat (OFFICE-66)
-//   threadParent — optional thread-parent message id for meeting-room threads
-//   identity     — { displayName, vumail, color } (best-effort; reused by presence)
-//   video        — start with camera on (default true)
-//   onLeave      — called after the call tears down
-
-export default function CallView({ sessionId, channelId, threadParent = '', identity, video = true, onLeave }) {
+export default function CallView({
+  sessionId, channelId, threadParent = '', identity, video = true, onLeave,
+}) {
   const [call, setCall] = useState(null)
   const [error, setError] = useState(null)
   const [muted, setMuted] = useState(false)
@@ -24,7 +39,6 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
   const [showRoster, setShowRoster] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [screenSharing, setScreenSharing] = useState(false)
-  // screenPresenter: 'local' | peerId | null
   const [screenPresenter, setScreenPresenter] = useState(null)
   const localVideoRef = useRef(null)
   const screenPreviewRef = useRef(null)
@@ -61,14 +75,12 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
     }
   }, [sessionId])
 
-  // Wire local stream to <video> when it appears (re-renders may swap node).
   useEffect(() => {
     if (call && localVideoRef.current && localVideoRef.current.srcObject !== call.localStream) {
       localVideoRef.current.srcObject = call.localStream
     }
   }, [call, peers.length])
 
-  // Wire local screen stream to the preview element.
   useEffect(() => {
     if (screenPreviewRef.current) {
       screenPreviewRef.current.srcObject =
@@ -103,7 +115,6 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
         setScreenSharing(true)
         setScreenPresenter('local')
       } catch (e) {
-        // User cancelled or permission denied — silently ignore.
         console.warn('[screen-share] aborted:', e.message)
       }
     }
@@ -111,13 +122,19 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-full bg-gray-900 text-white p-8">
-        <div className="text-xl mb-2">Couldn't start the call</div>
-        <div className="text-sm text-gray-400 mb-6">{error}</div>
+      <div
+        className="flex flex-col items-center justify-center h-full p-8 text-paper"
+        style={{ background: 'var(--ink)' }}
+      >
+        <div className="text-xl mb-1 font-serif">Couldn't start the call</div>
+        <div className="text-sm text-paper/60 mb-6">{error}</div>
         <button
+          type="button"
           onClick={handleLeave}
-          className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg"
-        >Close</button>
+          className="px-4 h-8 rounded-md bg-danger text-white hover:opacity-90 text-sm font-medium tracking-tightish"
+        >
+          Close
+        </button>
       </div>
     )
   }
@@ -125,7 +142,6 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
   const totalTiles = peers.length + 1
   const cols = totalTiles <= 1 ? 1 : totalTiles <= 4 ? 2 : 3
 
-  // Remote peer who is presenting (screen-share from the other side).
   const presentingPeer = screenPresenter && screenPresenter !== 'local'
     ? peers.find((p) => p.peerId === screenPresenter) ?? null
     : null
@@ -133,7 +149,10 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
   const anyScreenActive = screenSharing || !!presentingPeer
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 text-white">
+    <div
+      className="flex flex-col h-full text-paper"
+      style={{ background: 'var(--ink)' }}
+    >
       <CallHeader
         state={state}
         transport={transport}
@@ -143,7 +162,6 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
 
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Prominent screen-share area */}
           {anyScreenActive && (
             <ScreenShareView
               isLocal={screenSharing && screenPresenter === 'local'}
@@ -157,7 +175,6 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
             />
           )}
 
-          {/* Participant tiles */}
           <div
             className="flex-1 grid gap-2 p-3 overflow-auto"
             style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
@@ -182,7 +199,12 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
         </div>
 
         {showRoster && (
-          <Roster peers={peers} self={identity} activeSpeaker={activeSpeaker} screenPresenter={screenPresenter} />
+          <Roster
+            peers={peers}
+            self={identity}
+            activeSpeaker={activeSpeaker}
+            screenPresenter={screenPresenter}
+          />
         )}
         {showChat && channelId && (
           <InCallChat
@@ -203,6 +225,7 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
         onScreenShare={handleScreenShare}
         onLeave={handleLeave}
         onToggleRoster={() => setShowRoster((v) => !v)}
+        rosterActive={showRoster}
         onToggleChat={channelId ? () => setShowChat((v) => !v) : null}
         chatActive={showChat}
       />
@@ -210,7 +233,7 @@ export default function CallView({ sessionId, channelId, threadParent = '', iden
   )
 }
 
-// ScreenShareView — prominent area for screen content (local preview or remote).
+// ScreenShareView — prominent area at 55% height
 function ScreenShareView({ isLocal, localRef, presenterPeer, presenterLabel }) {
   const remoteRef = useRef(null)
   useEffect(() => {
@@ -223,30 +246,24 @@ function ScreenShareView({ isLocal, localRef, presenterPeer, presenterLabel }) {
 
   return (
     <div
-      className="relative mx-3 mt-3 rounded-xl bg-black overflow-hidden flex-shrink-0"
-      style={{ height: '55%', minHeight: 200 }}
+      className="relative mx-3 mt-3 rounded-lg overflow-hidden flex-shrink-0 border border-paper/10"
+      style={{ height: '55%', minHeight: 200, background: '#000' }}
     >
       {isLocal ? (
-        <video
-          ref={localRef}
-          autoPlay
-          playsInline
-          muted
-          className="w-full h-full object-contain"
-        />
+        <video ref={localRef} autoPlay playsInline muted className="w-full h-full object-contain" />
       ) : (
-        <video
-          ref={remoteRef}
-          autoPlay
-          playsInline
-          className="w-full h-full object-contain"
-        />
+        <video ref={remoteRef} autoPlay playsInline className="w-full h-full object-contain" />
       )}
-      <div className="absolute top-2 left-3 flex items-center gap-1.5 bg-black/60 px-2 py-1 rounded-full text-xs text-white">
-        <Monitor size={12} className="text-blue-400" />
+      <div
+        className="absolute top-2 left-3 flex items-center gap-1.5 px-2 py-1 rounded-pill text-2xs text-paper tracking-tightish"
+        style={{ background: 'rgba(26,25,22,.6)' }}
+      >
+        <Monitor size={11} className="text-accent" />
         <span>{presenterLabel} is presenting</span>
         {isLocal && (
-          <span className="ml-1 bg-blue-600 px-1.5 py-0.5 rounded text-[10px]">You</span>
+          <span className="ml-1 bg-accent text-white px-1.5 py-0.5 rounded-xs text-[9px] font-semibold uppercase tracking-eyebrow">
+            You
+          </span>
         )}
       </div>
     </div>
@@ -258,19 +275,30 @@ function CallHeader({ state, transport, participantCount, onToggleRoster }) {
     state === 'connecting' ? 'Connecting…' :
     state === 'connected' ? 'Connected' :
     state === 'closed' ? 'Call ended' : state
+
+  const relay = transport === 'relay'
   return (
-    <div className="px-4 py-2 border-b border-gray-800 flex items-center gap-3 text-sm">
-      <span className="text-gray-300">{stateLabel}</span>
-      <span className="flex items-center gap-1 text-gray-400">
-        {transport === 'relay' ? <WifiOff size={14} /> : <Wifi size={14} />}
-        <span>{transport === 'relay' ? 'Relay (TURN)' : 'P2P'}</span>
+    <div className="px-4 h-11 flex items-center gap-3 text-xs border-b border-paper/10">
+      <span className="text-paper/80 tracking-tightish">{stateLabel}</span>
+      <span
+        className={[
+          'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-pill text-2xs font-medium tracking-tightish',
+          relay
+            ? 'bg-warning/15 text-warning border border-warning/30'
+            : 'bg-accent/15 text-accent border border-accent/30',
+        ].join(' ')}
+      >
+        {relay ? <WifiOff size={11} /> : <Wifi size={11} />}
+        <span>{relay ? 'Relay (TURN)' : 'P2P'}</span>
       </span>
       <button
+        type="button"
         onClick={onToggleRoster}
-        className="ml-auto flex items-center gap-1 text-gray-300 hover:text-white"
+        className="ml-auto inline-flex items-center gap-1 text-paper/70 hover:text-paper transition-colors duration-fast"
+        title="Participants"
       >
-        <Users size={14} />
-        <span>{participantCount}</span>
+        <Users size={13} />
+        <span className="tracking-tightish">{participantCount}</span>
       </button>
     </div>
   )
@@ -279,8 +307,16 @@ function CallHeader({ state, transport, participantCount, onToggleRoster }) {
 function Tile({ label, muted, cameraOff, isLocal, videoRef, color, isPresenting }) {
   return (
     <div
-      className="relative rounded-lg bg-gray-800 overflow-hidden flex items-center justify-center min-h-[140px]"
-      style={{ outline: isPresenting ? '2px solid #60a5fa' : color ? `2px solid ${color}` : undefined }}
+      className="relative rounded-lg overflow-hidden flex items-center justify-center min-h-[140px]"
+      style={{
+        background: 'rgba(255,255,255,.04)',
+        outline: isPresenting
+          ? '2px solid var(--accent)'
+          : color
+            ? `2px solid ${color}`
+            : '1px solid rgba(255,255,255,.06)',
+        outlineOffset: '-2px',
+      }}
     >
       {!cameraOff && (
         <video
@@ -292,16 +328,27 @@ function Tile({ label, muted, cameraOff, isLocal, videoRef, color, isPresenting 
         />
       )}
       {cameraOff && (
-        <div className="text-gray-500 text-3xl uppercase font-semibold">
+        <div className="text-paper/40 text-3xl uppercase font-semibold tracking-tightish">
           {(label || '?').slice(0, 1)}
         </div>
       )}
-      <div className="absolute bottom-1 left-2 right-2 flex items-center justify-between text-xs text-white/90">
-        <span className="bg-black/40 px-2 py-0.5 rounded flex items-center gap-1">
-          {isPresenting && <Monitor size={10} className="text-blue-300" />}
+      <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between text-2xs text-paper">
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill tracking-tightish"
+          style={{ background: 'rgba(26,25,22,.55)' }}
+        >
+          {isPresenting && <Monitor size={10} className="text-accent" />}
           {label}
         </span>
-        {muted && <MicOff size={14} className="bg-black/40 p-0.5 rounded" />}
+        {muted && (
+          <span
+            className="inline-flex items-center justify-center w-5 h-5 rounded-pill"
+            style={{ background: 'rgba(26,25,22,.55)' }}
+            title="Muted"
+          >
+            <MicOff size={11} />
+          </span>
+        )}
       </div>
     </div>
   )
@@ -318,26 +365,42 @@ function RemoteTile({ peer, isSpeaking }) {
   const noVideo = !peer.stream || peer.stream.getVideoTracks().every((t) => !t.enabled)
   return (
     <div
-      className="relative rounded-lg bg-gray-800 overflow-hidden flex items-center justify-center min-h-[140px] transition-all"
+      className="relative rounded-lg overflow-hidden flex items-center justify-center min-h-[140px] transition-[outline] duration-fast ease-out"
       style={{
+        background: 'rgba(255,255,255,.04)',
         outline: peer.isPresenting
-          ? '2px solid #60a5fa'
-          : isSpeaking ? '3px solid #34d399' : undefined,
+          ? '2px solid var(--accent)'
+          : isSpeaking
+            ? '2px solid var(--accent)'
+            : '1px solid rgba(255,255,255,.06)',
+        outlineOffset: '-2px',
       }}
     >
       <video ref={ref} autoPlay playsInline className="w-full h-full object-cover" />
       {noVideo && (
-        <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-3xl uppercase font-semibold">
+        <div className="absolute inset-0 flex items-center justify-center text-paper/40 text-3xl uppercase font-semibold tracking-tightish">
           {label.slice(0, 1)}
         </div>
       )}
-      <div className="absolute bottom-1 left-2 right-2 flex items-center justify-between text-xs">
-        <span className="bg-black/40 px-2 py-0.5 rounded flex items-center gap-1">
-          {peer.isPresenting && <Monitor size={10} className="text-blue-300" />}
+      <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between text-2xs">
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill tracking-tightish text-paper"
+          style={{ background: 'rgba(26,25,22,.55)' }}
+        >
+          {peer.isPresenting && <Monitor size={10} className="text-accent" />}
           {label}
         </span>
         {peer.usingRelay && (
-          <span className="bg-amber-700/70 px-2 py-0.5 rounded text-[10px]">relay</span>
+          <span
+            className="inline-flex items-center px-2 py-0.5 rounded-pill text-[10px] font-medium uppercase tracking-eyebrow"
+            style={{
+              background: 'rgba(192,132,54,.18)',
+              color: 'var(--signal-warning)',
+              border: '1px solid rgba(192,132,54,.35)',
+            }}
+          >
+            relay
+          </span>
         )}
       </div>
     </div>
@@ -346,25 +409,32 @@ function RemoteTile({ peer, isSpeaking }) {
 
 function Roster({ peers, self, activeSpeaker, screenPresenter }) {
   return (
-    <aside className="w-60 border-l border-gray-800 bg-gray-900 overflow-y-auto p-3 text-sm">
-      <h3 className="text-xs uppercase text-gray-500 mb-2">Participants ({peers.length + 1})</h3>
+    <aside className="w-60 border-l border-paper/10 overflow-y-auto p-3 text-sm">
+      <h3 className="text-2xs uppercase text-paper/50 mb-2 tracking-eyebrow font-semibold">
+        Participants ({peers.length + 1})
+      </h3>
       <ul className="space-y-1">
-        <li className="flex items-center justify-between py-1">
-          <span className="flex items-center gap-1">
-            {screenPresenter === 'local' && <Monitor size={12} className="text-blue-400" />}
-            {self?.displayName || 'You'} <span className="text-gray-500">(you)</span>
+        <li className="flex items-center justify-between py-1 text-paper/90">
+          <span className="inline-flex items-center gap-1.5 tracking-tightish">
+            {screenPresenter === 'local' && <Monitor size={12} className="text-accent" />}
+            <span className="font-serif italic">{self?.displayName || 'You'}</span>
+            <span className="text-paper/40 text-2xs">(you)</span>
           </span>
         </li>
         {peers.map((p) => (
-          <li
-            key={p.peerId}
-            className="flex items-center justify-between py-1"
-          >
-            <span className={`flex items-center gap-1 ${activeSpeaker === p.peerId ? 'text-emerald-300' : ''}`}>
-              {p.isPresenting && <Monitor size={12} className="text-blue-400" />}
-              {p.identity?.displayName || p.peerId.slice(0, 6)}
+          <li key={p.peerId} className="flex items-center justify-between py-1">
+            <span
+              className={[
+                'inline-flex items-center gap-1.5 tracking-tightish',
+                activeSpeaker === p.peerId ? 'text-accent' : 'text-paper/85',
+              ].join(' ')}
+            >
+              {p.isPresenting && <Monitor size={12} className="text-accent" />}
+              <span className="font-serif italic">
+                {p.identity?.displayName || p.peerId.slice(0, 6)}
+              </span>
             </span>
-            <span className="text-[10px] text-gray-500">
+            <span className="text-[10px] text-paper/40 uppercase tracking-eyebrow">
               {p.usingRelay ? 'relay' : p.state}
             </span>
           </li>
@@ -374,57 +444,72 @@ function Roster({ peers, self, activeSpeaker, screenPresenter }) {
   )
 }
 
-function Controls({ muted, cameraOff, screenSharing, onMute, onCamera, onScreenShare, onLeave, onToggleRoster, onToggleChat, chatActive }) {
+// DockButton — IconButton-style affordance, themed for the dark call surface.
+function DockButton({ onClick, active, title, children }) {
   return (
-    <div className="px-4 py-3 border-t border-gray-800 flex items-center justify-center gap-3">
-      <CtrlBtn onClick={onMute} active={!muted} title={muted ? 'Unmute' : 'Mute'}>
-        {muted ? <MicOff size={18} /> : <Mic size={18} />}
-      </CtrlBtn>
-      <CtrlBtn onClick={onCamera} active={!cameraOff} title={cameraOff ? 'Camera on' : 'Camera off'}>
-        {cameraOff ? <VideoOff size={18} /> : <Video size={18} />}
-      </CtrlBtn>
-      <CtrlBtn
-        onClick={onScreenShare}
-        active={!screenSharing}
-        title={screenSharing ? 'Stop sharing' : 'Share screen'}
-        screenSharing={screenSharing}
-      >
-        {screenSharing ? <MonitorOff size={18} /> : <Monitor size={18} />}
-      </CtrlBtn>
-      <CtrlBtn onClick={onToggleRoster} active title="Participants">
-        <Users size={18} />
-      </CtrlBtn>
-      {onToggleChat && (
-        <CtrlBtn onClick={onToggleChat} active={!chatActive} title="In-call chat">
-          <MessageSquare size={18} />
-        </CtrlBtn>
-      )}
+    <Tooltip label={title} side="top">
       <button
-        onClick={onLeave}
-        className="ml-2 px-4 py-2 bg-red-600 hover:bg-red-500 rounded-full flex items-center gap-2"
-        title="Leave call"
+        type="button"
+        onClick={onClick}
+        aria-label={title}
+        aria-pressed={active ? 'true' : 'false'}
+        className={[
+          'inline-flex items-center justify-center w-10 h-10 rounded-md',
+          'transition-[background,color] duration-fast ease-out',
+          'focus-visible:outline-none focus-visible:shadow-focus',
+          active
+            ? 'bg-accent text-white hover:bg-accent-hover'
+            : 'bg-paper/10 text-paper hover:bg-paper/20',
+        ].join(' ')}
       >
-        <PhoneOff size={18} />
-        <span className="text-sm">Leave</span>
+        {children}
       </button>
-    </div>
+    </Tooltip>
   )
 }
 
-function CtrlBtn({ children, onClick, active, title, screenSharing }) {
-  // Screen-share button uses blue when actively sharing instead of red.
-  const cls = screenSharing
-    ? 'bg-blue-600 hover:bg-blue-500 text-white'
-    : active
-      ? 'bg-gray-700 hover:bg-gray-600 text-white'
-      : 'bg-red-600 hover:bg-red-500 text-white'
+function Controls({
+  muted, cameraOff, screenSharing,
+  onMute, onCamera, onScreenShare, onLeave,
+  onToggleRoster, rosterActive,
+  onToggleChat, chatActive,
+}) {
   return (
-    <button
-      onClick={onClick}
-      title={title}
-      className={`w-11 h-11 rounded-full flex items-center justify-center transition ${cls}`}
-    >
-      {children}
-    </button>
+    <div className="px-4 py-3 border-t border-paper/10 flex items-center justify-center">
+      <div
+        className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg border border-paper/10"
+        style={{ background: 'rgba(255,255,255,.04)' }}
+      >
+        <DockButton onClick={onMute} active={muted} title={muted ? 'Unmute' : 'Mute'}>
+          {muted ? <MicOff size={17} /> : <Mic size={17} />}
+        </DockButton>
+        <DockButton onClick={onCamera} active={cameraOff} title={cameraOff ? 'Camera on' : 'Camera off'}>
+          {cameraOff ? <VideoOff size={17} /> : <Video size={17} />}
+        </DockButton>
+        <DockButton onClick={onScreenShare} active={screenSharing} title={screenSharing ? 'Stop sharing' : 'Share screen'}>
+          {screenSharing ? <MonitorOff size={17} /> : <Monitor size={17} />}
+        </DockButton>
+        <span className="w-px h-6 bg-paper/10 mx-1" aria-hidden />
+        <DockButton onClick={onToggleRoster} active={rosterActive} title="Participants">
+          <Users size={17} />
+        </DockButton>
+        {onToggleChat && (
+          <DockButton onClick={onToggleChat} active={chatActive} title="In-call chat">
+            <MessageSquare size={17} />
+          </DockButton>
+        )}
+        <span className="w-px h-6 bg-paper/10 mx-1" aria-hidden />
+        <Tooltip label="Leave call" side="top">
+          <button
+            type="button"
+            onClick={onLeave}
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-md bg-danger text-white hover:opacity-90 text-sm font-medium tracking-tightish transition-opacity duration-fast focus-visible:outline-none focus-visible:shadow-focus"
+          >
+            <PhoneOff size={16} />
+            <span>Leave</span>
+          </button>
+        </Tooltip>
+      </div>
+    </div>
   )
 }

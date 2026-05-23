@@ -1,6 +1,10 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
 
+// Session tokens are stored exclusively in httpOnly cookies managed by the
+// backend. No token is ever written to localStorage — only an opaque
+// loggedIn flag is kept in memory for UX purposes.
+
 export const useAuthStore = create((set) => ({
   status: null,
   loading: true,
@@ -19,8 +23,9 @@ export const useAuthStore = create((set) => ({
   login: async (password) => {
     set({ error: null, remainingAttempts: null })
     try {
-      const res = await api.login(password)
-      if (res.token) localStorage.setItem('session_token', res.token)
+      await api.login(password)
+      // The backend sets an httpOnly session cookie on success.
+      // We never touch localStorage for tokens.
       set({ status: { enabled: true, authenticated: true }, error: null })
     } catch (err) {
       set({ error: err.error || 'Login failed', remainingAttempts: err.remaining_attempts ?? null })
@@ -30,7 +35,7 @@ export const useAuthStore = create((set) => ({
 
   logout: async () => {
     try { await api.logout() } catch { /* ignore */ }
-    localStorage.removeItem('session_token')
+    // Backend clears the httpOnly cookie. No localStorage cleanup needed.
     set({ status: { enabled: true, authenticated: false }, error: null })
   },
 }))

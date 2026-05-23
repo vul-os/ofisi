@@ -1,16 +1,18 @@
 /**
  * useLiveCursors.js — OFFICE-25: Live cursors + selections.
  *
- * Broadcasts throttled cursor/selection positions over the presence fabric
- * channel and collects remote peers' positions.
+ * Design treatment (updated):
+ *   - Cursor colour palette uses warm-leaning HSL values aligned to the
+ *     design tokens: hue rotated from the base, lightness capped at 52%
+ *     (so cursors read against both oat-light and warm-dark backgrounds),
+ *     saturation reduced to ~55% to avoid a rainbow-on-paper clash.
+ *   - The colour derivation mirrors DocsEditor's existing approach but is
+ *     now token-aware (never pure #6366f1 indigo as a fallback).
  *
- * Channel: "cursors" (separate from the "presence" channel used by OFFICE-24)
+ * Channel: "cursors" (separate from the "presence" channel)
  *
  * Message shape (JSON):
  *   { channel: 'cursors', payload: { accountId, from, to, slideId? } }
- *   - docs:   from/to are TipTap document positions (integers)
- *   - sheets: from/to encode "row,col" as a string e.g. "2,3"
- *   - slides: from/to are both the slide id string; slideId echoes the same
  *
  * Usage:
  *   const { remoteCursors, broadcastDocCursor, broadcastSheetCursor, broadcastSlideCursor }
@@ -25,6 +27,33 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 
 const CURSOR_CHANNEL = 'cursors'
 const THROTTLE_MS = 80   // max one broadcast per 80 ms
+
+/**
+ * Derive a warm-leaning HSL colour for a peer from their accountId string.
+ *
+ * Design constraints:
+ *   - Hue: full 360° rotation — we want variety, not a mono palette.
+ *   - Saturation: 50–58% — muted enough to not clash with oat paper.
+ *   - Lightness: 38–48% — readable as both caret line and selection highlight
+ *     against both light (oat-50) and dark (#131110) backgrounds.
+ *
+ * This replaces the old `hsl(h, 65%, 50%)` which produced oversaturated colours.
+ */
+export function peerColor(accountId) {
+  if (!accountId) return 'var(--accent)'   // fallback to system accent
+  let h = 0
+  for (const c of accountId) {
+    h = (h << 5) - h + c.charCodeAt(0)
+    h |= 0
+  }
+  const hue = Math.abs(h) % 360
+  // Avoid the teal-600 hue band (168–192°) — too close to the system accent.
+  // Shift it to a neighbouring, distinct hue.
+  const adjustedHue = (hue >= 168 && hue <= 192) ? (hue + 50) % 360 : hue
+  const sat = 52 + (Math.abs(h >> 8) % 8)  // 52–59%
+  const lig = 40 + (Math.abs(h >> 4) % 10) // 40–49% — punchy but not neon
+  return `hsl(${adjustedHue},${sat}%,${lig}%)`
+}
 
 export function useLiveCursors({ fabric, localIdentity, color }) {
   /** @type {[Map<string, object>, Function]} */
@@ -47,7 +76,7 @@ export function useLiveCursors({ fabric, localIdentity, color }) {
       if (frame.channel !== CURSOR_CHANNEL) return
       const p = frame.payload
       if (!p || !p.accountId) return
-      // Ignore own echoes (shouldn't happen but defensive).
+      // Ignore own echoes.
       if (localIdentity && p.accountId === localIdentity.accountId) return
 
       setRemoteCursors((prev) => {
@@ -80,14 +109,11 @@ export function useLiveCursors({ fabric, localIdentity, color }) {
     }
   }, [fabric, localIdentity])
 
-  /** Broadcast a Docs (TipTap) caret / selection.
-   * @param {number} from  - TipTap doc position (anchor)
-   * @param {number} to    - TipTap doc position (head; equals from for bare caret)
-   */
+  /** Broadcast a Docs (TipTap) caret / selection. */
   const broadcastDocCursor = useCallback((from, to) => {
     if (!localIdentity) return
     _sendCursor({
-      accountId: localIdentity.accountId,
+      accountId:   localIdentity.accountId,
       displayName: localIdentity.displayName,
       color,
       from,
@@ -96,34 +122,29 @@ export function useLiveCursors({ fabric, localIdentity, color }) {
     })
   }, [_sendCursor, localIdentity, color])
 
-  /** Broadcast a Sheets cell selection.
-   * @param {number} row
-   * @param {number} col
-   */
+  /** Broadcast a Sheets cell selection. */
   const broadcastSheetCursor = useCallback((row, col) => {
     if (!localIdentity) return
     _sendCursor({
-      accountId: localIdentity.accountId,
+      accountId:   localIdentity.accountId,
       displayName: localIdentity.displayName,
       color,
       from: `${row},${col}`,
-      to: `${row},${col}`,
+      to:   `${row},${col}`,
       type: 'sheet',
     })
   }, [_sendCursor, localIdentity, color])
 
-  /** Broadcast the active slide id in SlidesEditor.
-   * @param {string} slideId
-   */
+  /** Broadcast the active slide id in SlidesEditor. */
   const broadcastSlideCursor = useCallback((slideId) => {
     if (!localIdentity) return
     _sendCursor({
-      accountId: localIdentity.accountId,
+      accountId:   localIdentity.accountId,
       displayName: localIdentity.displayName,
       color,
-      from: slideId,
-      to: slideId,
-      type: 'slide',
+      from:    slideId,
+      to:      slideId,
+      type:    'slide',
       slideId,
     })
   }, [_sendCursor, localIdentity, color])

@@ -8,8 +8,21 @@ import {
   MousePointer2, Type, PenLine, Pencil, LayoutList,
   SlidersHorizontal, Plus, X, Trash2, Bold, Italic,
   Underline as UnderlineIcon, ChevronLeft, ChevronRight,
-  Upload, Save, RotateCw, FilePlus, Trash, FileSignature,
+  Upload, RotateCw, FilePlus, Trash, FileSignature,
 } from 'lucide-react'
+import { Button, IconButton, Tabs, Topbar, Tooltip } from '../../components/ui'
+
+/*
+ * PDFEditor — single-user PDF editor with annotate / sign / page operations.
+ *
+ * Aesthetic direction:
+ *   - Quiet design-system Topbar (Save status + meta), "Prepare to Sign" as the
+ *     single primary affordance.
+ *   - Warm paper canvas, oat sidebars.
+ *   - Page thumbnails in the LEFT sidebar use the design-system Sidebar
+ *     active-rail (accent left rail) for the selected page.
+ *   - Field/annotation overlays use the SINGLE accent palette — no rainbow.
+ */
 
 // Set worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -42,6 +55,9 @@ const CURSORS = {
   draw: 'crosshair',
 }
 
+// Annotation outline colour — warm ink, not bright blue.
+const ANNOT_INK = '#1a1916'
+
 export default function PDFEditor() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -56,14 +72,10 @@ export default function PDFEditor() {
   const [loadingPdf, setLoadingPdf] = useState(false)
 
   // Page operations state
-  // pageOrder: array of display-slot indices (1-based), each value is original 1-based page number
-  // 0 = blank inserted page
-  const [pageOrder, setPageOrder] = useState([]) // [] means not loaded
-  // pageRotations: { [displaySlot]: rotationDeg } accumulated rotation per display slot
+  const [pageOrder, setPageOrder] = useState([])
   const [pageRotations, setPageRotations] = useState({})
-  // blank page buffers: { [displaySlot]: ArrayBuffer } for inserted blank pages
   const blankPageBuffers = useRef({})
-  const [thumbDragSrc, setThumbDragSrc] = useState(null) // display slot being dragged
+  const [thumbDragSrc, setThumbDragSrc] = useState(null)
   const insertFileInputRef = useRef(null)
 
   // Tool state
@@ -71,7 +83,7 @@ export default function PDFEditor() {
   const [textDefaults, setTextDefaults] = useState({
     fontSize: 14,
     fontFamily: 'Helvetica',
-    color: '#1a1a2e',
+    color: ANNOT_INK,
     bold: false,
     italic: false,
     underline: false,
@@ -100,7 +112,7 @@ export default function PDFEditor() {
 
   // Draw state
   const [isDrawing, setIsDrawing] = useState(false)
-  const drawPathsRef = useRef({}) // { [pageNum]: [{id, points, color, size}] }
+  const drawPathsRef = useRef({})
   const currentDrawPoints = useRef([])
 
   // Refs
@@ -146,7 +158,7 @@ export default function PDFEditor() {
       setPageOrder(Array.from({ length: doc.numPages }, (_, i) => i + 1))
       setPageRotations({})
       blankPageBuffers.current = {}
-      showToast('PDF loaded successfully')
+      showToast('PDF loaded')
     } catch (e) {
       showToast('Error loading PDF: ' + e.message)
     } finally {
@@ -170,7 +182,7 @@ export default function PDFEditor() {
       setPageOrder(Array.from({ length: doc.numPages }, (_, i) => i + 1))
       setPageRotations({})
       blankPageBuffers.current = {}
-      showToast('PDF loaded successfully')
+      showToast('PDF loaded')
     } catch (e) {
       showToast('Error loading PDF: ' + e.message)
     } finally {
@@ -188,7 +200,6 @@ export default function PDFEditor() {
         if (url) {
           loadPDFFromUrl(url, name)
         } else if (data) {
-          // base64 encoded bytes
           const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0))
           const file = new File([bytes], name, { type: 'application/pdf' })
           loadPDF(file)
@@ -220,9 +231,8 @@ export default function PDFEditor() {
     const drawCanvas = drawCanvasRef.current
     if (!canvas) return
 
-    // displaySlot is 1-based; pageOrder maps it to original page number
     const origPageNum = pageOrder.length > 0 ? pageOrder[displaySlot - 1] : displaySlot
-    if (!origPageNum || origPageNum < 1) return // blank page or unloaded
+    if (!origPageNum || origPageNum < 1) return
 
     const page = await pdfJsDoc.getPage(origPageNum)
     const extraRot = pageRotations[displaySlot] || 0
@@ -238,7 +248,6 @@ export default function PDFEditor() {
     const ctx = canvas.getContext('2d')
     await page.render({ canvasContext: ctx, viewport }).promise
 
-    // Redraw paths for this page (by display slot)
     redrawPaths(displaySlot, drawCanvas)
   }, [pdfJsDoc, pageOrder, pageRotations])
 
@@ -246,7 +255,6 @@ export default function PDFEditor() {
     if (pdfJsDoc) renderPage(currentPage, zoom)
   }, [pdfJsDoc, currentPage, zoom, renderPage])
 
-  // Render thumbnails when doc loads or page order/rotations change
   useEffect(() => {
     if (!pdfJsDoc || pageOrder.length === 0) return
     for (let i = 1; i <= pageOrder.length; i++) {
@@ -259,13 +267,12 @@ export default function PDFEditor() {
     if (!canvas || !pdfJsDoc) return
     const origPageNum = pageOrder[displaySlot - 1]
     if (!origPageNum || origPageNum < 1) {
-      // blank page — draw white rectangle
       canvas.width = 100
       canvas.height = 130
       const ctx = canvas.getContext('2d')
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, 100, 130)
-      ctx.strokeStyle = '#e5e7eb'
+      ctx.strokeStyle = '#ece5da'
       ctx.strokeRect(0, 0, 100, 130)
       return
     }
@@ -282,15 +289,12 @@ export default function PDFEditor() {
 
   // ─── Page operations ─────────────────────────────────────
 
-  // Helper: remap annotations + drawPaths from old display-slot keys to new ones
   const remapPageData = (oldOrder, newOrder) => {
-    // Build mapping: old display slot → new display slot
-    // oldOrder[i] === value, find where that value went in newOrder
     const slotMap = {}
     oldOrder.forEach((origPage, oldIdx) => {
       const newIdx = newOrder.indexOf(origPage)
       if (newIdx !== -1) {
-        slotMap[oldIdx + 1] = newIdx + 1 // 1-based
+        slotMap[oldIdx + 1] = newIdx + 1
       }
     })
 
@@ -333,7 +337,6 @@ export default function PDFEditor() {
     remapPageData(oldOrder, newOrder)
     setPageOrder(newOrder)
     setTotalPages(newOrder.length)
-    // Adjust currentPage
     setCurrentPage(c => {
       if (c === fromSlot) return toSlot
       return c
@@ -347,10 +350,9 @@ export default function PDFEditor() {
     }
     const oldOrder = [...pageOrder]
     const newOrder = oldOrder.filter((_, i) => i !== displaySlot - 1)
-    // Remap: after deletion, slots after fromSlot shift down by 1
     const slotMap = {}
     oldOrder.forEach((origPage, oldIdx) => {
-      if (oldIdx === displaySlot - 1) return // deleted
+      if (oldIdx === displaySlot - 1) return
       const newIdx = newOrder.indexOf(origPage)
       if (newIdx !== -1) slotMap[oldIdx + 1] = newIdx + 1
     })
@@ -401,18 +403,15 @@ export default function PDFEditor() {
 
   const insertBlankPage = async (afterSlot) => {
     if (!pdfJsDoc) return
-    // Create a blank 1-page PDF as a unique sentinel entry
-    // We store it as a negative unique id in pageOrder to distinguish it from real pages
-    const blankId = -(Date.now()) // unique negative integer
+    const blankId = -(Date.now())
     const blankDoc = await PDFDocument.create()
-    blankDoc.addPage([612, 792]) // letter size
+    blankDoc.addPage([612, 792])
     const blankBytes = await blankDoc.save()
     blankPageBuffers.current[blankId] = blankBytes.buffer.slice(0)
 
     const newOrder = [...pageOrder]
     newOrder.splice(afterSlot, 0, blankId)
 
-    // Remap: slots from afterSlot+1 onward shift up by 1
     const oldOrder = [...pageOrder]
     const oldLen = oldOrder.length
     const slotMap = {}
@@ -454,7 +453,6 @@ export default function PDFEditor() {
     showToast('Blank page inserted')
   }
 
-  // Insert a PDF page from an uploaded file after afterSlot
   const insertPDFPage = async (file, afterSlot) => {
     if (!file || file.type !== 'application/pdf') return
     try {
@@ -462,14 +460,10 @@ export default function PDFEditor() {
       const importedDoc = await pdfjsLib.getDocument({ data: buf.slice() }).promise
       if (importedDoc.numPages < 1) return
 
-      // We'll add the imported pages into a combined pdfArrayBuffer and update pdfJsDoc
-      // Strategy: rebuild the pdfArrayBuffer with inserted pages, then reload pdfJsDoc
       const baseDoc = await PDFDocument.load(pdfArrayBuffer)
       const srcDoc = await PDFDocument.load(buf)
-      const [importedPage] = await baseDoc.copyPages(srcDoc, [0]) // copy first page
+      const [importedPage] = await baseDoc.copyPages(srcDoc, [0])
 
-      // We need a unique slot for this page. We'll add it to the base PDF
-      // and track its original page number (which will be numPages + 1)
       const newOrigPageNum = baseDoc.getPageCount() + 1
       baseDoc.addPage(importedPage)
       const newBuf = await baseDoc.save()
@@ -481,7 +475,6 @@ export default function PDFEditor() {
       const newOrder = [...pageOrder]
       newOrder.splice(afterSlot, 0, newOrigPageNum)
 
-      // Remap slots from afterSlot+1 onward up by 1
       const slotMap = {}
       for (let i = 0; i < oldOrder.length; i++) {
         const oldSlot = i + 1
@@ -563,10 +556,8 @@ export default function PDFEditor() {
     if (!isDrawing || activeTool !== TOOLS.DRAW) return
     const pt = getCanvasPoint(e, drawCanvasRef.current)
     currentDrawPoints.current.push(pt)
-    // Live draw
     const ctx = drawCanvasRef.current.getContext('2d')
     ctx.clearRect(0, 0, drawCanvasRef.current.width, drawCanvasRef.current.height)
-    // redraw old
     ;(drawPathsRef.current[currentPage] || []).forEach(({ points, color, size }) => {
       if (points.length < 2) return
       ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = size
@@ -575,7 +566,6 @@ export default function PDFEditor() {
       points.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
       ctx.stroke()
     })
-    // draw current
     const pts = currentDrawPoints.current
     if (pts.length > 1) {
       ctx.beginPath()
@@ -721,7 +711,7 @@ export default function PDFEditor() {
       if (sigPadRef.current) sigPadRef.current.off()
       sigPadRef.current = new SignaturePad(canvas, {
         backgroundColor: 'rgba(0,0,0,0)',
-        penColor: '#1a1a2e',
+        penColor: ANNOT_INK,
         velocityFilterWeight: 0.7,
         minWidth: 1,
         maxWidth: 3,
@@ -742,10 +732,9 @@ export default function PDFEditor() {
       const ctx = c.getContext('2d')
       c.width = 600; c.height = 120
       ctx.font = `64px '${font}'`
-      ctx.fillStyle = '#1a1a2e'
+      ctx.fillStyle = ANNOT_INK
       ctx.textBaseline = 'middle'
       ctx.fillText(text, 20, 60)
-      // Trim
       const d = ctx.getImageData(0, 0, c.width, c.height)
       let minX = c.width, minY = c.height, maxX = 0, maxY = 0
       for (let py = 0; py < c.height; py++) {
@@ -857,7 +846,6 @@ export default function PDFEditor() {
     if (!pdfArrayBuffer) return
     showToast('Preparing PDF…')
     try {
-      // Build the output document respecting pageOrder and pageRotations
       const srcDoc = await PDFDocument.load(pdfArrayBuffer)
       const outDoc = await PDFDocument.create()
       const hv = await outDoc.embedFont(StandardFonts.Helvetica)
@@ -872,7 +860,6 @@ export default function PDFEditor() {
         let outPage
 
         if (origPageNum < 1) {
-          // Blank page inserted
           const blankBuf = blankPageBuffers.current[origPageNum]
           if (blankBuf) {
             const blankSrc = await PDFDocument.load(blankBuf)
@@ -888,16 +875,12 @@ export default function PDFEditor() {
           outPage = outDoc.getPage(outDoc.getPageCount() - 1)
         }
 
-        // Apply accumulated rotation
         const extraRot = pageRotations[displaySlot] || 0
         if (extraRot !== 0) {
           outPage.setRotation(degrees((outPage.getRotation().angle + extraRot) % 360))
         }
 
-        // Get dimensions after rotation for coordinate mapping
         const { width: pW, height: pH } = outPage.getSize()
-
-        // Get the pdfjs page for coordinate reference (only for original pages)
         let cW = pW, cH = pH
         if (origPageNum >= 1 && pdfJsDoc) {
           try {
@@ -907,7 +890,6 @@ export default function PDFEditor() {
           } catch {}
         }
 
-        // Apply annotations for this display slot
         const anns = annotations[displaySlot] || []
         for (const ann of anns) {
           if (ann.type === 'text' && ann.content?.trim()) {
@@ -939,7 +921,6 @@ export default function PDFEditor() {
           }
         }
 
-        // Embed draw layer for this display slot
         const paths = drawPathsRef.current[displaySlot]
         if (paths?.length) {
           const tmp = document.createElement('canvas')
@@ -970,7 +951,7 @@ export default function PDFEditor() {
       a.download = (filename.replace(/\.pdf$/i, '') || 'document') + '_edited.pdf'
       a.click()
       URL.revokeObjectURL(url)
-      showToast('PDF downloaded!')
+      showToast('PDF downloaded')
     } catch (e) {
       showToast('Save error: ' + e.message)
       console.error(e)
@@ -981,156 +962,147 @@ export default function PDFEditor() {
   const totalAnns = Object.values(annotations).reduce((s, a) => s + a.filter(x => x.type === 'signature' || x.content?.trim()).length, 0)
     + Object.values(drawPathsRef.current).reduce((s, p) => s + p.length, 0)
 
+  const textActive = activeTool === TOOLS.TEXT || (selectedAnn?.type === 'text')
+
   // ─── Render ───────────────────────────────────────────────
   return (
-    <div className="flex-1 flex flex-col overflow-hidden" style={{ background: '#0f1117', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      {/* Google fonts */}
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Dancing+Script:wght@700&family=Pinyon+Script&display=swap');
-        .pdf-annot-text:focus { outline: none; }
-        .pdf-annot-text[contenteditable="true"] { cursor: text; }
-        .pdf-annot-text { cursor: default; white-space: pre-wrap; word-break: break-word; min-width: 20px; min-height: 1em; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
-        .sig-canvas-wrap { position: relative; }
-        .tool-tip { position: relative; }
-        .tool-tip:hover::after {
-          content: attr(data-tip);
-          position: absolute;
-          bottom: -28px; left: 50%;
-          transform: translateX(-50%);
-          background: #111827;
-          color: #f9fafb;
-          font-size: 11px;
-          padding: 3px 8px;
-          border-radius: 4px;
-          white-space: nowrap;
-          pointer-events: none;
-          z-index: 999;
+    <div className="flex-1 flex flex-col bg-bg text-ink overflow-hidden">
+
+      {/* Topbar */}
+      <Topbar
+        leading={
+          <>
+            <Tooltip label="Back">
+              <IconButton size="sm" onClick={() => navigate(-1)}>
+                <ArrowLeft size={15} />
+              </IconButton>
+            </Tooltip>
+            <span aria-hidden className="h-5 w-px bg-line" />
+            <div className="flex items-center gap-2 text-ink">
+              <div className="w-7 h-7 rounded-md bg-accent text-white flex items-center justify-center">
+                <FileSignature size={14} />
+              </div>
+              <span className="text-sm font-semibold tracking-tightish">PDF</span>
+            </div>
+            {filename && (
+              <span className="text-2xs text-ink-faint truncate max-w-[18ch] font-serif italic">
+                — {filename}
+              </span>
+            )}
+          </>
         }
-      `}</style>
+        title={null}
+        meta={
+          pdfJsDoc && (
+            <span className="text-2xs text-ink-faint tracking-tightish">
+              {totalAnns} annotation{totalAnns === 1 ? '' : 's'} · {Math.round(zoom * 100)}%
+            </span>
+          )
+        }
+        actions={
+          <>
+            {pdfJsDoc && (
+              <>
+                <Tooltip label="Zoom out (−)">
+                  <IconButton size="sm" onClick={() => changeZoom(-0.15)}>
+                    <ZoomOut size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Zoom in (+)">
+                  <IconButton size="sm" onClick={() => changeZoom(0.15)}>
+                    <ZoomIn size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Fit page">
+                  <IconButton size="sm" onClick={fitPage}>
+                    <Maximize2 size={13} />
+                  </IconButton>
+                </Tooltip>
+                <span aria-hidden className="h-5 w-px bg-line mx-1" />
+              </>
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload size={13} /> Open PDF
+            </Button>
+            {pdfJsDoc && (
+              /* Prepare to Sign = the distinguished primary affordance */
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => navigate('/signing-setup', { state: { localFileUrl: filename ? undefined : null, pdfReady: true } })}
+              >
+                <FileSignature size={13} /> Prepare to Sign
+              </Button>
+            )}
+            {pdfJsDoc && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={savePDF}
+              >
+                <Download size={13} /> Download
+              </Button>
+            )}
+          </>
+        }
+      />
 
-      {/* ── TOP BAR ── */}
-      <div style={{ background: '#0d1117', borderBottom: '1px solid rgba(255,255,255,.06)', height: 52, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', flexShrink: 0, zIndex: 50 }}>
-        <button
-          onClick={() => navigate('/pdf-editor')}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 6, border: 'none', background: 'transparent', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}
-          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,.07)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+      {/* Tool toolbar */}
+      <div className="bg-paper border-b border-line h-11 flex items-center gap-1 px-3 flex-shrink-0">
+        <span className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase mr-1">
+          Tools
+        </span>
+        {[
+          { tool: TOOLS.SELECT, icon: MousePointer2, label: 'Select (V)' },
+          { tool: TOOLS.TEXT, icon: Type, label: 'Text (T)' },
+          { tool: TOOLS.SIGNATURE, icon: PenLine, label: 'Signature (S)' },
+          { tool: TOOLS.DRAW, icon: Pencil, label: 'Draw (D)' },
+        ].map(({ tool, icon: Icon, label }) => (
+          <Tooltip key={tool} label={label}>
+            <IconButton
+              size="sm"
+              active={activeTool === tool}
+              onClick={() => setActiveTool(tool)}
+            >
+              <Icon size={14} />
+            </IconButton>
+          </Tooltip>
+        ))}
+
+        <span aria-hidden className="h-5 w-px bg-line mx-1" />
+
+        {/* Text formatting */}
+        <div
+          className={[
+            'flex items-center gap-1.5 transition-opacity duration-fast ease-out',
+            textActive ? 'opacity-100' : 'opacity-30 pointer-events-none',
+          ].join(' ')}
         >
-          <ArrowLeft size={15} /> Back
-        </button>
-
-        <div style={{ width: 1, height: 22, background: 'rgba(255,255,255,.1)', margin: '0 4px' }} />
-
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#f9fafb', fontWeight: 600, fontSize: 15, letterSpacing: '-0.02em' }}>
-          <div style={{ width: 28, height: 28, background: 'linear-gradient(135deg,#4f8ef7,#7c3aed)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontSize: 14 }}>📄</span>
-          </div>
-          PDF
-        </div>
-
-        {filename && (
-          <span style={{ color: '#6b7280', fontSize: 13, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 4 }}>
-            — {filename}
-          </span>
-        )}
-
-        <div style={{ flex: 1 }} />
-
-        {/* Zoom controls */}
-        {pdfJsDoc && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            {[
-              { icon: <ZoomOut size={14} />, action: () => changeZoom(-0.15), tip: 'Zoom out' },
-              { icon: <ZoomIn size={14} />, action: () => changeZoom(0.15), tip: 'Zoom in' },
-              { icon: <Maximize2 size={13} />, action: fitPage, tip: 'Fit page' },
-            ].map(({ icon, action, tip }, i) => (
-              <button key={i} onClick={action} title={tip}
-                style={{ width: 30, height: 30, borderRadius: 5, border: 'none', background: 'rgba(255,255,255,.06)', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,.12)'; e.currentTarget.style.color = '#fff' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,.06)'; e.currentTarget.style.color = '#9ca3af' }}
-              >{icon}</button>
+          <select
+            value={textDefaults.fontSize}
+            onChange={e => {
+              const v = parseInt(e.target.value)
+              setTextDefaults(p => ({ ...p, fontSize: v }))
+              if (selectedAnn?.type === 'text') updateAnn(selectedAnn.id, { fontSize: v })
+            }}
+            className="h-7 px-1.5 rounded-sm bg-bg-elev2 border border-line text-2xs text-ink outline-none focus:border-accent focus:shadow-focus"
+          >
+            {[8,10,11,12,14,16,18,20,24,28,32,36,42,48,60,72].map(s => (
+              <option key={s} value={s}>{s}px</option>
             ))}
-            <span style={{ color: '#9ca3af', fontSize: 12, minWidth: 44, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-          </div>
-        )}
-
-        <div style={{ width: 1, height: 22, background: 'rgba(255,255,255,.1)', margin: '0 4px' }} />
-
-        <button onClick={() => fileInputRef.current?.click()}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, border: 'none', background: 'rgba(255,255,255,.07)', color: '#d1d5db', cursor: 'pointer', fontSize: 13, fontWeight: 500 }}
-          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,.12)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,.07)'}
-        >
-          <Upload size={14} /> Open PDF
-        </button>
-
-        {/* Prepare to Sign — launches SigningSetup for this PDF */}
-        {pdfJsDoc && (
-          <button onClick={() => navigate('/signing-setup', { state: { localFileUrl: filename ? undefined : null, pdfReady: true } })}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'rgba(124,58,237,.15)', color: '#a78bfa', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(124,58,237,.25)'; e.currentTarget.style.color = '#c4b5fd' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(124,58,237,.15)'; e.currentTarget.style.color = '#a78bfa' }}
-          >
-            <FileSignature size={14} /> Prepare to Sign
-          </button>
-        )}
-
-        <button onClick={savePDF} disabled={!pdfJsDoc}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 16px', borderRadius: 6, border: 'none', background: pdfJsDoc ? '#4f8ef7' : '#1f2937', color: pdfJsDoc ? '#fff' : '#4b5563', cursor: pdfJsDoc ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 600 }}
-          onMouseEnter={e => { if (pdfJsDoc) e.currentTarget.style.background = '#3b7ef0' }}
-          onMouseLeave={e => { if (pdfJsDoc) e.currentTarget.style.background = '#4f8ef7' }}
-        >
-          <Download size={14} /> Download PDF
-        </button>
-      </div>
-
-      {/* ── TOOLBAR ── */}
-      <div style={{ background: '#161b27', borderBottom: '1px solid rgba(255,255,255,.05)', height: 46, display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px', flexShrink: 0 }}>
-        {/* Tool groups */}
-        <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.04)', borderRadius: 6, padding: '3px' }}>
-          {[
-            { tool: TOOLS.SELECT, icon: <MousePointer2 size={15} />, label: 'Select (V)' },
-            { tool: TOOLS.TEXT, icon: <Type size={15} />, label: 'Text (T)' },
-            { tool: TOOLS.SIGNATURE, icon: <PenLine size={15} />, label: 'Signature (S)' },
-            { tool: TOOLS.DRAW, icon: <Pencil size={15} />, label: 'Draw (D)' },
-          ].map(({ tool, icon, label }) => (
-            <button key={tool} onClick={() => setActiveTool(tool)} title={label}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                width: 34, height: 30, borderRadius: 5, border: 'none',
-                background: activeTool === tool ? '#4f8ef7' : 'transparent',
-                color: activeTool === tool ? '#fff' : '#9ca3af',
-                cursor: 'pointer', transition: 'all .12s',
-              }}
-              onMouseEnter={e => { if (activeTool !== tool) { e.currentTarget.style.background = 'rgba(255,255,255,.08)'; e.currentTarget.style.color = '#fff' } }}
-              onMouseLeave={e => { if (activeTool !== tool) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#9ca3af' } }}
-            >{icon}</button>
-          ))}
-        </div>
-
-        <div style={{ width: 1, height: 22, background: 'rgba(255,255,255,.08)', margin: '0 4px' }} />
-
-        {/* Text formatting (shown when text tool or text selected) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, opacity: activeTool === TOOLS.TEXT || (selectedAnn?.type === 'text') ? 1 : 0.3, pointerEvents: activeTool === TOOLS.TEXT || (selectedAnn?.type === 'text') ? 'all' : 'none', transition: 'opacity .15s' }}>
-          <select value={textDefaults.fontSize} onChange={e => {
-            const v = parseInt(e.target.value)
-            setTextDefaults(p => ({ ...p, fontSize: v }))
-            if (selectedAnn?.type === 'text') updateAnn(selectedAnn.id, { fontSize: v })
-          }}
-            style={{ background: 'rgba(255,255,255,.07)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 4, color: '#e5e7eb', fontSize: 12, padding: '3px 6px', cursor: 'pointer', fontFamily: 'inherit' }}
-          >
-            {[8,10,11,12,14,16,18,20,24,28,32,36,42,48,60,72].map(s => <option key={s} value={s}>{s}px</option>)}
           </select>
 
-          <select value={textDefaults.fontFamily} onChange={e => {
-            setTextDefaults(p => ({ ...p, fontFamily: e.target.value }))
-            if (selectedAnn?.type === 'text') updateAnn(selectedAnn.id, { fontFamily: e.target.value })
-          }}
-            style={{ background: 'rgba(255,255,255,.07)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 4, color: '#e5e7eb', fontSize: 12, padding: '3px 6px', cursor: 'pointer', fontFamily: 'inherit', width: 110 }}
+          <select
+            value={textDefaults.fontFamily}
+            onChange={e => {
+              setTextDefaults(p => ({ ...p, fontFamily: e.target.value }))
+              if (selectedAnn?.type === 'text') updateAnn(selectedAnn.id, { fontFamily: e.target.value })
+            }}
+            className="h-7 px-1.5 rounded-sm bg-bg-elev2 border border-line text-2xs text-ink outline-none focus:border-accent focus:shadow-focus w-28"
           >
             <option value="Helvetica">Helvetica</option>
             <option value="Times New Roman">Times New Roman</option>
@@ -1139,194 +1111,250 @@ export default function PDFEditor() {
           </select>
 
           {[
-            { key: 'bold', icon: <Bold size={13} />, label: 'Bold' },
-            { key: 'italic', icon: <Italic size={13} />, label: 'Italic' },
-            { key: 'underline', icon: <UnderlineIcon size={13} />, label: 'Underline' },
-          ].map(({ key, icon, label }) => (
-            <button key={key} title={label}
-              onClick={() => {
-                const val = !textDefaults[key]
-                setTextDefaults(p => ({ ...p, [key]: val }))
-                if (selectedAnn?.type === 'text') updateAnn(selectedAnn.id, { [key]: val })
-              }}
-              style={{
-                width: 30, height: 28, borderRadius: 4, border: 'none',
-                background: textDefaults[key] ? '#4f8ef7' : 'rgba(255,255,255,.06)',
-                color: textDefaults[key] ? '#fff' : '#9ca3af',
-                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            >{icon}</button>
+            { key: 'bold',      icon: Bold,          label: 'Bold' },
+            { key: 'italic',    icon: Italic,        label: 'Italic' },
+            { key: 'underline', icon: UnderlineIcon, label: 'Underline' },
+          ].map(({ key, icon: Icon, label }) => (
+            <Tooltip key={key} label={label}>
+              <IconButton
+                size="sm"
+                active={textDefaults[key]}
+                onClick={() => {
+                  const val = !textDefaults[key]
+                  setTextDefaults(p => ({ ...p, [key]: val }))
+                  if (selectedAnn?.type === 'text') updateAnn(selectedAnn.id, { [key]: val })
+                }}
+              >
+                <Icon size={13} />
+              </IconButton>
+            </Tooltip>
           ))}
 
-          {/* Color picker */}
-          <div style={{ position: 'relative', width: 28, height: 28 }}>
-            <div style={{ width: 22, height: 22, borderRadius: '50%', background: textDefaults.color, border: '2px solid rgba(255,255,255,.2)', margin: 3, cursor: 'pointer' }} />
-            <input type="color" value={textDefaults.color}
+          {/* Colour picker */}
+          <div className="relative w-7 h-7">
+            <span
+              className="absolute inset-1 rounded-full border border-line-strong pointer-events-none"
+              style={{ background: textDefaults.color }}
+            />
+            <input
+              type="color"
+              value={textDefaults.color}
               onChange={e => {
                 setTextDefaults(p => ({ ...p, color: e.target.value }))
                 if (selectedAnn?.type === 'text') updateAnn(selectedAnn.id, { color: e.target.value })
               }}
-              style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
             />
           </div>
         </div>
 
-        <div style={{ flex: 1 }} />
+        <div className="flex-1" />
 
-        {/* Panel toggles */}
-        <button onClick={() => setSidebarOpen(v => !v)} title="Toggle page thumbnails"
-          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 5, border: 'none', background: sidebarOpen ? 'rgba(79,142,247,.15)' : 'rgba(255,255,255,.04)', color: sidebarOpen ? '#4f8ef7' : '#9ca3af', cursor: 'pointer', fontSize: 12, fontWeight: 500 }}
-        >
-          <LayoutList size={14} /> Pages
-        </button>
-        <button onClick={() => setPanelOpen(v => !v)} title="Toggle properties"
-          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 5, border: 'none', background: panelOpen ? 'rgba(79,142,247,.15)' : 'rgba(255,255,255,.04)', color: panelOpen ? '#4f8ef7' : '#9ca3af', cursor: 'pointer', fontSize: 12, fontWeight: 500 }}
-        >
-          <SlidersHorizontal size={14} /> Properties
-        </button>
+        <Tooltip label="Toggle page thumbnails">
+          <IconButton
+            size="sm"
+            active={sidebarOpen}
+            onClick={() => setSidebarOpen(v => !v)}
+          >
+            <LayoutList size={14} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip label="Toggle properties">
+          <IconButton
+            size="sm"
+            active={panelOpen}
+            onClick={() => setPanelOpen(v => !v)}
+          >
+            <SlidersHorizontal size={14} />
+          </IconButton>
+        </Tooltip>
       </div>
 
-      {/* ── WORKSPACE ── */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      {/* WORKSPACE */}
+      <div className="flex-1 flex overflow-hidden">
 
-        {/* LEFT SIDEBAR */}
+        {/* LEFT SIDEBAR — page thumbnails */}
         {sidebarOpen && (
-          <div style={{ width: 200, background: '#111827', borderRight: '1px solid rgba(255,255,255,.04)', display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '10px 12px 6px', borderBottom: '1px solid rgba(255,255,255,.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ color: '#6b7280', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em' }}>Pages</span>
-              {totalPages > 0 && <span style={{ color: '#4b5563', fontSize: 11 }}>{totalPages} total</span>}
-            </div>
-            {/* Insert page actions */}
-            {pdfJsDoc && (
-              <div style={{ display: 'flex', gap: 4, padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,.04)' }}>
-                <button
-                  onClick={() => insertBlankPage(currentPage)}
-                  title="Insert blank page after current"
-                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 4px', borderRadius: 5, border: 'none', background: 'rgba(255,255,255,.06)', color: '#9ca3af', cursor: 'pointer', fontSize: 11 }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,.12)'; e.currentTarget.style.color = '#fff' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,.06)'; e.currentTarget.style.color = '#9ca3af' }}
-                >
-                  <FilePlus size={12} /> Blank
-                </button>
-                <button
-                  onClick={() => insertFileInputRef.current?.click()}
-                  title="Insert page from PDF after current"
-                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 4px', borderRadius: 5, border: 'none', background: 'rgba(255,255,255,.06)', color: '#9ca3af', cursor: 'pointer', fontSize: 11 }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,.12)'; e.currentTarget.style.color = '#fff' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,.06)'; e.currentTarget.style.color = '#9ca3af' }}
-                >
-                  <Upload size={12} /> PDF
-                </button>
-              </div>
-            )}
-            <div style={{ flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {!pdfJsDoc ? (
-                <div style={{ color: '#374151', fontSize: 12, textAlign: 'center', padding: '24px 8px' }}>Open a PDF to see pages</div>
-              ) : (
-                Array.from({ length: pageOrder.length || totalPages }, (_, i) => i + 1).map(n => (
-                  <div key={n}
-                    draggable
-                    onDragStart={() => setThumbDragSrc(n)}
-                    onDragOver={e => { e.preventDefault() }}
-                    onDrop={e => {
-                      e.preventDefault()
-                      if (thumbDragSrc != null && thumbDragSrc !== n) {
-                        reorderPages(thumbDragSrc, n)
-                      }
-                      setThumbDragSrc(null)
-                    }}
-                    onDragEnd={() => setThumbDragSrc(null)}
-                    onClick={() => goToPage(n)}
-                    style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 5,
-                      borderRadius: 5, cursor: 'grab',
-                      background: currentPage === n ? 'rgba(79,142,247,.12)' : thumbDragSrc === n ? 'rgba(255,255,255,.08)' : 'transparent',
-                      opacity: thumbDragSrc === n ? 0.5 : 1,
-                      transition: 'background .12s',
-                      outline: thumbDragSrc != null && thumbDragSrc !== n ? '1px dashed rgba(79,142,247,.4)' : 'none',
-                    }}
-                    onMouseEnter={e => { if (currentPage !== n) e.currentTarget.style.background = 'rgba(255,255,255,.04)' }}
-                    onMouseLeave={e => { if (currentPage !== n && thumbDragSrc !== n) e.currentTarget.style.background = 'transparent' }}
-                  >
-                    <div style={{ background: 'white', borderRadius: 3, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,.4)', border: `2px solid ${currentPage === n ? '#4f8ef7' : 'transparent'}`, width: '100%', position: 'relative' }}>
-                      <canvas ref={el => { if (el) thumbnailRefs.current[n] = el }} style={{ display: 'block', width: '100%' }} />
-                      {(pageRotations[n] || 0) !== 0 && (
-                        <div style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(79,142,247,.8)', borderRadius: 3, padding: '1px 4px', fontSize: 9, color: '#fff' }}>
-                          {(pageRotations[n] || 0)}°
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%' }}>
-                      <span style={{ color: currentPage === n ? '#4f8ef7' : '#6b7280', fontSize: 11, flex: 1, textAlign: 'center' }}>{n}</span>
-                      <div style={{ display: 'flex', gap: 2 }}>
-                        <button
-                          onClick={e => { e.stopPropagation(); rotatePage(n, 90) }}
-                          title="Rotate 90°"
-                          style={{ width: 20, height: 20, border: 'none', background: 'transparent', color: '#4b5563', cursor: 'pointer', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
-                          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,.1)'; e.currentTarget.style.color = '#9ca3af' }}
-                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#4b5563' }}
-                        ><RotateCw size={11} /></button>
-                        <button
-                          onClick={e => { e.stopPropagation(); deletePageSlot(n) }}
-                          title="Delete page"
-                          style={{ width: 20, height: 20, border: 'none', background: 'transparent', color: '#4b5563', cursor: 'pointer', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
-                          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,.15)'; e.currentTarget.style.color = '#ef4444' }}
-                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#4b5563' }}
-                        ><Trash size={11} /></button>
-                      </div>
-                    </div>
-                  </div>
-                ))
+          <aside className="w-52 bg-bg-elev2 border-r border-line flex flex-col flex-shrink-0 overflow-hidden">
+            <div className="px-3 py-2.5 border-b border-line flex items-center justify-between">
+              <span className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+                Pages
+              </span>
+              {totalPages > 0 && (
+                <span className="text-2xs text-ink-faint">{totalPages} total</span>
               )}
             </div>
-          </div>
+
+            {pdfJsDoc && (
+              <div className="flex gap-1 px-2 py-2 border-b border-line">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => insertBlankPage(currentPage)}
+                  title="Insert blank page after current"
+                >
+                  <FilePlus size={12} /> Blank
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => insertFileInputRef.current?.click()}
+                  title="Insert page from PDF after current"
+                >
+                  <Upload size={12} /> PDF
+                </Button>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5">
+              {!pdfJsDoc ? (
+                <p className="text-2xs text-ink-faint text-center py-6 font-serif italic">
+                  Open a PDF to see pages.
+                </p>
+              ) : (
+                Array.from({ length: pageOrder.length || totalPages }, (_, i) => i + 1).map(n => {
+                  const isActive = currentPage === n
+                  return (
+                    <div
+                      key={n}
+                      draggable
+                      onDragStart={() => setThumbDragSrc(n)}
+                      onDragOver={e => { e.preventDefault() }}
+                      onDrop={e => {
+                        e.preventDefault()
+                        if (thumbDragSrc != null && thumbDragSrc !== n) {
+                          reorderPages(thumbDragSrc, n)
+                        }
+                        setThumbDragSrc(null)
+                      }}
+                      onDragEnd={() => setThumbDragSrc(null)}
+                      onClick={() => goToPage(n)}
+                      className={[
+                        'relative flex flex-col items-center gap-1 p-1.5 rounded-md cursor-grab',
+                        'transition-colors duration-fast ease-out',
+                        isActive ? 'bg-accent-tint' : 'hover:bg-paper',
+                        thumbDragSrc === n ? 'opacity-50' : '',
+                        thumbDragSrc != null && thumbDragSrc !== n
+                          ? 'outline outline-1 outline-dashed outline-accent/40'
+                          : '',
+                      ].join(' ')}
+                    >
+                      <span
+                        aria-hidden
+                        className={[
+                          'absolute left-0 top-1 bottom-1 w-[2px] rounded-r-full transition-colors duration-fast',
+                          isActive ? 'bg-accent' : 'bg-transparent',
+                        ].join(' ')}
+                      />
+                      <div
+                        className={[
+                          'relative w-full rounded-xs overflow-hidden bg-paper border shadow-e1 transition-colors duration-fast',
+                          isActive ? 'border-accent' : 'border-line',
+                        ].join(' ')}
+                      >
+                        <canvas
+                          ref={el => { if (el) thumbnailRefs.current[n] = el }}
+                          className="block w-full"
+                        />
+                        {(pageRotations[n] || 0) !== 0 && (
+                          <span className="absolute top-1 right-1 bg-accent text-white rounded-pill text-2xs px-1.5 py-0">
+                            {pageRotations[n] || 0}°
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 w-full">
+                        <span
+                          className={[
+                            'text-2xs flex-1 text-center tracking-tightish',
+                            isActive ? 'text-accent-press font-medium' : 'text-ink-faint',
+                          ].join(' ')}
+                        >
+                          {n}
+                        </span>
+                        <Tooltip label="Rotate 90°">
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); rotatePage(n, 90) }}
+                            className="w-5 h-5 rounded-sm text-ink-faint hover:bg-accent-tint hover:text-accent-press transition-colors flex items-center justify-center"
+                          >
+                            <RotateCw size={11} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip label="Delete page">
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); deletePageSlot(n) }}
+                            className="w-5 h-5 rounded-sm text-ink-faint hover:bg-danger-bg hover:text-danger transition-colors flex items-center justify-center"
+                          >
+                            <Trash size={11} />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </aside>
         )}
 
         {/* MAIN CANVAS AREA */}
-        <div ref={canvasAreaRef}
-          style={{ flex: 1, overflowAuto: 'scroll', overflow: 'auto', background: '#1e2330', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 28, position: 'relative' }}
+        <div
+          ref={canvasAreaRef}
+          className="flex-1 overflow-auto bg-bg paper-grain flex flex-col items-center px-8 py-8 relative"
           onDragOver={e => { e.preventDefault(); setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
         >
           {!pdfJsDoc ? (
-            /* Drop zone */
-            <div style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              gap: 18, width: '100%', maxWidth: 560, margin: 'auto',
-              border: `2px dashed ${dragOver ? '#4f8ef7' : '#374151'}`,
-              borderRadius: 16, background: dragOver ? 'rgba(79,142,247,.04)' : 'rgba(255,255,255,.02)',
-              padding: 60, cursor: 'pointer', transition: 'all .2s',
-            }}
+            <div
               onClick={() => fileInputRef.current?.click()}
+              className={[
+                'flex flex-col items-center justify-center gap-4 w-full max-w-lg my-auto',
+                'border-2 border-dashed rounded-lg bg-paper paper-grain py-14 px-10 cursor-pointer',
+                'transition-colors duration-fast ease-out',
+                dragOver
+                  ? 'border-accent bg-accent-tint'
+                  : 'border-line-strong hover:border-accent hover:bg-accent-tint',
+              ].join(' ')}
             >
-              <div style={{ width: 64, height: 64, background: 'rgba(79,142,247,.1)', borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Upload size={28} color="#4f8ef7" />
+              <div className="w-14 h-14 rounded-md bg-accent-tint flex items-center justify-center">
+                <Upload size={24} className="text-accent" />
               </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ color: '#f9fafb', fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Open a PDF to get started</div>
-                <div style={{ color: '#6b7280', fontSize: 14 }}>Drag & drop a PDF here, or click to browse</div>
+              <div className="text-center">
+                <h2 className="font-serif text-xl text-ink leading-tight">
+                  Open a PDF to get started
+                </h2>
+                <p className="text-sm text-ink-muted mt-1 font-serif italic">
+                  Drag & drop here, or click to browse.
+                </p>
               </div>
-              <button style={{ padding: '10px 28px', background: '#4f8ef7', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-                Browse Files
-              </button>
+              <Button variant="primary">Browse files</Button>
             </div>
           ) : (
             <>
-              {/* Page + annotations */}
-              <div style={{ position: 'relative', boxShadow: '0 12px 48px rgba(0,0,0,.5)', cursor: CURSORS[activeTool] }}
+              <div
+                className="relative shadow-e2 rounded-sm overflow-hidden bg-paper animate-fade-in"
                 onClick={handleCanvasClick}
+                style={{ cursor: CURSORS[activeTool] }}
               >
                 {loadingPdf && (
-                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, borderRadius: 2 }}>
-                    <div style={{ width: 28, height: 28, border: '3px solid #4f8ef7', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
+                  <div className="absolute inset-0 bg-paper/70 flex items-center justify-center z-50">
+                    <div className="w-7 h-7 border-2 border-accent border-t-transparent rounded-full animate-spin" />
                   </div>
                 )}
-                <canvas ref={pageCanvasRef} style={{ display: 'block' }} />
+                <canvas ref={pageCanvasRef} className="block" />
 
                 {/* Draw canvas */}
-                <canvas ref={drawCanvasRef}
-                  style={{ position: 'absolute', top: 0, left: 0, pointerEvents: activeTool === TOOLS.DRAW ? 'all' : 'none', cursor: activeTool === TOOLS.DRAW ? 'crosshair' : 'default' }}
+                <canvas
+                  ref={drawCanvasRef}
+                  className="absolute top-0 left-0"
+                  style={{
+                    pointerEvents: activeTool === TOOLS.DRAW ? 'all' : 'none',
+                    cursor: activeTool === TOOLS.DRAW ? 'crosshair' : 'default',
+                  }}
                   onMouseDown={onDrawStart}
                   onMouseMove={onDrawMove}
                   onMouseUp={onDrawEnd}
@@ -1334,7 +1362,7 @@ export default function PDFEditor() {
                 />
 
                 {/* Annotations layer */}
-                <div ref={annotLayerRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+                <div ref={annotLayerRef} className="absolute top-0 left-0 w-full h-full pointer-events-none">
                   {getPageAnns(currentPage).map(ann => (
                     <AnnotationElement
                       key={ann.id}
@@ -1352,80 +1380,110 @@ export default function PDFEditor() {
 
               {/* Page navigation */}
               {totalPages > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 20 }}>
-                  <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1}
-                    style={{ width: 34, height: 34, borderRadius: 6, border: 'none', background: currentPage <= 1 ? '#1f2937' : '#374151', color: currentPage <= 1 ? '#4b5563' : '#d1d5db', cursor: currentPage <= 1 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  ><ChevronLeft size={17} /></button>
-                  <span style={{ color: '#9ca3af', fontSize: 13, background: '#1f2937', padding: '5px 14px', borderRadius: 6 }}>
+                <div className="flex items-center gap-3 mt-5">
+                  <IconButton
+                    size="sm"
+                    onClick={() => goToPage(currentPage - 1)}
+                    disabled={currentPage <= 1}
+                  >
+                    <ChevronLeft size={15} />
+                  </IconButton>
+                  <span className="text-xs text-ink-muted tracking-tightish bg-paper border border-line rounded-md px-3 py-1">
                     Page {currentPage} of {totalPages}
                   </span>
-                  <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= totalPages}
-                    style={{ width: 34, height: 34, borderRadius: 6, border: 'none', background: currentPage >= totalPages ? '#1f2937' : '#374151', color: currentPage >= totalPages ? '#4b5563' : '#d1d5db', cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  ><ChevronRight size={17} /></button>
+                  <IconButton
+                    size="sm"
+                    onClick={() => goToPage(currentPage + 1)}
+                    disabled={currentPage >= totalPages}
+                  >
+                    <ChevronRight size={15} />
+                  </IconButton>
                 </div>
               )}
             </>
           )}
         </div>
 
-        {/* RIGHT PANEL */}
+        {/* RIGHT PANEL — properties */}
         {panelOpen && (
-          <div style={{ width: 230, background: '#fff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '12px 14px', borderBottom: '1px solid #f3f4f6' }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '.08em' }}>Properties</span>
+          <aside className="w-64 bg-bg-elev2 border-l border-line flex flex-col flex-shrink-0 overflow-hidden">
+            <div className="px-3 py-2.5 border-b border-line">
+              <span className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+                Properties
+              </span>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
+            <div className="flex-1 overflow-y-auto p-3 space-y-4">
 
-              {/* Selected annotation */}
               {selectedAnn && (
-                <div style={{ marginBottom: 16, padding: 12, background: '#f9fafb', borderRadius: 8, border: '1px solid #e5e7eb' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10 }}>Selection</div>
+                <div className="bg-paper border border-line rounded-md p-3 space-y-3">
+                  <div className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+                    Selection
+                  </div>
                   {selectedAnn.type === 'text' && (
                     <>
                       <PanelRow label="Size">
-                        <input type="number" min={6} max={120} value={selectedAnn.fontSize}
+                        <input
+                          type="number"
+                          min={6}
+                          max={120}
+                          value={selectedAnn.fontSize}
                           onChange={e => updateAnn(selectedAnn.id, { fontSize: parseInt(e.target.value) || 12 })}
-                          style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 4, fontSize: 13, fontFamily: 'inherit' }}
+                          className="w-full h-7 bg-paper border border-line rounded-sm px-2 text-xs text-ink outline-none focus:border-accent focus:shadow-focus"
                         />
                       </PanelRow>
                       <PanelRow label="Color">
-                        <input type="color" value={selectedAnn.color}
+                        <input
+                          type="color"
+                          value={selectedAnn.color}
                           onChange={e => updateAnn(selectedAnn.id, { color: e.target.value })}
-                          style={{ width: '100%', height: 30, padding: '2px 4px', border: '1px solid #e5e7eb', borderRadius: 4, cursor: 'pointer' }}
+                          className="w-full h-7 rounded-sm border border-line cursor-pointer p-0.5 bg-paper"
                         />
                       </PanelRow>
                     </>
                   )}
                   {selectedAnn.type === 'signature' && (
-                    <div style={{ marginBottom: 8 }}>
-                      <img src={selectedAnn.imageData} alt="sig" style={{ width: '100%', objectFit: 'contain', maxHeight: 60 }} />
-                      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
-                        {Math.round(selectedAnn.width)} × {Math.round(selectedAnn.height)} px<br />
-                        Drag to reposition · resize from corner
-                      </div>
+                    <div className="space-y-1.5">
+                      <img
+                        src={selectedAnn.imageData}
+                        alt="sig"
+                        className="w-full object-contain max-h-16 bg-paper border border-line rounded-sm p-1"
+                      />
+                      <p className="text-2xs text-ink-faint font-serif italic">
+                        {Math.round(selectedAnn.width)} × {Math.round(selectedAnn.height)} px
+                        — drag to reposition, resize from corner.
+                      </p>
                     </div>
                   )}
-                  <button onClick={() => deleteAnn(selectedAnn.id)}
-                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '6px 0', background: '#fef2f2', color: '#ef4444', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#fee2e2'}
-                    onMouseLeave={e => e.currentTarget.style.background = '#fef2f2'}
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    fullWidth
+                    onClick={() => deleteAnn(selectedAnn.id)}
                   >
-                    <Trash2 size={13} /> Delete
-                  </button>
+                    <Trash2 size={12} /> Delete
+                  </Button>
                 </div>
               )}
 
               {/* Saved signatures */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Saved Signatures</div>
+              <div className="space-y-2">
+                <div className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+                  Saved signatures
+                </div>
                 {savedSigs.length === 0 ? (
-                  <div style={{ color: '#9ca3af', fontSize: 12, textAlign: 'center', padding: '14px 0' }}>No signatures saved yet</div>
+                  <p className="text-2xs text-ink-faint font-serif italic">
+                    No signatures saved yet.
+                  </p>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div className="flex flex-col gap-1.5">
                     {savedSigs.map(sig => (
-                      <div key={sig.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', border: '1px solid #e5e7eb', borderRadius: 8, cursor: pdfJsDoc ? 'pointer' : 'default', transition: 'all .12s' }}
-                        onMouseEnter={e => { if (pdfJsDoc) e.currentTarget.style.borderColor = '#4f8ef7' }}
-                        onMouseLeave={e => e.currentTarget.style.borderColor = '#e5e7eb'}
+                      <div
+                        key={sig.id}
+                        className={[
+                          'flex items-center gap-2 px-2 py-1.5 rounded-sm border bg-paper transition-colors',
+                          pdfJsDoc ? 'cursor-pointer hover:border-accent' : 'cursor-default',
+                          'border-line',
+                        ].join(' ')}
                         onClick={() => {
                           if (!pdfJsDoc) { showToast('Open a PDF first'); return }
                           const canvas = pageCanvasRef.current
@@ -1434,141 +1492,217 @@ export default function PDFEditor() {
                           showToast('Signature placed — drag to position')
                         }}
                       >
-                        <img src={sig.imageData} alt="sig" style={{ height: 28, maxWidth: 110, objectFit: 'contain', flex: 1 }} />
-                        <button onClick={e => { e.stopPropagation(); setSavedSigs(p => p.filter(s => s.id !== sig.id)) }}
-                          style={{ width: 20, height: 20, border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}
-                        >×</button>
+                        <img
+                          src={sig.imageData}
+                          alt="sig"
+                          className="h-7 max-w-[110px] object-contain flex-1"
+                        />
+                        <Tooltip label="Remove">
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); setSavedSigs(p => p.filter(s => s.id !== sig.id)) }}
+                            className="w-5 h-5 rounded-sm text-ink-faint hover:bg-danger-bg hover:text-danger transition-colors flex items-center justify-center"
+                          >
+                            <X size={12} />
+                          </button>
+                        </Tooltip>
                       </div>
                     ))}
                   </div>
                 )}
-                <button onClick={() => { pendingSigPos.current = null; openSigModal() }}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '7px 0', background: '#f9fafb', color: '#4b5563', border: '1px dashed #d1d5db', borderRadius: 6, fontSize: 13, cursor: 'pointer', marginTop: 8, fontWeight: 500 }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#f3f4f6'; e.currentTarget.style.borderColor = '#9ca3af' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = '#f9fafb'; e.currentTarget.style.borderColor = '#d1d5db' }}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  fullWidth
+                  onClick={() => { pendingSigPos.current = null; openSigModal() }}
                 >
-                  <Plus size={13} /> New Signature
-                </button>
+                  <Plus size={12} /> New signature
+                </Button>
               </div>
 
               {/* Stats */}
-              <div style={{ padding: 10, background: '#f9fafb', borderRadius: 8, border: '1px solid #f3f4f6' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Document</div>
+              <div className="bg-paper border border-line rounded-md p-3 space-y-1.5">
+                <div className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase mb-1">
+                  Document
+                </div>
                 {[
                   ['Pages', totalPages || '—'],
                   ['Annotations', totalAnns],
                   ['Zoom', Math.round(zoom * 100) + '%'],
                   ['Current page', pdfJsDoc ? currentPage : '—'],
                 ].map(([k, v]) => (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280', marginBottom: 5 }}>
+                  <div key={k} className="flex justify-between text-xs text-ink-muted tracking-tightish">
                     <span>{k}</span>
-                    <span style={{ color: '#1f2937', fontWeight: 500 }}>{v}</span>
+                    <span className="text-ink font-medium">{v}</span>
                   </div>
                 ))}
               </div>
             </div>
-          </div>
+          </aside>
         )}
       </div>
 
-      {/* ── STATUS BAR ── */}
-      <div style={{ background: '#0d1117', borderTop: '1px solid rgba(255,255,255,.05)', height: 26, display: 'flex', alignItems: 'center', gap: 20, padding: '0 14px', flexShrink: 0 }}>
+      {/* STATUS BAR — quiet hairline */}
+      <div className="bg-paper border-t border-line h-7 flex items-center gap-4 px-3 flex-shrink-0">
         {[
           ['Tool', activeTool.charAt(0).toUpperCase() + activeTool.slice(1)],
           ['Zoom', Math.round(zoom * 100) + '%'],
           ['Page', pdfJsDoc ? `${currentPage} / ${totalPages}` : '—'],
           ['Annotations', totalAnns],
         ].map(([k, v]) => (
-          <div key={k} style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 11, color: '#4b5563' }}>
-            {k}: <span style={{ color: '#9ca3af' }}>{v}</span>
+          <div key={k} className="flex gap-1.5 items-center text-2xs text-ink-faint tracking-tightish">
+            {k}: <span className="text-ink-muted">{v}</span>
           </div>
         ))}
-        <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: '#374151' }}>V · Select &nbsp; T · Text &nbsp; S · Signature &nbsp; D · Draw &nbsp; Del · Delete</span>
+        <div className="flex-1" />
+        <span className="text-2xs text-ink-faint tracking-tightish">
+          V · Select &nbsp; T · Text &nbsp; S · Signature &nbsp; D · Draw &nbsp; Del · Delete
+        </span>
       </div>
 
-      {/* ── SIGNATURE MODAL ── */}
+      {/* SIGNATURE MODAL */}
       {sigModalOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in"
+          style={{ background: 'rgba(26, 25, 22, 0.36)', backdropFilter: 'blur(2px)' }}
           onClick={e => { if (e.target === e.currentTarget) closeSigModal() }}
         >
-          <div style={{ background: '#fff', borderRadius: 14, boxShadow: '0 24px 80px rgba(0,0,0,.3)', width: 580, maxWidth: '95vw', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px 14px', borderBottom: '1px solid #f3f4f6' }}>
-              <span style={{ fontSize: 16, fontWeight: 700, color: '#111827' }}>Add Signature</span>
-              <button onClick={closeSigModal} style={{ width: 28, height: 28, borderRadius: 6, border: 'none', background: '#f3f4f6', color: '#6b7280', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} /></button>
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="bg-paper text-ink rounded-xl border border-line shadow-e3 w-full max-w-xl overflow-hidden animate-scale-in"
+          >
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-line">
+              <h3 className="text-md font-semibold tracking-tightish">Add signature</h3>
+              <IconButton size="sm" onClick={closeSigModal} title="Close">
+                <X size={15} />
+              </IconButton>
             </div>
 
-            <div style={{ padding: 20 }}>
-              {/* Tabs */}
-              <div style={{ display: 'flex', borderBottom: '1px solid #f3f4f6', marginBottom: 16 }}>
-                {['draw', 'type'].map(tab => (
-                  <button key={tab} onClick={() => setSigTab(tab)}
-                    style={{ padding: '8px 20px', border: 'none', background: 'transparent', fontSize: 14, fontWeight: 500, cursor: 'pointer', color: sigTab === tab ? '#4f8ef7' : '#6b7280', borderBottom: `2px solid ${sigTab === tab ? '#4f8ef7' : 'transparent'}`, marginBottom: -1, fontFamily: 'inherit', textTransform: 'capitalize' }}
-                  >{tab === 'draw' ? 'Draw' : 'Type'}</button>
-                ))}
-              </div>
+            <div className="px-5 py-4 space-y-4">
+              <Tabs
+                value={sigTab}
+                onChange={setSigTab}
+                items={[
+                  { value: 'draw', label: 'Draw' },
+                  { value: 'type', label: 'Type' },
+                ]}
+              />
 
               {sigTab === 'draw' ? (
                 <div>
-                  <div className="sig-canvas-wrap" style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', background: '#fafafa', position: 'relative' }}>
-                    <canvas ref={sigCanvasRef} style={{ display: 'block', touchAction: 'none' }} />
-                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d1d5db', fontSize: 14, pointerEvents: 'none' }}
+                  <div className="relative bg-paper border border-line rounded-md overflow-hidden">
+                    <canvas ref={sigCanvasRef} className="block touch-none" />
+                    <div
                       id="sig-hint"
-                    >Sign with your mouse or touch</div>
+                      className="absolute inset-0 flex items-center justify-center text-ink-faint text-sm font-serif italic pointer-events-none"
+                    >
+                      Sign with your mouse or touch
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-                    <button onClick={() => { sigPadRef.current?.clear(); document.getElementById('sig-hint') && (document.getElementById('sig-hint').style.opacity = 1) }}
-                      style={{ padding: '5px 14px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}
-                    >Clear</button>
+                  <div className="flex justify-end mt-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        sigPadRef.current?.clear()
+                        const el = document.getElementById('sig-hint')
+                        if (el) el.style.opacity = 1
+                      }}
+                    >
+                      Clear
+                    </Button>
                   </div>
                 </div>
               ) : (
-                <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 20 }}>
-                  <input type="text" placeholder="Type your name…" value={typedName} onChange={e => setTypedName(e.target.value)} maxLength={60}
-                    style={{ width: '100%', border: 'none', background: 'transparent', fontFamily: `'${sigFont}', cursive`, fontSize: 42, color: '#1a1a2e', textAlign: 'center', outline: 'none', marginBottom: 12, boxSizing: 'border-box' }}
+                <div className="bg-bg-elev2 border border-line rounded-md p-5">
+                  <input
+                    type="text"
+                    placeholder="Type your name…"
+                    value={typedName}
+                    onChange={e => setTypedName(e.target.value)}
+                    maxLength={60}
+                    className="w-full bg-transparent border-none outline-none text-center text-4xl text-ink mb-3"
+                    style={{ fontFamily: `'${sigFont}', cursive` }}
                   />
-                  <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 6, padding: '12px 0', textAlign: 'center', minHeight: 70, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <span style={{ fontFamily: `'${sigFont}', cursive`, fontSize: 48, color: '#1a1a2e' }}>{typedName || ''}</span>
+                  <div className="bg-paper border border-line rounded-sm py-3 px-3 text-center min-h-[70px] flex items-center justify-center">
+                    <span
+                      className="text-4xl text-ink"
+                      style={{ fontFamily: `'${sigFont}', cursive` }}
+                    >
+                      {typedName || ''}
+                    </span>
                   </div>
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12 }}>
-                    {[['Dancing Script', 'Signature Style'], ['Pinyon Script', 'Elegant Style']].map(([f, label]) => (
-                      <button key={f} onClick={() => setSigFont(f)}
-                        style={{ padding: '5px 16px', border: `1px solid ${sigFont === f ? '#4f8ef7' : '#e5e7eb'}`, borderRadius: 20, background: sigFont === f ? 'rgba(79,142,247,.08)' : 'white', color: sigFont === f ? '#4f8ef7' : '#6b7280', cursor: 'pointer', fontFamily: `'${f}', cursive`, fontSize: 18 }}
-                      >Aa</button>
+                  <div className="flex gap-2 justify-center mt-3">
+                    {[['Dancing Script', 'Signature'], ['Pinyon Script', 'Elegant']].map(([f, label]) => (
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => setSigFont(f)}
+                        className={[
+                          'px-4 py-1 rounded-pill border text-md transition-colors',
+                          sigFont === f
+                            ? 'border-accent bg-accent-tint text-accent-press'
+                            : 'border-line bg-paper text-ink-muted hover:border-line-strong',
+                        ].join(' ')}
+                        style={{ fontFamily: `'${f}', cursive` }}
+                      >
+                        Aa
+                      </button>
                     ))}
                   </div>
                 </div>
               )}
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#6b7280', cursor: 'pointer', marginTop: 14 }}>
-                <input type="checkbox" checked={saveToLib} onChange={e => setSaveToLib(e.target.checked)} style={{ accentColor: '#4f8ef7' }} />
+              <label className="flex items-center gap-2 text-sm text-ink-muted cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={saveToLib}
+                  onChange={e => setSaveToLib(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
                 Save this signature for future use
               </label>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '14px 20px', borderTop: '1px solid #f3f4f6' }}>
-              <button onClick={closeSigModal} style={{ padding: '8px 18px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 7, fontSize: 13, cursor: 'pointer', fontWeight: 500, fontFamily: 'inherit' }}>Cancel</button>
-              <button onClick={applySig} style={{ padding: '8px 20px', background: '#4f8ef7', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }}>Apply Signature</button>
+            <div className="px-5 py-3 border-t border-line bg-bg-elev2 flex items-center justify-end gap-2">
+              <Button variant="secondary" size="sm" onClick={closeSigModal}>Cancel</Button>
+              <Button variant="primary" size="sm" onClick={applySig}>Apply signature</Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Toast */}
+      {/* Toast — quiet pill */}
       {toast && (
-        <div style={{ position: 'fixed', bottom: 44, left: '50%', transform: 'translateX(-50%)', background: '#1f2937', color: '#f9fafb', padding: '10px 20px', borderRadius: 24, fontSize: 13, boxShadow: '0 8px 32px rgba(0,0,0,.3)', zIndex: 2000, pointerEvents: 'none' }}>
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[2000] bg-ink text-paper px-4 py-2 rounded-md shadow-e2 text-xs tracking-tightish animate-fade-in pointer-events-none">
           {toast}
         </div>
       )}
 
-      <input ref={fileInputRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={handleFileInput} />
-      <input ref={insertFileInputRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={e => {
-        const f = e.target.files[0]
-        if (f) insertPDFPage(f, currentPage)
-        e.target.value = ''
-      }} />
+      <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileInput} />
+      <input
+        ref={insertFileInputRef}
+        type="file"
+        accept=".pdf"
+        className="hidden"
+        onChange={e => {
+          const f = e.target.files[0]
+          if (f) insertPDFPage(f, currentPage)
+          e.target.value = ''
+        }}
+      />
 
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      {/* Cursive fonts for typed signatures */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&family=Pinyon+Script&display=swap');
+        .pdf-annot-text:focus { outline: none; }
+        .pdf-annot-text[contenteditable="true"] { cursor: text; }
+        .pdf-annot-text {
+          cursor: default; white-space: pre-wrap; word-break: break-word;
+          min-width: 20px; min-height: 1em;
+        }
+      `}</style>
     </div>
   )
 }
@@ -1577,7 +1711,7 @@ export default function PDFEditor() {
 function AnnotationElement({ ann, selected, activeTool, onMouseDown, onDelete, onUpdate, onSelect }) {
   const textRef = useRef(null)
   const [editing, setEditing] = useState(ann.editing || false)
-  const [resizing, setResizing] = useState(false)
+  const [, setResizing] = useState(false)
   const resizeStart = useRef({})
 
   useEffect(() => {
@@ -1616,7 +1750,6 @@ function AnnotationElement({ ann, selected, activeTool, onMouseDown, onDelete, o
     e.stopPropagation()
   }
 
-  // Signature resize
   const onResizeDown = (e) => {
     e.stopPropagation(); e.preventDefault()
     resizeStart.current = { mx: e.clientX, my: e.clientY, w: ann.width, h: ann.height }
@@ -1639,32 +1772,49 @@ function AnnotationElement({ ann, selected, activeTool, onMouseDown, onDelete, o
   if (ann.type === 'text') {
     return (
       <div
-        style={{ position: 'absolute', left: ann.x, top: ann.y, pointerEvents: 'all', userSelect: 'none', zIndex: selected ? 10 : 5 }}
+        className="absolute pointer-events-auto select-none"
+        style={{ left: ann.x, top: ann.y, zIndex: selected ? 10 : 5 }}
         onMouseDown={handleMouseDown}
         onDoubleClick={handleDblClick}
       >
-        <div style={{ position: 'relative', padding: '2px 4px', outline: selected ? '2px solid #4f8ef7' : editing ? '2px dashed #4f8ef7' : 'none', outlineOffset: 2, borderRadius: 2 }}>
+        <div
+          className={[
+            'relative px-1 py-0.5 rounded-xs',
+            selected ? 'outline outline-2 outline-accent outline-offset-2' :
+              editing ? 'outline outline-2 outline-dashed outline-accent outline-offset-2' : '',
+          ].join(' ')}
+        >
           <span
             ref={textRef}
-            className="pdf-annot-text"
+            className="pdf-annot-text block"
             contentEditable={editing}
             suppressContentEditableWarning
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
             onClick={e => { if (editing) e.stopPropagation() }}
             style={{
-              fontSize: ann.fontSize, fontFamily: ann.fontFamily,
-              color: ann.color, fontWeight: ann.bold ? 700 : 400,
+              fontSize: ann.fontSize,
+              fontFamily: ann.fontFamily,
+              color: ann.color,
+              fontWeight: ann.bold ? 700 : 400,
               fontStyle: ann.italic ? 'italic' : 'normal',
               textDecoration: ann.underline ? 'underline' : 'none',
-              display: 'block', minWidth: 20, minHeight: '1em',
+              minWidth: 20,
+              minHeight: '1em',
               cursor: editing ? 'text' : activeTool === 'select' ? 'move' : 'default',
             }}
-          >{ann.content}</span>
+          >
+            {ann.content}
+          </span>
           {selected && (
-            <button onClick={e => { e.stopPropagation(); onDelete() }}
-              style={{ position: 'absolute', top: -10, right: -10, width: 20, height: 20, background: '#ef4444', border: '2px solid white', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'white', fontWeight: 700, zIndex: 20 }}
-            >×</button>
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); onDelete() }}
+              aria-label="Delete"
+              className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-danger border-2 border-paper rounded-full flex items-center justify-center text-white shadow-e1 z-20"
+            >
+              <X size={11} />
+            </button>
           )}
         </div>
       </div>
@@ -1674,18 +1824,39 @@ function AnnotationElement({ ann, selected, activeTool, onMouseDown, onDelete, o
   if (ann.type === 'signature') {
     return (
       <div
-        style={{ position: 'absolute', left: ann.x, top: ann.y, width: ann.width, height: ann.height, pointerEvents: 'all', userSelect: 'none', zIndex: selected ? 10 : 5 }}
+        className="absolute pointer-events-auto select-none"
+        style={{
+          left: ann.x, top: ann.y,
+          width: ann.width, height: ann.height,
+          zIndex: selected ? 10 : 5,
+        }}
         onMouseDown={handleMouseDown}
       >
-        <div style={{ position: 'relative', width: '100%', height: '100%', outline: selected ? '2px solid #4f8ef7' : 'none', outlineOffset: 2 }}>
-          <img src={ann.imageData} alt="signature" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+        <div
+          className={[
+            'relative w-full h-full',
+            selected ? 'outline outline-2 outline-accent outline-offset-2' : '',
+          ].join(' ')}
+        >
+          <img
+            src={ann.imageData}
+            alt="signature"
+            draggable={false}
+            className="w-full h-full object-contain block"
+          />
           {selected && (
             <>
-              <button onClick={e => { e.stopPropagation(); onDelete() }}
-                style={{ position: 'absolute', top: -10, right: -10, width: 20, height: 20, background: '#ef4444', border: '2px solid white', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'white', fontWeight: 700, zIndex: 20 }}
-              >×</button>
-              <div onMouseDown={onResizeDown}
-                style={{ position: 'absolute', bottom: -5, right: -5, width: 12, height: 12, background: '#4f8ef7', border: '2px solid white', borderRadius: 2, cursor: 'se-resize', zIndex: 20 }}
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); onDelete() }}
+                aria-label="Delete"
+                className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-danger border-2 border-paper rounded-full flex items-center justify-center text-white shadow-e1 z-20"
+              >
+                <X size={11} />
+              </button>
+              <div
+                onMouseDown={onResizeDown}
+                className="absolute -bottom-1 -right-1 w-3 h-3 bg-accent border-2 border-paper rounded-xs cursor-se-resize z-20"
               />
             </>
           )}
@@ -1699,9 +1870,11 @@ function AnnotationElement({ ann, selected, activeTool, onMouseDown, onDelete, o
 
 function PanelRow({ label, children }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-      <span style={{ fontSize: 12, color: '#6b7280', width: 44, flexShrink: 0 }}>{label}</span>
-      <div style={{ flex: 1 }}>{children}</div>
+    <div className="flex items-center gap-2">
+      <span className="text-2xs text-ink-faint w-12 flex-shrink-0 tracking-tightish">
+        {label}
+      </span>
+      <div className="flex-1">{children}</div>
     </div>
   )
 }

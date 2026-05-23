@@ -2,7 +2,10 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Workbook } from '@fortune-sheet/react'
 import '@fortune-sheet/react/dist/index.css'
-import { ArrowLeft, Save, Loader2, Download, AlertCircle, MessageSquare } from 'lucide-react'
+import {
+  ArrowLeft, Save, Loader2, Download, AlertCircle, MessageSquare,
+  Check, Circle, ChevronDown,
+} from 'lucide-react'
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
 import { readDraft, clearDraft } from '../../lib/draftStore'
@@ -11,6 +14,7 @@ import { GridSession, getGridReplicaId } from '../../lib/crdt/grid.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '../../lib/useLiveCursors.js'
 import { SheetsCursorLayer } from '../../components/RemoteCursors.jsx'
+import { Button, IconButton, Tooltip, Topbar } from '../../components/ui'
 
 const RETRY_DELAY_MS = 4000
 const AUTOSAVE_DELAY_MS = 3000
@@ -106,7 +110,11 @@ export default function SheetsEditor() {
 
   // ── OFFICE-25: Live cursors ───────────────────────────────────────────────
   // fabric is null until OFFICE-20 is wired; hook is a graceful no-op until then.
-  const { remoteCursors, broadcastSheetCursor } = useLiveCursors({ fabric: null, localIdentity: null, color: '#6366f1' })
+  // Cursor colour pulled from the accent ramp so remote highlights sit calmly
+  // alongside the warm-neutral surface (no generic indigo).
+  const { remoteCursors, broadcastSheetCursor } = useLiveCursors({
+    fabric: null, localIdentity: null, color: 'var(--teal-500)',
+  })
 
   // Reference to the Fortune Sheet container so we can measure cell positions.
   const workbookWrapRef = useRef(null)
@@ -197,6 +205,13 @@ export default function SheetsEditor() {
     doSave(dataRef.current)
   }
 
+  const handleTitleChange = (newTitle) => {
+    setTitle(newTitle)
+    markDirty(id)
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => doSave(dataRef.current), 1500)
+  }
+
   const handleRestoreDraft = () => {
     if (!draft) return
     setData(draft.content)
@@ -210,95 +225,166 @@ export default function SheetsEditor() {
     setDraft(null)
   }
 
-  const statusText = () => {
-    if (saveStatus.status === 'saving') return 'Saving…'
-    if (saveStatus.status === 'saved') return 'Saved'
-    if (saveStatus.status === 'error') return retryCount > 0 ? `Retry ${retryCount}/3…` : 'Save failed'
-    if (saveStatus.status === 'dirty') return 'Unsaved'
-    return ''
-  }
-
-  const statusColor = () => {
-    if (saveStatus.status === 'error') return 'text-red-500'
-    if (saveStatus.status === 'saving') return 'text-yellow-500'
-    if (saveStatus.status === 'saved') return 'text-green-500'
-    return 'text-gray-400'
-  }
+  // Discreet save status — a meta-line, never a banner.
+  // Mirrors DocsEditor: an icon + short word in muted ink so the user
+  // doesn't have to keep scanning to verify the doc is safe.
+  const statusInfo = (() => {
+    switch (saveStatus.status) {
+      case 'saving':
+        return { text: 'Saving',  tone: 'muted',   icon: Loader2,    spin: true  }
+      case 'saved':
+        return { text: 'Saved',   tone: 'success', icon: Check,      spin: false }
+      case 'error':
+        return {
+          text: retryCount > 0 ? `Retrying ${retryCount}/3` : 'Save failed',
+          tone: 'danger',
+          icon: AlertCircle,
+          spin: false,
+        }
+      case 'dirty':
+        return { text: 'Unsaved', tone: 'muted',   icon: Circle,     spin: false }
+      default:
+        return null
+    }
+  })()
+  const StatusIcon = statusInfo?.icon
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-white">
-      {/* Draft restore banner */}
+    <div className="flex-1 flex flex-col overflow-hidden bg-bg">
+      {/* Draft-restore — only banner we keep (requires user action). */}
       {draft && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-amber-50 border-b border-amber-200 text-sm text-amber-800">
-          <AlertCircle size={16} className="text-amber-500 flex-shrink-0" />
-          <span className="flex-1">Unsaved changes from a previous session were found.</span>
-          <button
-            onClick={handleRestoreDraft}
-            className="px-3 py-1 bg-amber-600 text-white rounded-md text-xs font-medium hover:bg-amber-700 transition"
-          >
-            Restore
-          </button>
-          <button
-            onClick={handleDiscardDraft}
-            className="px-3 py-1 border border-amber-400 text-amber-700 rounded-md text-xs font-medium hover:bg-amber-100 transition"
-          >
-            Discard
-          </button>
+        <div className="flex items-center gap-3 px-4 py-2 bg-warning-bg border-b border-line text-xs text-warning animate-fade-in">
+          <AlertCircle size={14} className="flex-shrink-0" />
+          <span className="flex-1 text-ink-muted">
+            Unsaved changes from a previous session were found.
+          </span>
+          <Button variant="primary" size="sm" onClick={handleRestoreDraft}>Restore</Button>
+          <Button variant="secondary" size="sm" onClick={handleDiscardDraft}>Discard</Button>
         </div>
       )}
 
-      {/* Save error banner */}
-      {saveStatus.status === 'error' && !draft && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-red-50 border-b border-red-200 text-sm text-red-700">
-          <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
-          <span className="flex-1">Save failed — {saveStatus.error || 'network error'}. Retrying…</span>
-        </div>
-      )}
+      {/* Top bar — composed from the design system, mirroring DocsEditor. */}
+      <Topbar
+        leading={
+          <Tooltip label="Back to Sheets">
+            <IconButton size="sm" onClick={() => navigate('/sheets')}>
+              <ArrowLeft size={15} />
+            </IconButton>
+          </Tooltip>
+        }
+        title={
+          <input
+            value={title}
+            onChange={(e) => handleTitleChange(e.target.value)}
+            placeholder="Untitled sheet"
+            aria-label="Sheet title"
+            className={[
+              'flex-1 min-w-0 text-sm font-semibold tracking-tightish',
+              'bg-transparent border border-transparent rounded-sm px-2 py-1',
+              'text-ink placeholder:text-ink-faint',
+              'hover:border-line focus:border-line-strong focus:bg-paper',
+              'transition-[border-color,background] duration-fast ease-out outline-none',
+            ].join(' ')}
+          />
+        }
+        meta={
+          statusInfo && (
+            <span
+              className={[
+                'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
+                statusInfo.tone === 'success' ? 'text-success' :
+                statusInfo.tone === 'danger'  ? 'text-danger' :
+                                                'text-ink-faint',
+              ].join(' ')}
+              title={saveStatus.error || ''}
+            >
+              {StatusIcon && (
+                <StatusIcon
+                  size={11}
+                  className={statusInfo.spin ? 'animate-spin' : ''}
+                />
+              )}
+              {statusInfo.text}
+            </span>
+          )
+        }
+        actions={
+          <>
+            <Tooltip label="Comments">
+              <IconButton
+                size="sm"
+                active={showComments}
+                onClick={() => setShowComments((v) => !v)}
+              >
+                <MessageSquare size={14} />
+              </IconButton>
+            </Tooltip>
+            {/* Export — quiet secondary so it doesn't compete with primary Save. */}
+            <div className="relative group">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                className={[
+                  'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md',
+                  'bg-paper border border-line text-xs font-medium tracking-tightish',
+                  'text-ink-muted hover:border-line-strong hover:text-ink',
+                  'transition-colors duration-fast ease-out',
+                  'focus-visible:outline-none focus-visible:shadow-focus',
+                ].join(' ')}
+              >
+                <Download size={12} /> Export
+                <ChevronDown size={11} className="opacity-60" />
+              </button>
+              <div
+                role="menu"
+                className={[
+                  'absolute right-0 top-full mt-0.5 w-44 py-1',
+                  'bg-paper border border-line rounded-md shadow-e2 z-30 text-sm',
+                  'hidden group-hover:block animate-scale-in',
+                ].join(' ')}
+              >
+                <button
+                  role="menuitem"
+                  onClick={() => exportSheetsToXlsx(data, title)}
+                  className="w-full text-left px-3 py-2 hover:bg-accent-tint text-ink-muted flex items-center gap-2"
+                >
+                  <span className="text-2xs font-bold tracking-eyebrow text-accent w-10">XLSX</span>
+                  Excel workbook
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={() => exportSheetsToCsv(data, title)}
+                  className="w-full text-left px-3 py-2 hover:bg-accent-tint text-ink-muted flex items-center gap-2"
+                >
+                  <span className="text-2xs font-bold tracking-eyebrow text-ink-faint w-10">CSV</span>
+                  Comma-separated
+                </button>
+              </div>
+            </div>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleSave}
+              disabled={saveStatus.status === 'saving'}
+            >
+              {saveStatus.status === 'saving'
+                ? <Loader2 size={13} className="animate-spin" />
+                : <Save size={13} />}
+              Save
+            </Button>
+          </>
+        }
+      />
 
-      {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 bg-white flex-shrink-0">
-        <button onClick={() => navigate('/sheets')} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition">
-          <ArrowLeft size={18} />
-        </button>
-        <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
-          <svg viewBox="0 0 24 24" className="w-4 h-4 text-emerald-600 fill-current"><path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm-8 14H7v-2h4v2zm0-4H7v-2h4v2zm0-4H7V7h4v2zm6 8h-4v-2h4v2zm0-4h-4v-2h4v2zm0-4h-4V7h4v2z"/></svg>
-        </div>
-        <input
-          value={title}
-          onChange={(e) => { setTitle(e.target.value); markDirty(id) }}
-          className="flex-1 text-base font-semibold text-gray-900 bg-transparent border-none outline-none hover:bg-gray-50 focus:bg-gray-50 rounded px-2 py-0.5"
-          placeholder="Untitled Sheet"
-        />
-        <span className={`text-xs hidden sm:block ${statusColor()}`}>{statusText()}</span>
-        <button
-          onClick={() => setShowComments(v => !v)}
-          title="Comments"
-          className={`p-1.5 rounded-lg transition ${showComments ? 'bg-emerald-100 text-emerald-600' : 'hover:bg-gray-100 text-gray-500'}`}
+      {/* Workbook + optional comments panel.
+          We wrap Fortune Sheet in `sheets-themed` so a small set of CSS rules
+          re-tint cell selection / column headers with the design tokens,
+          without touching the library's grid internals. */}
+      <div className="flex-1 flex overflow-hidden bg-bg">
+        <div
+          className="flex-1 overflow-hidden relative bg-paper sheets-themed"
+          ref={workbookWrapRef}
         >
-          <MessageSquare size={16} />
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={saveStatus.status === 'saving'}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-60 transition"
-        >
-          {saveStatus.status === 'saving' ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          Save
-        </button>
-        <div className="relative group">
-          <button className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
-            <Download size={14} /> Export ▾
-          </button>
-          <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-xl shadow-xl z-30 py-1 text-sm hidden group-hover:block">
-            <button onClick={() => exportSheetsToXlsx(data, title)} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-gray-700">Excel (.xlsx)</button>
-            <button onClick={() => exportSheetsToCsv(data, title)} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-gray-700">CSV (.csv)</button>
-          </div>
-        </div>
-      </div>
-
-      {/* Workbook + optional comments panel */}
-      <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 overflow-hidden relative" ref={workbookWrapRef}>
           <Workbook
             data={data}
             onChange={handleChange}

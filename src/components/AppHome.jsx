@@ -9,12 +9,14 @@ import { useFilesStore } from '../store/filesStore'
 import { useLocalFilesStore } from '../store/localFilesStore'
 import NewFileModal from './NewFileModal'
 import { importFromUrl, importFile } from '../lib/importFile'
+import { Button, IconButton, Input, Card, Tooltip } from './ui'
 
+// ─── Token-aligned config ─────────────────────────────────────────────────────
 const CONFIG = {
   doc: {
     label: 'Documents', singularLabel: 'Document',
-    icon: FileText, color: 'text-indigo-600', bg: 'bg-indigo-50',
-    btnBg: 'bg-indigo-600 hover:bg-indigo-700', accent: '#4f46e5',
+    icon: FileText,
+    iconCn: 'text-accent',       bgCn: 'bg-accent-tint',
     route: 'docs', emptyMsg: 'No documents yet',
     localExts: ['.doc', '.docx', '.txt', '.md', '.rtf', '.odt'],
     extLabel: 'docx, doc, txt, md',
@@ -23,8 +25,8 @@ const CONFIG = {
   },
   sheet: {
     label: 'Spreadsheets', singularLabel: 'Spreadsheet',
-    icon: Table2, color: 'text-emerald-600', bg: 'bg-emerald-50',
-    btnBg: 'bg-emerald-600 hover:bg-emerald-700', accent: '#059669',
+    icon: Table2,
+    iconCn: 'text-success',      bgCn: 'bg-success-bg',
     route: 'sheets', emptyMsg: 'No spreadsheets yet',
     localExts: ['.xls', '.xlsx', '.csv', '.ods'],
     extLabel: 'xlsx, xls, csv',
@@ -33,8 +35,8 @@ const CONFIG = {
   },
   slide: {
     label: 'Presentations', singularLabel: 'Presentation',
-    icon: Presentation, color: 'text-amber-600', bg: 'bg-amber-50',
-    btnBg: 'bg-amber-500 hover:bg-amber-600', accent: '#d97706',
+    icon: Presentation,
+    iconCn: 'text-warning',      bgCn: 'bg-warning-bg',
     route: 'slides', emptyMsg: 'No presentations yet',
     localExts: ['.ppt', '.pptx', '.odp'],
     extLabel: 'pptx, ppt',
@@ -43,8 +45,8 @@ const CONFIG = {
   },
   pdf: {
     label: 'PDFs', singularLabel: 'PDF',
-    icon: FileSearch, color: 'text-rose-600', bg: 'bg-rose-50',
-    btnBg: 'bg-rose-600 hover:bg-rose-700', accent: '#e11d48',
+    icon: FileSearch,
+    iconCn: 'text-danger',       bgCn: 'bg-danger-bg',
     route: 'pdf', emptyMsg: 'No PDFs yet',
     localExts: ['.pdf'],
     extLabel: 'pdf',
@@ -55,16 +57,16 @@ const CONFIG = {
 
 function formatDate(s) {
   const diff = Date.now() - new Date(s).getTime()
-  if (diff < 60000) return 'just now'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+  if (diff < 60000)    return 'just now'
+  if (diff < 3600000)  return `${Math.floor(diff / 60000)}m ago`
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-  if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`
+  if (diff < 604800000)return `${Math.floor(diff / 86400000)}d ago`
   return new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 function formatSize(b) {
-  if (b < 1024) return b + ' B'
-  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB'
+  if (b < 1024)         return b + ' B'
+  if (b < 1024 * 1024)  return (b / 1024).toFixed(0) + ' KB'
   return (b / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
@@ -109,7 +111,6 @@ export default function AppHome({ type }) {
     .filter(f => f.name.toLowerCase().includes(search.toLowerCase()))
 
   const openFile = (f) => navigate(`/${cfg.route}/${f.id}`)
-
   const startRename = (f) => { setRenaming(f.id); setRenameValue(f.name); setMenuOpen(null) }
   const commitRename = async (id) => { if (renameValue.trim()) await renameFile(id, renameValue.trim()); setRenaming(null) }
 
@@ -126,80 +127,107 @@ export default function AppHome({ type }) {
   }
 
   return (
-    <div className="flex-1 overflow-auto bg-gray-50">
-      {/* Top bar */}
-      <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-3">
-        <div className={`w-7 h-7 rounded-lg ${cfg.bg} flex items-center justify-center flex-shrink-0`}>
-          <Icon size={15} className={cfg.color} />
+    <div className="flex-1 overflow-auto bg-bg">
+      {/* ── Topbar ── */}
+      <div className="sticky top-0 z-10 flex items-center gap-3 px-5 h-11 bg-paper border-b border-line">
+        {/* App icon */}
+        <div className={`w-7 h-7 rounded-md ${cfg.bgCn} flex items-center justify-center flex-shrink-0`}>
+          <Icon size={15} className={cfg.iconCn} />
         </div>
-        <h1 className="text-sm font-bold text-gray-900">{cfg.label}</h1>
+        <h1 className="text-sm font-semibold text-ink tracking-tightish">{cfg.label}</h1>
 
-        <div className="flex-1 max-w-sm relative mx-2">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
+        {/* Search */}
+        <div className="flex-1 max-w-xs mx-2">
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
             placeholder="Search…"
-            className="w-full pl-8 pr-3 py-1.5 bg-gray-100 rounded-lg text-sm focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-400 transition"
+            size="sm"
+            leading={<Search size={13} />}
           />
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-1">
-            <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md transition ${viewMode === 'grid' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={13} /></button>
-            <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md transition ${viewMode === 'list' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}><List size={13} /></button>
+        {/* Actions cluster */}
+        <div className="ml-auto flex items-center gap-1.5">
+          {/* View toggle */}
+          <div className="flex items-center gap-0.5 p-0.5 bg-bg-elev2 border border-line rounded-md mr-1">
+            <Tooltip label="Grid view" side="bottom">
+              <IconButton
+                size="sm"
+                active={viewMode === 'grid'}
+                onClick={() => setViewMode('grid')}
+              >
+                <LayoutGrid size={13} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip label="List view" side="bottom">
+              <IconButton
+                size="sm"
+                active={viewMode === 'list'}
+                onClick={() => setViewMode('list')}
+              >
+                <List size={13} />
+              </IconButton>
+            </Tooltip>
           </div>
-          <input ref={fileInputRef} type="file" accept={cfg.importExts} className="hidden" onChange={handleImportFile} />
-          <button
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={cfg.importExts}
+            className="hidden"
+            onChange={handleImportFile}
+          />
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => fileInputRef.current?.click()}
             disabled={importing === '__file__'}
-            className="flex items-center gap-1.5 px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-xl text-sm font-semibold shadow-sm transition"
           >
-            {importing === '__file__' ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-            Open File
-          </button>
+            {importing === '__file__' ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+            Open file
+          </Button>
           {cfg.canCreate && (
-            <button onClick={() => setShowNew(true)}
-              className={`flex items-center gap-1.5 px-4 py-2 ${cfg.btnBg} text-white rounded-xl text-sm font-semibold shadow-sm transition`}
-            >
-              <Plus size={14} /> New {cfg.singularLabel}
-            </button>
+            <Button variant="primary" size="sm" onClick={() => setShowNew(true)}>
+              <Plus size={13} /> New {cfg.singularLabel}
+            </Button>
           )}
         </div>
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-6 space-y-8">
 
-        {/* Vulos files */}
+        {/* ── Cloud files ── */}
         <section>
           {loading && (
             <div className="flex justify-center py-16">
-              <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: cfg.accent, borderTopColor: 'transparent' }} />
+              <Loader2 size={18} className="animate-spin text-accent" />
             </div>
           )}
 
           {!loading && myFiles.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className={`w-16 h-16 ${cfg.bg} rounded-2xl flex items-center justify-center mb-4`}>
-                <Icon size={28} className={`${cfg.color} opacity-40`} />
+            <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in">
+              <div className={`w-16 h-16 ${cfg.bgCn} rounded-xl flex items-center justify-center mb-4`}>
+                <Icon size={28} className={`${cfg.iconCn} opacity-40`} />
               </div>
-              <p className="text-base font-bold text-gray-900 mb-1">
+              <p className="font-serif text-lg text-ink mb-1">
                 {search ? 'No results' : cfg.emptyMsg}
               </p>
-              <p className="text-sm text-gray-400 mb-5">
-                {search ? 'Try a different term' : `Start fresh with a blank ${cfg.singularLabel.toLowerCase()}`}
+              <p className="text-sm text-ink-muted mb-6">
+                {search
+                  ? 'Try a different search term'
+                  : `Start fresh with a blank ${cfg.singularLabel.toLowerCase()}`
+                }
               </p>
               {!search && (
                 <div className="flex items-center gap-2">
-                  <button onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-xl text-sm font-semibold transition"
-                  >
-                    <Upload size={15} /> Open File
-                  </button>
+                  <Button variant="secondary" size="md" onClick={() => fileInputRef.current?.click()}>
+                    <Upload size={14} /> Open File
+                  </Button>
                   {cfg.canCreate && (
-                    <button onClick={() => setShowNew(true)}
-                      className={`flex items-center gap-2 px-5 py-2.5 ${cfg.btnBg} text-white rounded-xl text-sm font-semibold transition`}
-                    >
-                      <Plus size={15} /> New {cfg.singularLabel}
-                    </button>
+                    <Button variant="primary" size="md" onClick={() => setShowNew(true)}>
+                      <Plus size={14} /> New {cfg.singularLabel}
+                    </Button>
                   )}
                 </div>
               )}
@@ -209,10 +237,17 @@ export default function AppHome({ type }) {
           {!loading && myFiles.length > 0 && viewMode === 'grid' && (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {myFiles.map(file => (
-                <FileCard key={file.id} file={file} cfg={cfg} Icon={Icon}
-                  renaming={renaming} renameValue={renameValue}
-                  setRenaming={setRenaming} setRenameValue={setRenameValue}
-                  menuOpen={menuOpen} setMenuOpen={setMenuOpen}
+                <FileCard
+                  key={file.id}
+                  file={file}
+                  cfg={cfg}
+                  Icon={Icon}
+                  renaming={renaming}
+                  renameValue={renameValue}
+                  setRenaming={setRenaming}
+                  setRenameValue={setRenameValue}
+                  menuOpen={menuOpen}
+                  setMenuOpen={setMenuOpen}
                   onOpen={() => openFile(file)}
                   onRename={() => startRename(file)}
                   onRenameCommit={() => commitRename(file.id)}
@@ -223,10 +258,16 @@ export default function AppHome({ type }) {
           )}
 
           {!loading && myFiles.length > 0 && viewMode === 'list' && (
-            <FileListTable files={myFiles} cfg={cfg} Icon={Icon}
-              renaming={renaming} renameValue={renameValue}
-              setRenaming={setRenaming} setRenameValue={setRenameValue}
-              menuOpen={menuOpen} setMenuOpen={setMenuOpen}
+            <FileListTable
+              files={myFiles}
+              cfg={cfg}
+              Icon={Icon}
+              renaming={renaming}
+              renameValue={renameValue}
+              setRenaming={setRenaming}
+              setRenameValue={setRenameValue}
+              menuOpen={menuOpen}
+              setMenuOpen={setMenuOpen}
               onOpen={openFile}
               onRename={startRename}
               onRenameCommit={commitRename}
@@ -235,46 +276,62 @@ export default function AppHome({ type }) {
           )}
         </section>
 
-        {/* On Your Computer */}
+        {/* ── On Your Computer ── */}
         {myLocalFiles.length > 0 && (
           <section>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <HardDrive size={13} className="text-gray-400" />
-                <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">On Your Computer</h2>
-                <span className="text-[10px] text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">{myLocalFiles.length}</span>
+                <HardDrive size={13} className="text-ink-faint" />
+                <p className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+                  On Your Computer
+                </p>
+                <span className="text-2xs text-ink-faint bg-bg-elev2 border border-line rounded-pill px-2 py-0.5">
+                  {myLocalFiles.length}
+                </span>
               </div>
-              <button onClick={() => scan()} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition">
+              <button
+                onClick={() => scan()}
+                className="flex items-center gap-1.5 text-2xs text-ink-faint hover:text-ink-muted transition-colors"
+              >
                 <RefreshCw size={11} className={localLoading ? 'animate-spin' : ''} />
                 Rescan
               </button>
             </div>
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <Card>
               {myLocalFiles.map((file, i) => (
-                <button key={file.path}
+                <button
+                  key={file.path}
                   onClick={() => openLocalFile(file)}
                   disabled={importing === file.path}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition text-left group ${i < myLocalFiles.length - 1 ? 'border-b border-gray-50' : ''}`}
+                  className={[
+                    'w-full flex items-center gap-3 px-4 py-2.5 text-left group',
+                    'hover:bg-accent-tint transition-colors duration-fast ease-out',
+                    'disabled:opacity-60',
+                    i < myLocalFiles.length - 1 ? 'border-b border-line' : '',
+                  ].join(' ')}
                 >
-                  <div className={`w-7 h-7 ${cfg.bg} rounded-md flex items-center justify-center flex-shrink-0`}>
-                    <Icon size={13} className={cfg.color} />
+                  <div className={`w-7 h-7 ${cfg.bgCn} rounded-md flex items-center justify-center flex-shrink-0`}>
+                    <Icon size={13} className={cfg.iconCn} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
-                    <p className="text-[10px] text-gray-400 truncate">{file.path.replace(/\/Users\/[^/]+/, '~')}</p>
+                    <p className="text-sm font-medium text-ink truncate tracking-tightish">{file.name}</p>
+                    <p className="text-2xs text-ink-faint truncate">
+                      {file.path.replace(/\/Users\/[^/]+/, '~')}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-3 flex-shrink-0 text-[10px] text-gray-400">
+                  <div className="flex items-center gap-3 flex-shrink-0 text-2xs text-ink-faint tracking-tightish">
                     <span>{formatSize(file.size)}</span>
-                    <span className={`px-1.5 py-0.5 rounded ${cfg.bg} ${cfg.color} font-medium uppercase text-[9px]`}>
+                    <span className={`px-1.5 py-0.5 rounded-xs ${cfg.bgCn} ${cfg.iconCn} font-semibold uppercase text-[9px]`}>
                       {file.ext.slice(1)}
                     </span>
                     {importing === file.path
-                      ? <Loader2 size={12} className="animate-spin text-indigo-500" />
-                      : <ArrowUpRight size={12} className="text-gray-300 group-hover:text-gray-500 transition" />}
+                      ? <Loader2 size={12} className="animate-spin text-accent" />
+                      : <ArrowUpRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                    }
                   </div>
                 </button>
               ))}
-            </div>
+            </Card>
           </section>
         )}
       </div>
@@ -285,39 +342,66 @@ export default function AppHome({ type }) {
   )
 }
 
-function FileCard({ file, cfg, Icon, renaming, renameValue, setRenaming, setRenameValue, menuOpen, setMenuOpen, onOpen, onRename, onRenameCommit, onDelete }) {
+// ─── FileCard ─────────────────────────────────────────────────────────────────
+function FileCard({
+  file, cfg, Icon, renaming, renameValue, setRenaming, setRenameValue,
+  menuOpen, setMenuOpen, onOpen, onRename, onRenameCommit, onDelete,
+}) {
   return (
-    <div className="group bg-white rounded-xl border border-gray-200 hover:border-gray-300 hover:shadow-md transition-all cursor-pointer overflow-hidden">
-      <div className={`h-28 ${cfg.bg} flex items-center justify-center relative`} onClick={onOpen}>
-        <Icon size={32} className={`${cfg.color} opacity-30`} />
-        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition">
-          <ArrowUpRight size={13} className="text-gray-500" />
+    <div className="group bg-paper rounded-lg border border-line hover:border-line-strong hover:shadow-e1 transition-all cursor-pointer overflow-hidden">
+      {/* Thumbnail */}
+      <div
+        className={`h-28 ${cfg.bgCn} flex items-center justify-center relative`}
+        onClick={onOpen}
+      >
+        <Icon size={32} className={`${cfg.iconCn} opacity-25`} />
+        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <ArrowUpRight size={13} className="text-ink-faint" />
         </div>
       </div>
+      {/* Meta */}
       <div className="p-3" onClick={onOpen}>
         {renaming === file.id ? (
-          <input autoFocus value={renameValue}
+          <input
+            autoFocus
+            value={renameValue}
             onChange={e => setRenameValue(e.target.value)}
             onBlur={onRenameCommit}
-            onKeyDown={e => { if (e.key === 'Enter') onRenameCommit(); if (e.key === 'Escape') setRenaming(null) }}
-            className="w-full text-xs font-semibold border border-indigo-400 rounded px-1 focus:outline-none"
+            onKeyDown={e => {
+              if (e.key === 'Enter') onRenameCommit()
+              if (e.key === 'Escape') setRenaming(null)
+            }}
+            className="w-full text-xs font-semibold border border-accent rounded-sm px-1 focus:outline-none bg-paper text-ink"
             onClick={e => e.stopPropagation()}
           />
         ) : (
-          <p className="text-xs font-semibold text-gray-900 truncate">{file.name}</p>
+          <p className="text-xs font-semibold text-ink truncate tracking-tightish">{file.name}</p>
         )}
         <div className="flex items-center justify-between mt-1.5">
-          <span className="text-[10px] text-gray-400 flex items-center gap-1">
+          <span className="text-2xs text-ink-faint flex items-center gap-1 tracking-tightish">
             <Clock size={9} />{formatDate(file.updated_at)}
           </span>
           <div className="relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setMenuOpen(menuOpen === file.id ? null : file.id)}
-              className="p-0.5 rounded hover:bg-gray-100 text-gray-400 opacity-0 group-hover:opacity-100 transition"
-            ><MoreVertical size={12} /></button>
+            <button
+              onClick={() => setMenuOpen(menuOpen === file.id ? null : file.id)}
+              className="p-0.5 rounded-sm hover:bg-accent-tint text-ink-faint opacity-0 group-hover:opacity-100 transition-[opacity,background] duration-fast"
+            >
+              <MoreVertical size={12} />
+            </button>
             {menuOpen === file.id && (
-              <div className="absolute right-0 bottom-full mb-1 w-32 bg-white border border-gray-200 rounded-xl shadow-xl z-20 py-1 text-xs">
-                <button className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 text-gray-700" onClick={onRename}><Pencil size={12} /> Rename</button>
-                <button className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 text-red-600" onClick={onDelete}><Trash2 size={12} /> Delete</button>
+              <div className="absolute right-0 bottom-full mb-1 w-32 bg-paper border border-line rounded-lg shadow-e2 z-20 py-1 text-xs overflow-hidden animate-scale-in">
+                <button
+                  className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent-tint text-ink transition-colors"
+                  onClick={onRename}
+                >
+                  <Pencil size={12} className="text-ink-faint" /> Rename
+                </button>
+                <button
+                  className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-danger-bg text-danger transition-colors"
+                  onClick={onDelete}
+                >
+                  <Trash2 size={12} /> Delete
+                </button>
               </div>
             )}
           </div>
@@ -327,48 +411,74 @@ function FileCard({ file, cfg, Icon, renaming, renameValue, setRenaming, setRena
   )
 }
 
-function FileListTable({ files, cfg, Icon, renaming, renameValue, setRenaming, setRenameValue, menuOpen, setMenuOpen, onOpen, onRename, onRenameCommit, onDelete }) {
+// ─── FileListTable ────────────────────────────────────────────────────────────
+function FileListTable({
+  files, cfg, Icon, renaming, renameValue, setRenaming, setRenameValue,
+  menuOpen, setMenuOpen, onOpen, onRename, onRenameCommit, onDelete,
+}) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    <Card>
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-gray-100 bg-gray-50">
-            <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
-            <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Modified</th>
+          <tr className="border-b border-line bg-bg-elev2">
+            <th className="text-left px-4 py-2.5 text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">Name</th>
+            <th className="text-left px-4 py-2.5 text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">Modified</th>
             <th className="w-10" />
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-50">
+        <tbody className="divide-y divide-line">
           {files.map(file => (
-            <tr key={file.id} className="group hover:bg-gray-50 cursor-pointer" onClick={() => onOpen(file)}>
+            <tr
+              key={file.id}
+              className="group hover:bg-accent-tint cursor-pointer transition-colors duration-fast"
+              onClick={() => onOpen(file)}
+            >
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 ${cfg.bg} rounded-lg flex items-center justify-center flex-shrink-0`}>
-                    <Icon size={14} className={cfg.color} />
+                  <div className={`w-8 h-8 ${cfg.bgCn} rounded-md flex items-center justify-center flex-shrink-0`}>
+                    <Icon size={14} className={cfg.iconCn} />
                   </div>
                   {renaming === file.id ? (
-                    <input autoFocus value={renameValue}
+                    <input
+                      autoFocus
+                      value={renameValue}
                       onChange={e => setRenameValue(e.target.value)}
                       onBlur={() => onRenameCommit(file.id)}
-                      onKeyDown={e => { if (e.key === 'Enter') onRenameCommit(file.id); if (e.key === 'Escape') setRenaming(null) }}
-                      className="font-medium border border-indigo-400 rounded px-1 text-sm focus:outline-none"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') onRenameCommit(file.id)
+                        if (e.key === 'Escape') setRenaming(null)
+                      }}
+                      className="font-medium border border-accent rounded-sm px-1 text-sm focus:outline-none bg-paper text-ink"
                       onClick={e => e.stopPropagation()}
                     />
                   ) : (
-                    <span className="font-medium text-gray-900">{file.name}</span>
+                    <span className="font-medium text-ink tracking-tightish">{file.name}</span>
                   )}
                 </div>
               </td>
-              <td className="px-4 py-3 text-gray-400 text-xs">{formatDate(file.updated_at)}</td>
+              <td className="px-4 py-3 text-2xs text-ink-faint tracking-tightish">{formatDate(file.updated_at)}</td>
               <td className="px-2 py-3" onClick={e => e.stopPropagation()}>
                 <div className="relative">
-                  <button onClick={() => setMenuOpen(menuOpen === file.id ? null : file.id)}
-                    className="p-1 rounded hover:bg-gray-100 text-gray-400 opacity-0 group-hover:opacity-100 transition"
-                  ><MoreVertical size={14} /></button>
+                  <button
+                    onClick={() => setMenuOpen(menuOpen === file.id ? null : file.id)}
+                    className="p-1 rounded-sm hover:bg-accent-tint text-ink-faint opacity-0 group-hover:opacity-100 transition-[opacity,background] duration-fast"
+                  >
+                    <MoreVertical size={14} />
+                  </button>
                   {menuOpen === file.id && (
-                    <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-xl shadow-xl z-20 py-1 text-xs">
-                      <button className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 text-gray-700" onClick={() => onRename(file)}><Pencil size={12} /> Rename</button>
-                      <button className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 text-red-600" onClick={() => onDelete(file.id)}><Trash2 size={12} /> Delete</button>
+                    <div className="absolute right-0 top-full mt-1 w-32 bg-paper border border-line rounded-lg shadow-e2 z-20 py-1 text-xs overflow-hidden animate-scale-in">
+                      <button
+                        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent-tint text-ink transition-colors"
+                        onClick={() => onRename(file)}
+                      >
+                        <Pencil size={12} className="text-ink-faint" /> Rename
+                      </button>
+                      <button
+                        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-danger-bg text-danger transition-colors"
+                        onClick={() => onDelete(file.id)}
+                      >
+                        <Trash2 size={12} /> Delete
+                      </button>
                     </div>
                   )}
                 </div>
@@ -377,6 +487,6 @@ function FileListTable({ files, cfg, Icon, renaming, renameValue, setRenaming, s
           ))}
         </tbody>
       </table>
-    </div>
+    </Card>
   )
 }
