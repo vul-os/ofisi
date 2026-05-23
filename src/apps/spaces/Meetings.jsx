@@ -335,14 +335,14 @@ function CreateModal({ open, onCreated, onClose }) {
             required
           />
           <Input
-            label="Your vumail"
+            label="Your Vulos account address"
             placeholder="you@vulos"
             value={form.host_vumail}
             onChange={(e) => update('host_vumail', e.target.value)}
           />
           <Input
             label="Invitees"
-            hint="Comma-separated vumail addresses"
+            hint="Comma-separated Vulos account addresses (@vulos.org)"
             placeholder="alice@vulos, bob@vulos"
             value={form.invitees_raw}
             onChange={(e) => update('invitees_raw', e.target.value)}

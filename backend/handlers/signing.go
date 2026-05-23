@@ -222,7 +222,7 @@ func (h *SigningHandler) GetSignerView(c *gin.Context) {
 //   - each signature yields a verifiable Ed25519 token bound to the doc hash
 //   - audit log is hash-chained + append-only
 //   - before/after hashes recorded per signer
-//   - identity captured (account/vumail or link)
+//   - identity captured (Vulos account or link)
 func (h *SigningHandler) Complete(c *gin.Context) {
 	token := c.Param("token")
 

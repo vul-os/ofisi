@@ -20,7 +20,7 @@ type Meeting struct {
 	Title       string        `json:"title"`
 	SessionID   string        `json:"session_id"` // fabric session / room id fed into createCall
 	HostVumail  string        `json:"host_vumail"`
-	Invitees    []string      `json:"invitees"`   // vumail addresses
+	Invitees    []string      `json:"invitees"`   // Vulos account addresses (@vulos.org)
 	ScheduledAt *time.Time    `json:"scheduled_at,omitempty"`
 	DurationMin int           `json:"duration_min,omitempty"` // 0 = open-ended
 	Status      MeetingStatus `json:"status"`

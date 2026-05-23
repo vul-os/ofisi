@@ -25,7 +25,7 @@ type Channel struct {
 	ID        string      `json:"id"`
 	Name      string      `json:"name"`
 	Type      ChannelType `json:"type"`
-	CreatedBy string      `json:"created_by"` // account/vumail id of creator
+	CreatedBy string      `json:"created_by"` // Vulos account id of creator
 	CreatedAt time.Time   `json:"created_at"`
 	UpdatedAt time.Time   `json:"updated_at"`
 }
@@ -34,7 +34,7 @@ type Channel struct {
 type Membership struct {
 	ID        string    `json:"id"`
 	ChannelID string    `json:"channel_id"`
-	AccountID string    `json:"account_id"` // vumail / account id
+	AccountID string    `json:"account_id"` // Vulos account id
 	JoinedAt  time.Time `json:"joined_at"`
 }
 

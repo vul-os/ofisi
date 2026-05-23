@@ -42,7 +42,7 @@ export default function Room() {
 
   const [phase, setPhase] = useState('lobby')  // 'lobby' | 'call' | 'ended'
   const [displayName, setDisplayName] = useState('')
-  const [vumail, setVumail] = useState('')
+  const [accountAddress, setAccountAddress] = useState('')
   const [videoOn, setVideoOn] = useState(true)
   const [micOn, setMicOn] = useState(true)
   const [meta, setMeta] = useState(null)
@@ -86,13 +86,13 @@ export default function Room() {
     if (!displayName.trim()) return
     const id = {
       displayName: displayName.trim(),
-      vumail: vumail.trim() || null,
+      accountAddress: accountAddress.trim() || null,
       color: pickColor(),
       peerId: null,
     }
     setIdentity(id)
     setPhase('call')
-  }, [displayName, vumail])
+  }, [displayName, accountAddress])
 
   const handleLeave = useCallback(() => { setPhase('ended') }, [])
   const handleBack = useCallback(() => { navigate('/meetings') }, [navigate])
@@ -265,10 +265,10 @@ export default function Room() {
               autoFocus
             />
             <Input
-              label="Vumail (optional)"
+              label="Vulos account (optional)"
               placeholder="you@vulos"
-              value={vumail}
-              onChange={(e) => setVumail(e.target.value)}
+              value={accountAddress}
+              onChange={(e) => setAccountAddress(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
             />
           </div>

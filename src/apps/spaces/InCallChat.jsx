@@ -12,7 +12,7 @@
  * Props:
  *   channelId   — Spaces channel/thread id tied to this call session
  *   threadParent — optional parent message id (for meeting-room threads)
- *   identity    — { displayName, vumail } used as author label
+ *   identity    — { displayName, accountAddress } used as author label
  *   onClose     — called when the panel is dismissed
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
@@ -77,7 +77,7 @@ export default function InCallChat({ channelId, threadParent = '', identity, onC
     if (!text || !channelId) return
     setSending(true)
     try {
-      const authorId = identity?.vumail || identity?.displayName || 'you'
+      const authorId = identity?.accountAddress || identity?.displayName || 'you'
       store.send(channelId, authorId, text, threadParent)
       setMessages(
         store
@@ -141,7 +141,7 @@ export default function InCallChat({ channelId, threadParent = '', identity, onC
           <ChatMessage
             key={m.id}
             message={m}
-            selfId={identity?.vumail || identity?.displayName}
+            selfId={identity?.accountAddress || identity?.displayName}
           />
         ))}
         <div ref={bottomRef} />

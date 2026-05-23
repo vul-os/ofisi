@@ -108,7 +108,7 @@ for the signaling and relay primitives this builds on.
   P2P data channel where reachable, **relay circuit fallback** otherwise; bucket
   snapshot for cold/late joiners.
 - **Presence:** live roster of collaborators with identity (Vulos account /
-  vumail), color, and online state.
+  accountAddress), color, and online state.
 - **Live cursors & selections:** remote carets and selection ranges rendered in
   each editor.
 - **Comments:** anchored, threaded comments on a text range / cell / slide
@@ -140,7 +140,7 @@ and signs (draw, type, or upload). Every completed signature **generates a
 cryptographic token** and appends to a **tamper-evident audit trail** — who
 signed, when, from where, and the document hash before and after. The result is
 a sealed, verifiable PDF plus a completion certificate. Where possible, signer
-identity ties to the **Vulos account / vumail**.
+identity ties to the **Vulos account**.
 
 ### Goals
 
@@ -150,7 +150,7 @@ identity ties to the **Vulos account / vumail**.
   tamper-evident: any post-sign modification must be detectable.
 - Support real signing ceremonies — multiple signers, defined order, reminders,
   and a final completion certificate.
-- Anchor identity in Vulos (account / vumail) when available; allow link-based
+- Anchor identity in Vulos account when available; allow link-based
   signers when not.
 
 ### Concrete features
@@ -175,7 +175,7 @@ identity ties to the **Vulos account / vumail**.
   in / attached to the final sealed PDF.
 - **Verification:** a checker that re-hashes a sealed PDF and validates each
   token + audit chain, flagging any tampering.
-- **Identity binding:** prefer authenticated Vulos account / vumail identity;
+- **Identity binding:** prefer authenticated Vulos account identity;
   fall back to link + email/typed identity for external signers.
 
 ### Explicit non-goals
@@ -209,7 +209,7 @@ paying for Slack and Zoom.
 - First-class real-time media: 1:1 and group voice/video, screen-share, and
   scheduled meeting rooms, all P2P-first with relay/TURN fallback.
 - One identity and one fabric across Office + Spaces: the people you edit docs
-  with are the people you call, keyed to Vulos account / vumail.
+  with are the people you call, keyed to Vulos account.
 - No new central server: messages converge via CRDT/bucket sync, media via
   WebRTC + Vulos relay — reusing Sections 2 and the OS RELAY layer.
 
@@ -241,9 +241,29 @@ paying for Slack and Zoom.
   not v1.
 - **No giant-webinar scale** (thousands of viewers) in v1 — target team-sized
   calls and rooms; mesh/relay first, SFU later if needed.
-- **No separate identity system.** Spaces identity is the Vulos account / vumail,
+- **No separate identity system.** Spaces identity is the Vulos account,
   shared with Office collaboration.
 - **No bespoke signaling server.** Reuse the OS fabric's signaling + relay; do
   not build a parallel one for Office/Spaces.
 - **No telephony/PSTN dial-in** in the OSS core.
 ```
+
+---
+
+## Future work
+
+### Multi-target builds: web subdomain + OS-embed library for all apps
+Build each app surface (docs, sheets, slides, spaces, calendar, meet) as two targets:
+(1) a standalone web build served from a subdomain (`office.vulos.org`, `calendar.vulos.org`,
+`meet.vulos.org`), and (2) an embeddable library (`lib.jsx` export) consumed by the Vulos OS
+shell as a native app wrapper. Vite multi-entry config wires both outputs from the same source
+tree. The subdomain builds integrate with the `vulos-cloud` multi-target routing pipeline.
+Do not touch `src/apps/*/lib.jsx`, `vite.config.*`, or `package.json` — those are owned by
+the subdomain agent while it is active.
+
+### Deep-link routing per app
+Each app surface exposes a canonical deep-link scheme (`vulos-office://docs/{id}`,
+`vulos-office://meet/{roomId}`, etc.) so the OS launcher, notification taps, and inter-app
+links can navigate directly to a document, sheet, meeting room, or calendar event. Routing
+table in `src/App.jsx` handles both the web-subdomain URL pattern and the OS deep-link
+scheme. Coordinate with the multi-target build work above.

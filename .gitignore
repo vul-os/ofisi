@@ -16,6 +16,11 @@ node_modules
 dist/*
 !dist/.gitkeep
 dist-ssr
+dist-lib/
+dist-office/
+dist-talk/
+dist-calendar/
+dist-meet/
 *.local
 
 # Editor directories and files

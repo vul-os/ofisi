@@ -133,7 +133,7 @@ AC: [ ] concurrent cell edits converge in Sheets [ ] concurrent slide reorder/co
 
 ### [OFFICE-24] Presence roster (who's here)
 `done` · P1 · M · dep: OFFICE-20 · parallel: yes — src/lib/presence.js, src/components/PresenceBar.jsx
-Scope: A presence primitive over the fabric session: broadcast {accountId/vumail, displayName, color, online} on join/heartbeat; render an avatar roster in editor top bars; reusable by Sheets/Slides/Spaces. Identity from the Vulos account/vumail when present, else a session-scoped guest identity. JSX only.
+Scope: A presence primitive over the fabric session: broadcast {accountId/accountAddress, displayName, color, online} on join/heartbeat; render an avatar roster in editor top bars; reusable by Sheets/Slides/Spaces. Identity from the Vulos Vulos account when present, else a session-scoped guest identity. JSX only.
 AC: [ ] roster shows all live collaborators with stable colors [ ] entries drop on disconnect/timeout [ ] reused across docs/sheets/slides [ ] npm run build
 
 ### [OFFICE-25] Live cursors + selections
@@ -164,12 +164,12 @@ _Roadmap: [`ROADMAP.md` § 3](ROADMAP.md)_ · _Prefix: `OFFICE-`_
 
 > DocuSign-style: place fields, send signing links, multi-signer order, a
 > cryptographic token per signature, a tamper-evident audit trail, and a
-> completion certificate. Identity ties to the Vulos account/vumail where it can.
+> completion certificate. Identity ties to the Vulos Vulos account where it can.
 > Builds on the existing PDF canvas (OFFICE-04).
 
 ### [OFFICE-40] Signing data model + backend store
 `done` · P0 · L · dep: OFFICE-06 · parallel: no — backend/models/signing.go, backend/storage/storage.go, backend/storage/local.go, backend/storage/postgres.go
-Scope: Add domain models for a signing envelope: Envelope (id, source PDF ref, status, signing-order mode), Field (page, x, y, w, h, type ∈ signature|initial|date|name|text, required, assigned signer), Signer (id, name, email/vumail/account, order, status), and AuditEvent (envelope id, signer id, action ∈ created|sent|viewed|signed|declined, ts, ip, identity, doc_hash_before, doc_hash_after, token). Extend the Storage interface + both backends (local JSON + postgres) with envelope CRUD and append-only audit insert.
+Scope: Add domain models for a signing envelope: Envelope (id, source PDF ref, status, signing-order mode), Field (page, x, y, w, h, type ∈ signature|initial|date|name|text, required, assigned signer), Signer (id, name, email/account-address/account, order, status), and AuditEvent (envelope id, signer id, action ∈ created|sent|viewed|signed|declined, ts, ip, identity, doc_hash_before, doc_hash_after, token). Extend the Storage interface + both backends (local JSON + postgres) with envelope CRUD and append-only audit insert.
 AC: [ ] envelope/field/signer/audit models persist in local + postgres [ ] audit log is append-only (no update/delete) [ ] storage interface extended without breaking file CRUD [ ] go build ./...
 
 ### [OFFICE-41] Field-placement editor (assign fields to signers)
@@ -189,8 +189,8 @@ AC: [ ] draw/type/upload signature works [ ] date auto-fills, text fields editab
 
 ### [OFFICE-44] Cryptographic token + tamper-evident audit trail
 `done` · P0 · L · dep: OFFICE-42, OFFICE-43 · parallel: no — backend/handlers/signing.go, backend/signing/crypto.go, backend/storage/local.go
-Scope: On each signer completion: compute the document hash before/after applying that signer's fields, generate a cryptographic token (sign {envelope id, signer id, doc_hash_before, doc_hash_after, ts, identity} with a server keypair — Ed25519; key from env, generate-if-missing for dev), and append an immutable `signed` audit event chaining the prior event's hash (hash-chained log). Identity = Vulos account/vumail if authenticated, else link identity. No third-party signing service.
-AC: [ ] each signature yields a verifiable Ed25519 token bound to the doc hash [ ] audit log is hash-chained + append-only [ ] before/after hashes recorded per signer [ ] identity captured (account/vumail or link) [ ] go build ./... && go test ./backend/signing/...
+Scope: On each signer completion: compute the document hash before/after applying that signer's fields, generate a cryptographic token (sign {envelope id, signer id, doc_hash_before, doc_hash_after, ts, identity} with a server keypair — Ed25519; key from env, generate-if-missing for dev), and append an immutable `signed` audit event chaining the prior event's hash (hash-chained log). Identity = Vulos Vulos account if authenticated, else link identity. No third-party signing service.
+AC: [ ] each signature yields a verifiable Ed25519 token bound to the doc hash [ ] audit log is hash-chained + append-only [ ] before/after hashes recorded per signer [ ] identity captured (Vulos account or link) [ ] go build ./... && go test ./backend/signing/...
 
 ### [OFFICE-45] Multi-signer orchestration + reminders
 `done` · P1 · M · dep: OFFICE-44 · parallel: yes — backend/handlers/signing.go
@@ -253,3 +253,17 @@ AC: [ ] create a scheduled room with a join link [ ] join via link enters lobby 
 `done` · P3 · S · dep: OFFICE-63, OFFICE-61 · parallel: yes — src/apps/spaces/CallView.jsx, src/lib/crdt/messages.js
 Scope: A lightweight in-call chat panel that posts to the originating channel/thread (or an ephemeral room thread for ad-hoc meeting rooms) using the existing CRDT message store, so call chat persists in Vulos Spaces history. JSX only.
 AC: [ ] in-call messages post to the channel/room thread [ ] messages persist in Vulos Spaces history after the call [ ] npm run build
+
+---
+
+## Area: Future
+
+### Multi-target builds (web subdomain + OS-embed library) for all app surfaces
+`todo` · P2 · L · dep: none · parallel: no — vite.config.*, package.json, src/apps/*/lib.jsx (NOTE: OWNED BY SUBDOMAIN AGENT while active — do not edit these files in parallel)
+Add a Vite multi-entry config that builds each app (docs, sheets, slides, spaces, calendar, meet) as both a standalone web bundle (for subdomain serving) and an embeddable `lib.jsx` export (for the OS shell app wrapper). Coordinate with the vulos-cloud subdomain routing pipeline. The OS-embed library target exports a single React component per app.
+AC: [ ] `npm run build` produces both web and lib outputs [ ] lib.jsx exports a single component per app [ ] web output deployable to app-specific subdomain [ ] no .tsx files introduced
+
+### Deep-link routing per app surface
+`todo` · P2 · M · dep: none · parallel: yes — src/App.jsx
+Add canonical deep-link routes for each app surface: `vulos-office://docs/{id}`, `vulos-office://meet/{roomId}`, `vulos-office://calendar/{eventId}`, etc. The `src/App.jsx` router handles both web-subdomain URL patterns and the OS deep-link scheme. Coordinate with the multi-target build work and the OS app wrapper tasks in the `vulos` repo.
+AC: [ ] deep-link URLs for docs/sheets/slides/spaces/calendar/meet defined [ ] App.jsx routes resolve them correctly [ ] OS launcher links tested against the routing table [ ] npm run build

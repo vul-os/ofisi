@@ -12,7 +12,7 @@
  *   sessionId    — fabric session id for this call (channel id, DM id, room id)
  *   channelId    — Spaces channel/thread id for persisted in-call chat (OFFICE-66)
  *   threadParent — optional thread-parent message id for meeting-room threads
- *   identity     — { displayName, vumail, color }
+ *   identity     — { displayName, accountAddress, color }
  *   video        — start with camera on (default true)
  *   onLeave      — called after the call tears down
  */

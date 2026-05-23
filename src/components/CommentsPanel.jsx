@@ -15,7 +15,7 @@
  *                          { type, from, to, snapshot }     (Docs)
  *                          { type, sheet, row, col, snapshot } (Sheets)
  *                          { type, slideId, snapshot }      (Slides)
- *   authorId  {string}   identity of the current user (vumail / session id)
+ *   authorId  {string}   identity of the current user (Vulos account address / session id)
  *   onClose   {function} called when the user clicks the X
  */
 

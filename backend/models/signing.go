@@ -92,7 +92,7 @@ type Signer struct {
 	ID          string      `json:"id"`
 	EnvelopeID  string      `json:"envelope_id"`
 	Name        string      `json:"name"`
-	Email       string      `json:"email"`     // email or vumail
+	Email       string      `json:"email"`     // email or Vulos account address
 	AccountID   string      `json:"account_id,omitempty"` // Vulos account id if known
 	Order       int         `json:"order"`     // 1-based; ties = parallel within that order
 	Status      SignerStatus `json:"status"`
@@ -111,7 +111,7 @@ type AuditEvent struct {
 	Action         AuditAction `json:"action"`
 	Timestamp      time.Time   `json:"timestamp"`
 	IP             string      `json:"ip,omitempty"`
-	Identity       string      `json:"identity,omitempty"`      // vumail / email / link identity
+	Identity       string      `json:"identity,omitempty"`      // Vulos account / email / link identity
 	DocHashBefore  string      `json:"doc_hash_before,omitempty"`
 	DocHashAfter   string      `json:"doc_hash_after,omitempty"`
 	Token          string      `json:"token,omitempty"`          // Ed25519 signature token (OFFICE-44)

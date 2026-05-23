@@ -1,6 +1,6 @@
 {
-  "name": "vulos-office",
-  "private": true,
+  "name": "@vulos/office-client",
+  "private": false,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -8,10 +8,26 @@
     "dev:web": "concurrently -n \"vite,go\" -c \"cyan,green\" \"vite\" \"go run .\"",
     "build": "vite build && go build -o vulos-office .",
     "build:frontend": "vite build",
+    "build:lib": "vite build --config vite.config.lib.js",
+    "build:office": "vite build --config vite.config.office.js",
+    "build:talk": "vite build --config vite.config.talk.js",
+    "build:calendar": "vite build --config vite.config.calendar.js",
+    "build:meet": "vite build --config vite.config.meet.js",
+    "build:all": "npm run build:frontend && npm run build:lib && npm run build:office && npm run build:talk && npm run build:calendar && npm run build:meet",
     "build:go": "go build -o vulos-office .",
     "start": "go run .",
     "preview": "vite preview",
     "test": "vitest run"
+  },
+  "exports": {
+    ".": "./dist-lib/index.js",
+    "./docs": "./dist-lib/docs.js",
+    "./sheets": "./dist-lib/sheets.js",
+    "./slides": "./dist-lib/slides.js",
+    "./pdf": "./dist-lib/pdf.js",
+    "./spaces": "./dist-lib/spaces.js",
+    "./calendar": "./dist-lib/calendar.js",
+    "./contacts": "./dist-lib/contacts.js"
   },
   "dependencies": {
     "@fortune-sheet/react": "^1.0.4",
@@ -53,6 +69,8 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.1.2",
