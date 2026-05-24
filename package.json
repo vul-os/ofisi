@@ -19,16 +19,73 @@
     "preview": "vite preview",
     "test": "vitest run"
   },
+  "main": "./dist-lib/index.cjs",
+  "module": "./dist-lib/index.js",
   "exports": {
-    ".": "./dist-lib/index.js",
-    "./docs": "./dist-lib/docs.js",
-    "./sheets": "./dist-lib/sheets.js",
-    "./slides": "./dist-lib/slides.js",
-    "./pdf": "./dist-lib/pdf.js",
-    "./spaces": "./dist-lib/spaces.js",
-    "./calendar": "./dist-lib/calendar.js",
-    "./contacts": "./dist-lib/contacts.js"
+    ".": {
+      "source": "./src/lib/index.js",
+      "import": "./dist-lib/index.js",
+      "require": "./dist-lib/index.cjs",
+      "default": "./dist-lib/index.js"
+    },
+    "./docs": {
+      "source": "./src/apps/docs/lib.jsx",
+      "import": "./dist-lib/docs.js",
+      "require": "./dist-lib/docs.cjs",
+      "default": "./dist-lib/docs.js"
+    },
+    "./sheets": {
+      "source": "./src/apps/sheets/lib.jsx",
+      "import": "./dist-lib/sheets.js",
+      "require": "./dist-lib/sheets.cjs",
+      "default": "./dist-lib/sheets.js"
+    },
+    "./slides": {
+      "source": "./src/apps/slides/lib.jsx",
+      "import": "./dist-lib/slides.js",
+      "require": "./dist-lib/slides.cjs",
+      "default": "./dist-lib/slides.js"
+    },
+    "./pdf": {
+      "source": "./src/apps/pdf/lib.jsx",
+      "import": "./dist-lib/pdf.js",
+      "require": "./dist-lib/pdf.cjs",
+      "default": "./dist-lib/pdf.js"
+    },
+    "./spaces": {
+      "source": "./src/apps/spaces/lib.jsx",
+      "import": "./dist-lib/spaces.js",
+      "require": "./dist-lib/spaces.cjs",
+      "default": "./dist-lib/spaces.js"
+    },
+    "./calendar": {
+      "source": "./src/apps/calendar/lib.jsx",
+      "import": "./dist-lib/calendar.js",
+      "require": "./dist-lib/calendar.cjs",
+      "default": "./dist-lib/calendar.js"
+    },
+    "./contacts": {
+      "source": "./src/apps/contacts/lib.jsx",
+      "import": "./dist-lib/contacts.js",
+      "require": "./dist-lib/contacts.cjs",
+      "default": "./dist-lib/contacts.js"
+    },
+    "./package.json": "./package.json"
   },
+  "files": [
+    "dist-lib/",
+    "src/lib/",
+    "src/apps/*/lib.jsx",
+    "src/apps/docs/",
+    "src/apps/sheets/",
+    "src/apps/slides/",
+    "src/apps/pdf/",
+    "src/apps/spaces/",
+    "src/apps/calendar/",
+    "src/apps/contacts/",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "@fortune-sheet/react": "^1.0.4",
     "@tiptap/extension-character-count": "^2.11.7",
