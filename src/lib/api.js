@@ -1,11 +1,41 @@
-const BASE = '/api'
+import { selectEndpoint, currentEndpoint, invalidateEndpoint } from './endpoints.js'
+
+const API_PREFIX = '/api'
+
+// Resolve the API base URL through the endpoint-failover layer. The selected
+// base is a same-origin '' by default, or a cloud/LAN origin when the OS shell
+// injects window.__VULOS_ENDPOINTS__. See src/lib/endpoints.js.
+async function apiBase() {
+  const base = await selectEndpoint()
+  return base + API_PREFIX
+}
+
+// Build the full URL for an API path using the cached selection synchronously
+// (used by callers that need a string URL, e.g. <img src>).
+export function apiUrl(path) {
+  return currentEndpoint() + API_PREFIX + path
+}
 
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers }
 
   // Session is managed via an httpOnly cookie set by the backend on login.
   // credentials: 'include' ensures the browser sends it automatically.
-  const res = await fetch(BASE + path, { ...options, headers, credentials: 'include' })
+  const base = await apiBase()
+  let res
+  try {
+    res = await fetch(base + path, { ...options, headers, credentials: 'include' })
+  } catch (netErr) {
+    // Network-level failure (endpoint unreachable): invalidate the selection,
+    // re-probe (cloud↔LAN failover), and retry once against the new endpoint.
+    invalidateEndpoint()
+    const retryBase = (await selectEndpoint({ force: true })) + API_PREFIX
+    if (retryBase !== base) {
+      res = await fetch(retryBase + path, { ...options, headers, credentials: 'include' })
+    } else {
+      throw netErr
+    }
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw Object.assign(new Error(err.error || 'Request failed'), err)
@@ -72,7 +102,7 @@ export const api = {
     request(`/files/${fileId}/comments/${commentId}/replies/${replyId}`, { method: 'DELETE' }),
 
   scanLocalFiles: () => request('/local-files'),
-  localFileUrl: (path) => `${BASE}/local-files/serve?path=${encodeURIComponent(path)}`,
+  localFileUrl: (path) => apiUrl(`/local-files/serve?path=${encodeURIComponent(path)}`),
 
   // OFFICE-60/61: Vulos Spaces API
   spacesListChannels: () => request('/spaces/channels'),
@@ -158,7 +188,8 @@ export const api = {
 
   // Docs export: returns a Blob for download (PDF or DOCX)
   exportDoc: async (fileId, format) => {
-    const res = await fetch(`${BASE}/files/${fileId}/export?format=${encodeURIComponent(format)}`, {
+    const base = await apiBase()
+    const res = await fetch(`${base}/files/${fileId}/export?format=${encodeURIComponent(format)}`, {
       credentials: 'include',
     })
     if (!res.ok) throw new Error(`Export failed: ${res.statusText}`)
@@ -168,8 +199,9 @@ export const api = {
   uploadImage: async (file) => {
     const form = new FormData()
     form.append('file', file)
+    const base = await apiBase()
     // Cookie sent automatically via credentials: 'include'.
-    const res = await fetch(BASE + '/upload', { method: 'POST', body: form, credentials: 'include' })
+    const res = await fetch(base + '/upload', { method: 'POST', body: form, credentials: 'include' })
     if (!res.ok) throw new Error('Upload failed')
     return res.json()
   },

@@ -10,6 +10,9 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import CalendarShell from '../shells/CalendarShell.jsx'
 import '../index.css'
+import { bootstrapOffline } from '../lib/offlineBootstrap.js'
+
+bootstrapOffline()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

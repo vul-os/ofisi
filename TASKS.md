@@ -325,10 +325,10 @@ AC: [ ] README.md mentions bundling from Starter [ ] ROADMAP.md §Bundling decis
 ## Area: Offline-first + local-first sync (v6 — 2026-05-24)
 
 ### [OFFICE-OFFLINE-01] Office offline-first PWA hardening + LAN-endpoint failover
-`todo` · P2 · M · dep: none · parallel: yes — src/lib/, src/sw.js (new)
+`done` · P2 · M · dep: none · parallel: yes — src/lib/, src/sw.js (new)
 Scope: Office is already local-first CRDT; add service-worker app-shell caching + LAN-endpoint failover
 (consistent with the OS OFFLINE-02 contract in `vulos`) so the suite loads + edits offline on the box's LAN.
-AC: [ ] app shell loads offline [ ] CRDT edits work offline + sync on reconnect [ ] LAN-endpoint failover [ ] npm run build
+AC: [x] app shell loads offline [x] CRDT edits work offline + sync on reconnect [x] LAN-endpoint failover [x] npm run build
 
 ### [OFFICE-SYNC-01] Office CRDT sync via rendezvous + fabric-P2P (local-MinIO mode)
 `todo` · P2 · M · dep: OFFICE-STORE-01 · parallel: yes — backend/storage/, backend/crdt/

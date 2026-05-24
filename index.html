@@ -42,13 +42,8 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Service-worker registration + cloud↔LAN endpoint failover are wired in
+         src/lib/offlineBootstrap.js (imported from src/main.jsx). -->
     <script type="module" src="/src/main.jsx"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
-        });
-      }
-    </script>
   </body>
 </html>
