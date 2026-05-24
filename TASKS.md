@@ -319,3 +319,20 @@ Scope: Verify that all user-facing copy in vulos-office README.md, ROADMAP.md, a
 copy in `docs/` correctly reflects that Office is bundled from Starter and up — no standalone
 Office tier exists. Fix any copy that implies a standalone Office tier.
 AC: [ ] README.md mentions bundling from Starter [ ] ROADMAP.md §Bundling decision present [ ] no copy implies standalone Office tier [ ] npm run build passes unmodified
+
+---
+
+## Area: Offline-first + local-first sync (v6 — 2026-05-24)
+
+### [OFFICE-OFFLINE-01] Office offline-first PWA hardening + LAN-endpoint failover
+`todo` · P2 · M · dep: none · parallel: yes — src/lib/, src/sw.js (new)
+Scope: Office is already local-first CRDT; add service-worker app-shell caching + LAN-endpoint failover
+(consistent with the OS OFFLINE-02 contract in `vulos`) so the suite loads + edits offline on the box's LAN.
+AC: [ ] app shell loads offline [ ] CRDT edits work offline + sync on reconnect [ ] LAN-endpoint failover [ ] npm run build
+
+### [OFFICE-SYNC-01] Office CRDT sync via rendezvous + fabric-P2P (local-MinIO mode)
+`todo` · P2 · M · dep: OFFICE-STORE-01 · parallel: yes — backend/storage/, backend/crdt/
+Scope: In `local-minio-sync` mode, office syncs its CRDT docs + blobs via the central Tigris rendezvous
+(SYNC-RENDEZVOUS-01 in vulos-cloud) and fast-follow fabric-P2P (SYNC-P2P-01 in vulos-relay), converging
+across boxes. Default endpoint-injected path unchanged.
+AC: [ ] office CRDT syncs via rendezvous [ ] fabric-P2P path converges [ ] default path unchanged [ ] go build ./... && npm run build
