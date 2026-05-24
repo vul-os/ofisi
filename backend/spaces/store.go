@@ -280,6 +280,17 @@ func (s *SpacesStore) AddMember(channelID, accountID string) (*models.Membership
 	return m, nil
 }
 
+// IsMember reports whether accountID belongs to the given channel.
+func (s *SpacesStore) IsMember(channelID, accountID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if m, ok := s.members[channelID]; ok {
+		_, isMember := m[accountID]
+		return isMember
+	}
+	return false
+}
+
 func (s *SpacesStore) ListMembers(channelID string) []*models.Membership {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -385,6 +396,17 @@ func (s *SpacesStore) DeleteMessage(channelID, msgID string) error {
 	return s.applyLocal(op)
 }
 
+// GetMessage returns a single message from the in-memory index.
+func (s *SpacesStore) GetMessage(channelID, msgID string) (*models.Message, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if msgs, ok := s.messages[channelID]; ok {
+		m, found := msgs[msgID]
+		return m, found
+	}
+	return nil, false
+}
+
 // ListMessages returns messages in a channel sorted by SeqClock ascending.
 // Thread replies are included; callers may filter by ThreadParent.
 func (s *SpacesStore) ListMessages(channelID string) []*models.Message {
@@ -408,6 +430,11 @@ func (s *SpacesStore) ListMessages(channelID string) []*models.Message {
 // MergeOps applies a batch of ops received from a peer.  It is idempotent
 // and commutative: applying the same ops in any order converges to the same
 // state.
+//
+// MergeOps performs no author validation and is intended for trusted/internal
+// replication (e.g. server-to-server sync over an authenticated fabric link)
+// and tests. The REST endpoint must use MergeOpsAs to bind ops to the
+// authenticated user.
 func (s *SpacesStore) MergeOps(ops []*models.MessageOp) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -417,6 +444,60 @@ func (s *SpacesStore) MergeOps(ops []*models.MessageOp) error {
 		}
 	}
 	return nil
+}
+
+// MergeOpsAs applies a batch of ops submitted by an authenticated peer, but
+// only after validating that the caller is allowed to author them.
+//
+// Security rules (defends against AuthorID/SeqClock forgery):
+//   - Append: op.Msg.AuthorID must equal authUser. A peer cannot inject
+//     messages attributed to someone else.
+//   - Edit / Tombstone: the targeted message, if it already exists locally,
+//     must have been authored by authUser. This stops a peer from editing or
+//     tombstoning another user's message. Edits/tombstones for messages not
+//     yet seen locally must also carry op.Msg.AuthorID == authUser (a forged
+//     op authored as someone else is rejected outright).
+//
+// Ops that fail validation are rejected and the whole batch is refused so a
+// caller cannot smuggle a forged op alongside legitimate ones.
+func (s *SpacesStore) MergeOpsAs(authUser string, ops []*models.MessageOp) error {
+	if authUser == "" {
+		return fmt.Errorf("spaces: MergeOpsAs requires an authenticated user")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Validate the whole batch first; reject atomically on any violation.
+	for _, op := range ops {
+		if op.Msg.AuthorID != authUser {
+			return fmt.Errorf("spaces: op author %q does not match authenticated user %q", op.Msg.AuthorID, authUser)
+		}
+		// If the target already exists, the existing author must also match —
+		// guards against tombstoning/editing a message id whose body was
+		// authored by someone else (even if the forged op claims authUser).
+		if existing, ok := s.lookupLocked(op.ChannelID, op.Msg.ID); ok {
+			if existing.AuthorID != "" && existing.AuthorID != authUser {
+				return fmt.Errorf("spaces: cannot apply %s to message %q authored by %q", op.Op, op.Msg.ID, existing.AuthorID)
+			}
+		}
+	}
+
+	for _, op := range ops {
+		if err := s.applyRemote(op); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// lookupLocked returns the stored message for (channelID, msgID). Caller must
+// hold s.mu.
+func (s *SpacesStore) lookupLocked(channelID, msgID string) (*models.Message, bool) {
+	if msgs, ok := s.messages[channelID]; ok {
+		m, found := msgs[msgID]
+		return m, found
+	}
+	return nil, false
 }
 
 // ExportOps returns all ops for channelID with SeqClock > afterClock for

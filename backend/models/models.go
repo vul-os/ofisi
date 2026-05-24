@@ -70,6 +70,10 @@ type UpdateFileRequest struct {
 
 type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
+	// AccountID optionally binds the session to a Vulos account id. It becomes
+	// the JWT subject so downstream handlers can derive identity from the
+	// verified token instead of trusting a client-supplied header.
+	AccountID string `json:"account_id,omitempty"`
 }
 
 type LoginResponse struct {

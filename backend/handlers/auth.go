@@ -44,11 +44,16 @@ func (h *AuthHandler) Status(c *gin.Context) {
 			}
 		}
 		if token != "" {
-			claims := &jwt.RegisteredClaims{}
-			parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
-				return []byte(middleware.JWTSecret), nil
-			})
-			authenticated = err == nil && parsed.Valid
+			if secret, serr := middleware.JWTSecret(); serr == nil {
+				claims := &jwt.RegisteredClaims{}
+				parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
+					if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+						return nil, jwt.ErrTokenSignatureInvalid
+					}
+					return secret, nil
+				})
+				authenticated = err == nil && parsed.Valid
+			}
 		}
 	} else {
 		authenticated = true
@@ -125,12 +130,21 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		expiry = 24 * time.Hour
 	}
 
+	secret, serr := middleware.JWTSecret()
+	if serr != nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse{Error: "server auth not configured"})
+		return
+	}
+
 	claims := jwt.RegisteredClaims{
+		// Subject carries the verified account id; downstream handlers read it
+		// from context instead of trusting the X-Account-ID header.
+		Subject:   req.AccountID,
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)),
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString([]byte(middleware.JWTSecret))
+	signed, err := token.SignedString(secret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "failed to create session"})
 		return

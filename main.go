@@ -28,6 +28,15 @@ func main() {
 		cfg = config.Default()
 	}
 
+	// Fail closed: when auth is enabled, refuse to start unless a JWT signing
+	// secret is configured (VULOS_OFFICE_JWT_SECRET, or VULOS_OFFICE_DEV=1 for
+	// local development). This prevents shipping with a predictable key.
+	if cfg.Auth.Enabled && !middleware.JWTSecretConfigured() {
+		log.Fatalf("auth is enabled but no JWT signing secret is configured: set %s "+
+			"to a strong random value (or %s=1 for local dev)",
+			middleware.EnvJWTSecret, middleware.EnvDevMode)
+	}
+
 	store, err := storage.New(cfg)
 	if err != nil {
 		log.Fatal("Storage init failed:", err)

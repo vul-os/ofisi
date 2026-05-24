@@ -22,15 +22,18 @@ import (
 
 // ---- in-memory stores --------------------------------------------------------
 
+// P2: reactions are stored in a map keyed by (msgID, emoji, userID) and indexed
+// by message id. Add/Remove are O(1) and there is no unbounded append-only
+// growth — a removed reaction frees its entry instead of accumulating a
+// tombstone scanned on every list.
 type reactionsStore struct {
-	mu   sync.RWMutex
-	rows []*models.Reaction // append-only; deletions are filtered on read
-	// deleted set: (msgID, emoji, userID)
-	deleted map[string]bool
+	mu sync.RWMutex
+	// byMsg[msgID][reactionKey] = reaction
+	byMsg map[string]map[string]*models.Reaction
 }
 
 func newReactionsStore() *reactionsStore {
-	return &reactionsStore{deleted: make(map[string]bool)}
+	return &reactionsStore{byMsg: make(map[string]map[string]*models.Reaction)}
 }
 
 func reactionKey(msgID, emoji, userID string) string {
@@ -40,39 +43,41 @@ func reactionKey(msgID, emoji, userID string) string {
 func (rs *reactionsStore) Add(msgID, emoji, userID string) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	k := reactionKey(msgID, emoji, userID)
-	delete(rs.deleted, k)
-	// idempotent: check if already exists
-	for _, r := range rs.rows {
-		if r.MessageID == msgID && r.Emoji == emoji && r.UserID == userID {
-			return
-		}
+	m := rs.byMsg[msgID]
+	if m == nil {
+		m = make(map[string]*models.Reaction)
+		rs.byMsg[msgID] = m
 	}
-	rs.rows = append(rs.rows, &models.Reaction{
+	k := reactionKey(msgID, emoji, userID)
+	if _, exists := m[k]; exists {
+		return // idempotent
+	}
+	m[k] = &models.Reaction{
 		MessageID: msgID,
 		Emoji:     emoji,
 		UserID:    userID,
 		CreatedAt: time.Now(),
-	})
+	}
 }
 
 func (rs *reactionsStore) Remove(msgID, emoji, userID string) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	rs.deleted[reactionKey(msgID, emoji, userID)] = true
+	if m := rs.byMsg[msgID]; m != nil {
+		delete(m, reactionKey(msgID, emoji, userID))
+		if len(m) == 0 {
+			delete(rs.byMsg, msgID)
+		}
+	}
 }
 
 func (rs *reactionsStore) ListByChannel(channelID string, messages []*models.Message) []*models.Reaction {
-	// Build set of message IDs in this channel
-	ids := make(map[string]bool, len(messages))
-	for _, m := range messages {
-		ids[m.ID] = true
-	}
 	rs.mu.RLock()
 	defer rs.mu.RUnlock()
 	var out []*models.Reaction
-	for _, r := range rs.rows {
-		if ids[r.MessageID] && !rs.deleted[reactionKey(r.MessageID, r.Emoji, r.UserID)] {
+	// Only walk reactions for message ids in this channel (indexed lookup).
+	for _, msg := range messages {
+		for _, r := range rs.byMsg[msg.ID] {
 			out = append(out, r)
 		}
 	}
@@ -198,6 +203,9 @@ func NewSpacesHandlerExt() *SpacesHandlerExt {
 // ListReactions GET /api/spaces/channels/:channelId/reactions
 func (h *SpacesHandlerExt) ListReactions(c *gin.Context) {
 	channelID := c.Param("channelId")
+	if !h.requireChannelAccess(c, channelID, requesterID(c)) {
+		return
+	}
 	msgs := h.store.ListMessages(channelID)
 	rxns := h.ext.reactions.ListByChannel(channelID, msgs)
 	if rxns == nil {
@@ -214,9 +222,15 @@ func (h *SpacesHandlerExt) React(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	userID := c.GetHeader("X-Account-ID")
-	if userID == "" {
-		userID = "anonymous"
+	userID := requesterID(c)
+	// React carries a channel_id in the body; verify membership against it and
+	// confirm the message actually lives in that channel.
+	if !h.requireChannelAccess(c, req.ChannelID, userID) {
+		return
+	}
+	if _, ok := h.store.GetMessage(req.ChannelID, msgID); !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "message not found in channel"})
+		return
 	}
 	if strings.TrimSpace(req.Emoji) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "emoji required"})
@@ -234,10 +248,11 @@ func (h *SpacesHandlerExt) Unreact(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	userID := c.GetHeader("X-Account-ID")
-	if userID == "" {
-		userID = "anonymous"
+	userID := requesterID(c)
+	if !h.requireChannelAccess(c, req.ChannelID, userID) {
+		return
 	}
+	// A user may only remove their own reaction (Remove is keyed on userID).
 	h.ext.reactions.Remove(msgID, req.Emoji, userID)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
@@ -247,6 +262,9 @@ func (h *SpacesHandlerExt) Unreact(c *gin.Context) {
 // ListPins GET /api/spaces/channels/:channelId/pins
 func (h *SpacesHandlerExt) ListPins(c *gin.Context) {
 	channelID := c.Param("channelId")
+	if !h.requireChannelAccess(c, channelID, requesterID(c)) {
+		return
+	}
 	pins := h.ext.pins.List(channelID)
 	if pins == nil {
 		pins = []*models.PinnedMessage{}
@@ -262,9 +280,9 @@ func (h *SpacesHandlerExt) PinMessage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	pinnedBy := c.GetHeader("X-Account-ID")
-	if pinnedBy == "" {
-		pinnedBy = "anonymous"
+	pinnedBy := requesterID(c)
+	if !h.requireChannelAccess(c, channelID, pinnedBy) {
+		return
 	}
 	// Look up message body + author for the panel snapshot
 	body := ""
@@ -285,6 +303,9 @@ func (h *SpacesHandlerExt) PinMessage(c *gin.Context) {
 func (h *SpacesHandlerExt) UnpinMessage(c *gin.Context) {
 	channelID := c.Param("channelId")
 	msgID := c.Param("msgId")
+	if !h.requireChannelAccess(c, channelID, requesterID(c)) {
+		return
+	}
 	h.ext.pins.Unpin(channelID, msgID)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
@@ -293,10 +314,8 @@ func (h *SpacesHandlerExt) UnpinMessage(c *gin.Context) {
 
 // SetStatus PUT /api/spaces/users/me/status
 func (h *SpacesHandlerExt) SetStatus(c *gin.Context) {
-	userID := c.GetHeader("X-Account-ID")
-	if userID == "" {
-		userID = "anonymous"
-	}
+	// Always set the *authenticated* user's own status; never trust a header.
+	userID := requesterID(c)
 	var req models.SetStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -323,6 +342,9 @@ func (h *SpacesHandlerExt) GetStatus(c *gin.Context) {
 // swap in a Persister.Search() call when durability is added).
 func (h *SpacesHandlerExt) SearchMessages(c *gin.Context) {
 	channelID := c.Param("channelId")
+	if !h.requireChannelAccess(c, channelID, requesterID(c)) {
+		return
+	}
 	raw := strings.TrimSpace(c.Query("q"))
 
 	msgs := h.store.ListMessages(channelID)
