@@ -23,7 +23,7 @@ import {
   Mic, MicOff, Video, VideoOff, PhoneOff, Users,
   Wifi, WifiOff, MessageSquare, Monitor, MonitorOff,
 } from 'lucide-react'
-import { createCall } from '../../lib/call/rtc'
+import { createCall } from '@vulos/relay-client/call'
 import InCallChat from './InCallChat.jsx'
 import { Tooltip } from '../../components/ui'
 import RaiseHand, { HandIndicator } from './components/RaiseHand.jsx'
@@ -32,6 +32,7 @@ import BackgroundBlur from './components/BackgroundBlur.jsx'
 import PresenterFocus, { usePinnedLayout } from './components/PresenterFocus.jsx'
 import RecordingStub from './components/RecordingStub.jsx'
 import Captions, { CaptionOverlay } from './components/Captions.jsx'
+import { gridLayout, useViewportWidth } from './components/speakerGrid.js'
 
 export default function CallView({
   sessionId, channelId, threadParent = '', identity, video = true, isOrganizer = false, onLeave,
@@ -194,10 +195,13 @@ export default function CallView({
     screenPresenter,
   })
 
-  // Responsive grid: mobile 1-col, tablet 2-up, desktop up to 3x3
-  const gridCols = mainPeer
-    ? 1
-    : totalTiles <= 1 ? 1 : totalTiles <= 4 ? 2 : 3
+  // MEET-FRONTEND-POLISH-01: shared responsive grid (1/2/4/9/16/25 ladder).
+  // When a tile is pinned the strip shrinks to a single column under the main
+  // tile, mirroring the prior behaviour.
+  const viewportWidth = useViewportWidth()
+  const { style: gridStyle } = mainPeer
+    ? { style: { gridTemplateColumns: 'repeat(1, minmax(0, 1fr))' } }
+    : gridLayout(totalTiles, viewportWidth)
 
   return (
     <div
@@ -245,7 +249,8 @@ export default function CallView({
 
           <div
             className="flex-1 grid gap-2 p-3 overflow-auto"
-            style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
+            style={gridStyle}
+            data-testid="mesh-speaker-grid"
           >
             <Tile
               label={identity?.displayName ? `${identity.displayName} (you)` : 'You'}
@@ -493,7 +498,13 @@ function RemoteTile({ peer, isSpeaking, handRaised, captionText, onPin, isPinned
   const noVideo = !peer.stream || peer.stream.getVideoTracks().every((t) => !t.enabled)
   return (
     <div
-      className="relative rounded-lg overflow-hidden flex items-center justify-center min-h-[140px] transition-[outline] duration-fast ease-out group"
+      className={[
+        'relative rounded-lg overflow-hidden flex items-center justify-center min-h-[140px]',
+        'transition-[outline] duration-fast ease-out group',
+        // MEET-FRONTEND-POLISH-01: subtle border-glow when this tile is the
+        // active speaker (and not already pinned/presenting).
+        isSpeaking && !isPinned ? 'animate-[speaker-glow_1.8s_ease-out_infinite]' : '',
+      ].join(' ')}
       style={{
         background: 'rgba(255,255,255,.04)',
         outline: isPinned
@@ -503,6 +514,8 @@ function RemoteTile({ peer, isSpeaking, handRaised, captionText, onPin, isPinned
             : '1px solid rgba(255,255,255,.06)',
         outlineOffset: '-2px',
       }}
+      data-testid="mesh-remote-tile"
+      data-speaking={isSpeaking ? 'true' : 'false'}
     >
       <video ref={ref} autoPlay playsInline className="w-full h-full object-cover" />
       {noVideo && (

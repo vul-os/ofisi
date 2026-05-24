@@ -15,7 +15,7 @@
  */
 
 import { useState } from 'react'
-import { STATUS_ONLINE, STATUS_AWAY, STATUS_DND, STATUS_IN_CALL } from '../lib/presence.js'
+import { STATUS_ONLINE, STATUS_AWAY, STATUS_DND, STATUS_IN_CALL } from '@vulos/relay-client/presence'
 
 // ─── Status dot tokens (warm-signal palette, not generic Tailwind greens) ─────
 const STATUS_DOT_STYLE = {

@@ -87,6 +87,7 @@
     "LICENSE"
   ],
   "dependencies": {
+    "@vulos/relay-client": "file:../vulos-relay/client",
     "@fortune-sheet/react": "^1.0.4",
     "@tiptap/extension-character-count": "^2.11.7",
     "@tiptap/extension-color": "^2.11.7",

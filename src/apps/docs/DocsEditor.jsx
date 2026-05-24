@@ -33,7 +33,7 @@ import SuggestionPanel from '../../components/SuggestionPanel'
 import ActivityFeed from '../../components/ActivityFeed'
 import { DocsCollabSession } from '../../lib/crdt/index.js'
 import { getSuggestionStore } from '../../lib/crdt/suggestions.js'
-import { useLiveCursors } from '../../lib/useLiveCursors.js'
+import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { DocsCursorLayer } from '../../components/RemoteCursors.jsx'
 import { Button, IconButton, Tooltip, Topbar } from '../../components/ui'
 

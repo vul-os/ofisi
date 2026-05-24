@@ -26,7 +26,7 @@
  *   session.leave()
  */
 
-import { FabricClient } from '../fabric.js'
+import { FabricClient } from '@vulos/relay-client/fabric'
 import { TextCRDT, TEXT_OP_INSERT, TEXT_OP_DELETE } from './text.js'
 
 const SNAP_KEY_PREFIX = 'vulos_crdt_snap_'

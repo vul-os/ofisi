@@ -24,13 +24,19 @@
  *   livekitURL   — optional override (default '' → comes from token response)
  *   createRoom   — testing seam: defaults to createLiveKitRoom
  */
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff, Users,
   Wifi, MessageSquare, Hand, Layers, Circle, Square,
+  Captions as CaptionsIcon,
 } from 'lucide-react'
-import { createLiveKitRoom } from '../../../lib/call/livekitClient'
+import { createLiveKitRoom } from '@vulos/relay-client/call'
 import { Tooltip } from '../../../components/ui'
+import CaptionsPanel from './CaptionsPanel.jsx'
+import RecordingIndicator from './RecordingIndicator.jsx'
+import RaiseHandQueue from './RaiseHandQueue.jsx'
+import BreakoutRooms from './BreakoutRooms.jsx'
+import { gridLayout, useViewportWidth } from './speakerGrid.js'
 
 const MAX_VISIBLE_TILES = 25
 
@@ -48,9 +54,16 @@ export default function LiveKitCallView({
   const [state, setState] = useState('connecting')
   const [handRaised, setHandRaised] = useState(false)
   const [peerHands, setPeerHands] = useState({})
+  // peerId → unix-ms timestamp of when their hand was raised. Used to render
+  // the FIFO RaiseHandQueue with stable ordering across re-renders.
+  const [handRaisedAt, setHandRaisedAt] = useState({})
   const [showRoster, setShowRoster] = useState(false)
   const [recording, setRecording] = useState(false)
+  const [recordingId, setRecordingId] = useState(null)
   const [breakoutOpen, setBreakoutOpen] = useState(false)
+  const [captionsOpen, setCaptionsOpen] = useState(false)
+  const [handQueueOpen, setHandQueueOpen] = useState(false)
+  const viewportWidth = useViewportWidth()
 
   useEffect(() => {
     let cancelled = false
@@ -78,6 +91,19 @@ export default function LiveKitCallView({
         r.on('state', (s) => setState(s))
         r.on('raise-hand', ({ peerId, raised }) => {
           setPeerHands((prev) => ({ ...prev, [peerId]: raised }))
+          setHandRaisedAt((prev) => {
+            const next = { ...prev }
+            if (raised) {
+              if (!next[peerId]) next[peerId] = Date.now()
+            } else {
+              delete next[peerId]
+            }
+            return next
+          })
+          // Auto-open the queue when someone raises and we're not the
+          // organizer's only hand. Closing is manual so the host can park
+          // it open.
+          if (raised) setHandQueueOpen(true)
         })
       } catch (e) {
         console.error('[livekit] join failed', e)
@@ -109,25 +135,80 @@ export default function LiveKitCallView({
     if (!room) return
     const next = !handRaised
     setHandRaised(next)
+    // Track our own timestamp in the same map so the queue is consistent.
+    const localKey = identity?.accountAddress || '__self__'
+    setHandRaisedAt((prev) => {
+      const nextMap = { ...prev }
+      if (next) {
+        if (!nextMap[localKey]) nextMap[localKey] = Date.now()
+      } else {
+        delete nextMap[localKey]
+      }
+      return nextMap
+    })
+    if (next) setHandQueueOpen(true)
     await room.raiseHand(next)
-  }, [room, handRaised])
+  }, [room, handRaised, identity])
 
-  // TODO(MEET-RECORDING-01): wire to vulos-cloud recording control endpoint.
-  // The endpoint is queued for the next sub-wave; here we just toggle local
-  // UI state and POST to a stub URL so MEET-RECORDING-01 has a target shape.
+  // Lower (dismiss) another peer's hand — used by the host from the queue.
+  // Mesh + SFU both expose `sendDataMessage` for arbitrary data-channel
+  // payloads; we send a `raise-hand-dismiss` envelope and clear our local
+  // state so the queue updates immediately.
+  const handleDismissHand = useCallback((peerId) => {
+    if (!room) return
+    try {
+      room.sendDataMessage?.({ type: 'raise-hand-dismiss', peerId })
+    } catch { /* room may not expose this method on older builds */ }
+    setPeerHands((prev) => {
+      const next = { ...prev }
+      delete next[peerId]
+      return next
+    })
+    setHandRaisedAt((prev) => {
+      const next = { ...prev }
+      delete next[peerId]
+      return next
+    })
+  }, [room])
+
+  // MEET-FRONTEND-POLISH-01: drive the recording control endpoint.
+  //   POST /api/meet/recordings { roomId }            → { id, quotaMinutesRemaining }
+  //   DELETE /api/meet/recordings/{id}                → 204
+  // RecordingIndicator polls GET /api/meet/recordings/{id} for status + the
+  // workspace's remaining quota.
   const handleRecordingToggle = useCallback(async () => {
     if (!room) return
-    const next = !recording
-    setRecording(next)
+    if (recording && recordingId) {
+      // Stop the active recording.
+      try {
+        await fetch(`/api/meet/recordings/${encodeURIComponent(recordingId)}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        })
+      } catch { /* swallow — the indicator will eventually 404 */ }
+      setRecording(false)
+      setRecordingId(null)
+      return
+    }
     try {
-      await fetch('/api/meet/recording', {
+      const r = await fetch('/api/meet/recordings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ room_id: sessionId, recording: next }),
+        body: JSON.stringify({ roomId: sessionId }),
       })
-    } catch { /* stub — endpoint may not exist yet */ }
-  }, [room, recording, sessionId])
+      if (!r.ok) return
+      const j = await r.json().catch(() => null)
+      if (!j || !j.id) return
+      setRecordingId(String(j.id))
+      setRecording(true)
+    } catch { /* endpoint not yet live; UI stays off */ }
+  }, [room, recording, recordingId, sessionId])
+
+  const handleRecordingStopped = useCallback(() => {
+    setRecording(false)
+    setRecordingId(null)
+  }, [])
 
   if (error) {
     return (
@@ -158,11 +239,35 @@ export default function LiveKitCallView({
     state === 'reconnecting' ? 'Reconnecting…' :
     state === 'closed' ? 'Call ended' : state
 
-  const gridCols =
-    totalTiles <= 1 ? 1 :
-    totalTiles <= 4 ? 2 :
-    totalTiles <= 9 ? 3 :
-    totalTiles <= 16 ? 4 : 5
+  // Responsive grid: 1 / 2 / 4 / 9 / 16 / 25 ladders with viewport-aware caps.
+  const { style: gridStyle } = gridLayout(totalTiles, viewportWidth)
+
+  // Raise-hand queue — FIFO ordered by the timestamp captured when each peer
+  // raised. Local peer is included so the host sees their own position too.
+  const localKey = identity?.accountAddress || '__self__'
+  const raiseHandQueue = useMemo(() => {
+    const entries = []
+    if (handRaised) {
+      entries.push({
+        peerId: localKey,
+        displayName: identity?.displayName || 'You',
+        raisedAt: handRaisedAt[localKey] || Date.now(),
+      })
+    }
+    for (const p of participants) {
+      if (peerHands[p.peerId]) {
+        entries.push({
+          peerId: p.peerId,
+          displayName: p.identity?.displayName || p.peerId.slice(0, 6),
+          raisedAt: handRaisedAt[p.peerId] || Date.now(),
+        })
+      }
+    }
+    return entries.sort((a, b) => a.raisedAt - b.raisedAt)
+  }, [handRaised, localKey, identity, handRaisedAt, peerHands, participants])
+
+  // Most-recent loudest speaker — used for both the tile glow and a header pill.
+  const activeSpeakerId = activeSpeakers.length > 0 ? activeSpeakers[0] : null
 
   return (
     <div className="flex flex-col h-full text-paper" style={{ background: 'var(--ink)' }}>
@@ -175,14 +280,28 @@ export default function LiveKitCallView({
           <Wifi size={11} />
           <span>SFU</span>
         </span>
-        {recording && (
-          <span
-            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-pill text-2xs font-medium tracking-tightish bg-danger/20 text-danger border border-danger/30"
-            aria-live="polite"
+        {recording && recordingId && (
+          <RecordingIndicator
+            recordingId={recordingId}
+            onStopped={handleRecordingStopped}
+          />
+        )}
+        {raiseHandQueue.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setHandQueueOpen((v) => !v)}
+            className={[
+              'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-pill text-2xs font-medium tracking-tightish border',
+              handQueueOpen
+                ? 'bg-warning/25 text-warning border-warning/40'
+                : 'bg-warning/15 text-warning border-warning/30',
+            ].join(' ')}
+            aria-pressed={handQueueOpen ? 'true' : 'false'}
+            data-testid="raise-hand-queue-toggle"
           >
-            <Circle size={9} fill="currentColor" />
-            <span>REC</span>
-          </span>
+            <Hand size={11} />
+            <span>{raiseHandQueue.length}</span>
+          </button>
         )}
         <button
           type="button"
@@ -197,10 +316,10 @@ export default function LiveKitCallView({
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Speaker grid */}
+        {/* Speaker grid — responsive 1/2/4/9/16/25 ladder via speakerGrid.js */}
         <div
           className="flex-1 grid gap-2 p-3 overflow-auto"
-          style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
+          style={gridStyle}
           data-testid="livekit-speaker-grid"
         >
           <SelfTile
@@ -228,6 +347,37 @@ export default function LiveKitCallView({
             </div>
           )}
         </div>
+
+        {handQueueOpen && raiseHandQueue.length > 0 && (
+          <RaiseHandQueue
+            queue={raiseHandQueue}
+            onDismiss={isOrganizer ? handleDismissHand : undefined}
+            localPeerId={localKey}
+          />
+        )}
+
+        {captionsOpen && (
+          <CaptionsPanel
+            roomId={sessionId}
+            open={captionsOpen}
+            onClose={() => setCaptionsOpen(false)}
+          />
+        )}
+
+        {breakoutOpen && (
+          <BreakoutRooms
+            parentRoomId={sessionId}
+            participants={participants}
+            localPeerId={localKey}
+            isOrganizer={isOrganizer}
+            onClose={() => setBreakoutOpen(false)}
+            onJoinBreakout={(roomId) => {
+              // Joining a breakout = leave this room + re-enter under the new
+              // sessionId. The shell handles routing.
+              if (onLeave) onLeave({ breakoutRoomId: roomId })
+            }}
+          />
+        )}
 
         {showRoster && (
           <aside className="w-60 border-l border-paper/10 overflow-y-auto p-3 text-sm">
@@ -260,11 +410,6 @@ export default function LiveKitCallView({
         )}
       </div>
 
-      {/* Breakout panel stub */}
-      {breakoutOpen && (
-        <BreakoutPanel onClose={() => setBreakoutOpen(false)} participantCount={totalTiles} />
-      )}
-
       {/* Controls */}
       <div className="px-4 py-3 border-t border-paper/10 flex items-center justify-center">
         <div
@@ -279,6 +424,14 @@ export default function LiveKitCallView({
           </DockButton>
           <DockButton onClick={handleHandToggle} active={handRaised} title={handRaised ? 'Lower hand' : 'Raise hand'}>
             <Hand size={17} />
+          </DockButton>
+          <DockButton
+            onClick={() => setCaptionsOpen((v) => !v)}
+            active={captionsOpen}
+            title={captionsOpen ? 'Close captions' : 'Open captions'}
+            testid="livekit-captions-toggle"
+          >
+            <CaptionsIcon size={17} />
           </DockButton>
           <DockButton onClick={() => setBreakoutOpen((v) => !v)} active={breakoutOpen} title="Breakout rooms">
             <Layers size={17} />
@@ -408,7 +561,14 @@ function ParticipantTile({ participant, isSpeaking, handRaised }) {
 
   return (
     <div
-      className="relative rounded-lg overflow-hidden flex items-center justify-center min-h-[140px] transition-[outline] duration-fast ease-out"
+      className={[
+        'relative rounded-lg overflow-hidden flex items-center justify-center min-h-[140px]',
+        'transition-[outline] duration-fast ease-out',
+        // MEET-FRONTEND-POLISH-01: active-speaker emphasis via the
+        // `speaker-glow` keyframe (tailwind.config.js). Subtle accent
+        // box-shadow pulse — no garish color, no layout shift.
+        isSpeaking ? 'animate-[speaker-glow_1.8s_ease-out_infinite]' : '',
+      ].join(' ')}
       style={{
         background: 'rgba(255,255,255,.04)',
         outline: isSpeaking
@@ -417,6 +577,7 @@ function ParticipantTile({ participant, isSpeaking, handRaised }) {
         outlineOffset: '-2px',
       }}
       data-testid="livekit-participant-tile"
+      data-speaking={isSpeaking ? 'true' : 'false'}
     >
       <video ref={ref} autoPlay playsInline className="w-full h-full object-cover" />
       <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between text-2xs">
@@ -439,50 +600,7 @@ function ParticipantTile({ participant, isSpeaking, handRaised }) {
   )
 }
 
-// Breakout-room panel (stub — UI shell only).
-//
-// TODO(MEET-BREAKOUT-01): full creation+routing is queued for a later wave.
-// This shell just lets the host pick a count and a label per room.
-function BreakoutPanel({ onClose, participantCount }) {
-  const [count, setCount] = useState(2)
-  const [creating, setCreating] = useState(false)
-  return (
-    <div className="px-4 py-3 border-t border-paper/10 bg-paper/5">
-      <div className="flex items-center gap-3">
-        <Layers size={14} className="text-paper/70" />
-        <span className="text-sm text-paper/80 tracking-tightish font-medium">Breakout rooms</span>
-        <span className="text-2xs text-paper/40 uppercase tracking-eyebrow">soon</span>
-        <span className="ml-auto inline-flex items-center gap-2 text-2xs text-paper/60">
-          <label htmlFor="breakout-count">Rooms</label>
-          <input
-            id="breakout-count"
-            type="number"
-            min={2}
-            max={20}
-            value={count}
-            onChange={(e) => setCount(Math.max(2, Math.min(20, parseInt(e.target.value, 10) || 2)))}
-            className="w-14 h-7 px-2 text-sm bg-paper/10 border border-paper/10 rounded-md text-paper outline-none"
-          />
-          <span className="text-paper/40">
-            ≈ {Math.max(1, Math.floor(participantCount / count))} per room
-          </span>
-        </span>
-        <button
-          type="button"
-          disabled={creating}
-          onClick={() => { setCreating(true); setTimeout(() => { setCreating(false); onClose?.() }, 400) }}
-          className="inline-flex items-center justify-center h-7 px-3 rounded-md text-xs font-medium tracking-tightish bg-paper/10 text-paper hover:bg-paper/20 disabled:opacity-50"
-        >
-          {creating ? 'Creating…' : 'Create (stub)'}
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-xs text-paper/60 hover:text-paper tracking-tightish"
-        >
-          Close
-        </button>
-      </div>
-    </div>
-  )
-}
+// MEET-FRONTEND-POLISH-01: the inline BreakoutPanel stub was promoted to a
+// working component at ./BreakoutRooms.jsx — it now drives create / drift /
+// recall against the cloud MEET-BREAKOUT-01 endpoints (degrading cleanly to a
+// "unavailable in this workspace" notice when those endpoints aren't live).

@@ -46,6 +46,9 @@ export default defineConfig({
         'react/jsx-runtime',
         'react-dom/client',
         'react-router-dom',
+        // RELAY-CLIENT-02: keep relay-client a peer dependency so the OS shell
+        // de-dups it (both consumers ship the same bundle from one source).
+        /^@vulos\/relay-client/,
       ],
       output: {
         exports: 'named',

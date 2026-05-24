@@ -14,7 +14,7 @@ import {
   readLiveKitFlag,
   createLiveKitRoom,
   fetchMeetToken,
-} from '../../lib/call/livekitClient.js'
+} from '@vulos/relay-client/call'
 
 // ────────────────────────────────────────────────────────────────────────────
 // 1. Route selection

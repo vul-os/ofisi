@@ -1,9 +1,12 @@
 # Vulos Office — Task Backlog
 
-**Status: 35 / 35 tasks done (100%).** Office Core, Real-time Collaboration (CRDT +
+**Status: 37 / 37 tasks done (100%).** Office Core, Real-time Collaboration (CRDT +
 fabric), PDF Auto-Sign, and Vulos Spaces (channels, calls, screen-share, meetings) are
-all shipped. Design-system pillar applied to core surfaces (see `src/design/DESIGN.md`
-§9); remaining surfaces deferred to the next pass (§10).
+all shipped. Wave C (2026-05-24) adds the shared `@vulos/relay-client` migration
+(RELAY-CLIENT-02) and the Spaces UI ship-ready polish — captions panel, recording
+indicator + quota, raise-hand queue, working breakouts, responsive 1/2/4/9/16/25 grid,
+and active-speaker glow (MEET-FRONTEND-POLISH-01). Design-system pillar applied to core
+surfaces (see `src/design/DESIGN.md` §9); remaining surfaces deferred to the next pass (§10).
 
 Actionable work for autonomous coding agents, grouped by area and
 **priority-ordered**. Vulos Office is the productivity surface of the Vulos
@@ -381,17 +384,17 @@ AC: [x] livekit-client wired for >5 [x] mesh fallback for ≤5 [x] speaker grid 
 ## Area: Relay-client adoption + Spaces UI polish (Wave C — 2026-05-24)
 
 ### [RELAY-CLIENT-02] Migrate office to consume @vulos/relay-client + delete local copies
-`todo` · P1 · M · dep: RELAY-CLIENT-01 (vulos-relay) · parallel: yes — package.json, src/lib/
+`done` · P1 · M · dep: RELAY-CLIENT-01 (vulos-relay) · parallel: yes — package.json, src/lib/
 Scope: After RELAY-CLIENT-01 ships the JS package at `vulos-relay/client/`, add
 `"@vulos/relay-client": "file:../vulos-relay/client"` to office's package.json; replace local imports of
 `src/lib/{endpoints,offlineBootstrap,signaling,fabric,presence,call,useLiveCursors,roundTripCheck}` with
 `@vulos/relay-client/*` imports; DELETE the local source files. Verify nothing references the deleted paths
 (`grep -r "src/lib/signaling\|src/lib/fabric\|src/lib/endpoints\|src/lib/offlineBootstrap"` returns empty).
 Run full build+test to confirm byte-equivalent behavior.
-AC: [ ] file: dep added [ ] 8 local files deleted [ ] imports swapped [ ] grep clean [ ] npm run build + npm test green [ ] cross-repo vulos npm run build green
+AC: [x] file: dep added [x] 8 local files deleted [x] imports swapped [x] grep clean [x] npm run build + npm test green [x] cross-repo vulos npm run build green
 
 ### [MEET-FRONTEND-POLISH-01] Spaces UI polish — captions panel, recording UX, breakouts wired, responsive grid
-`todo` · P2 · M · dep: MEET-SPACES-01 · parallel: yes — src/apps/spaces/components/
+`done` · P2 · M · dep: MEET-SPACES-01 · parallel: yes — src/apps/spaces/components/
 Scope: MEET-SPACES-01 delivered the LiveKit calling surface + speaker grid + raise-hand + breakout stub +
 recording toggle. Bring it to ship-ready:
 (a) **Captions panel** — consume the vulos OS `MEET-TRANSCRIPT-01` SSE stream (`GET /api/meet/transcribe/stream/{room}`),
@@ -401,4 +404,4 @@ recording toggle. Bring it to ship-ready:
 (d) **Breakout rooms** — wire the stub: admin creates breakouts; drift users in/out; return-to-main.
 (e) **Responsive speaker grid** — 1/2/4/9/16/25 tile layouts adapting to viewport.
 (f) **Active-speaker emphasis** — subtle border-glow on the loudest tile.
-AC: [ ] captions panel renders SSE [ ] recording indicator + quota [ ] raise-hand queue [ ] breakout create/drift/return [ ] responsive grid (test viewports) [ ] active-speaker animation [ ] npm run build + npm test green
+AC: [x] captions panel renders SSE [x] recording indicator + quota [x] raise-hand queue [x] breakout create/drift/return [x] responsive grid (test viewports) [x] active-speaker animation [x] npm run build + npm test green

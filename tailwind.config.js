@@ -147,12 +147,20 @@ export default {
           '0%':   { opacity: 0, transform: 'translateX(8px)' },
           '100%': { opacity: 1, transform: 'translateX(0)' },
         },
+        // MEET-FRONTEND-POLISH-01: active-speaker subtle border-glow loop.
+        // Pulse between two accent-tinted box-shadows so the loudest tile
+        // breathes — never garish, never animates the layout box.
+        'speaker-glow': {
+          '0%, 100%': { boxShadow: '0 0 0 2px var(--accent), 0 0 0 0 rgba(255,255,255,0)' },
+          '50%':      { boxShadow: '0 0 0 2px var(--accent), 0 0 14px 0 var(--accent-tint)' },
+        },
       },
       animation: {
         'fade-in':        'fade-in var(--duration-base) var(--ease-out) both',
         'rise-in':        'rise-in var(--duration-slow) var(--ease-spring) both',
         'scale-in':       'scale-in var(--duration-base) var(--ease-spring) both',
         'slide-in-right': 'slide-in-right var(--duration-base) var(--ease-out) both',
+        'speaker-glow':   'speaker-glow 1.8s var(--ease-out) infinite',
       },
     },
   },

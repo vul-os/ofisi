@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import ChannelView from './ChannelView.jsx'
 import { api } from '../../lib/api.js'
-import { usePresence, STATUS_ONLINE } from '../../lib/presence.js'
+import { usePresence, STATUS_ONLINE } from '@vulos/relay-client/presence'
 import { PresenceDot, StatusPicker } from '../../components/PresenceBar.jsx'
 import { Button, IconButton, Input, Modal, Sidebar } from '../../components/ui'
 

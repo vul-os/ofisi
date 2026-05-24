@@ -1,10 +1,10 @@
-import { selectEndpoint, currentEndpoint, invalidateEndpoint } from './endpoints.js'
+import { selectEndpoint, currentEndpoint, invalidateEndpoint } from '@vulos/relay-client/endpoints'
 
 const API_PREFIX = '/api'
 
 // Resolve the API base URL through the endpoint-failover layer. The selected
 // base is a same-origin '' by default, or a cloud/LAN origin when the OS shell
-// injects window.__VULOS_ENDPOINTS__. See src/lib/endpoints.js.
+// injects window.__VULOS_ENDPOINTS__. See @vulos/relay-client/endpoints.
 async function apiBase() {
   const base = await selectEndpoint()
   return base + API_PREFIX

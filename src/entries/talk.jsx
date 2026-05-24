@@ -10,7 +10,10 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import TalkShell from '../shells/TalkShell.jsx'
 import '../index.css'
-import { bootstrapOffline } from '../lib/offlineBootstrap.js'
+// RELAY-CLIENT-02: configure relay-client seams BEFORE bootstrap touches LS.
+import { configure } from '@vulos/relay-client/endpoints'
+configure({ lsKeyPrefix: 'vulos.office.endpoints.v1', healthPath: '/api/auth/status' })
+import { bootstrapOffline } from '@vulos/relay-client/offlineBootstrap'
 
 bootstrapOffline()
 

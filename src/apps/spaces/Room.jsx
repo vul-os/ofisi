@@ -19,7 +19,7 @@ import {
   selectCallRoute,
   DEFAULT_MESH_THRESHOLD,
   readLiveKitFlag,
-} from '../../lib/call/livekitClient'
+} from '@vulos/relay-client/call'
 import { Button, Card, Input, Tooltip } from '../../components/ui'
 
 // Attempt to fetch meeting metadata (title, invitees, etc).  Non-blocking.
