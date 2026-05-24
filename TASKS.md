@@ -369,9 +369,9 @@ AC: [x] npm run build emits no mixed-import warning for fabric.js [x] CRDT + Spa
 ## Area: Video meetings — office Spaces on LiveKit (Wave B — 2026-05-24)
 
 ### [MEET-SPACES-01] Rebuild Spaces calling on the LiveKit client SDK (preserve mesh ≤5 fallback)
-`todo` · P2 · L · dep: MEET-CORE-01 (vulos-relay) · parallel: yes — src/apps/spaces/, src/lib/call/
+`done` · P2 · L · dep: MEET-CORE-01 (vulos-relay) · parallel: yes — src/apps/spaces/, src/lib/call/
 Scope: Replace the Spaces calling stack to use `livekit-client` (MIT) JS SDK for rooms >5 participants;
 preserve the existing `fabric.js` mesh path for ≤5 (intimate calls, lower-latency, no SFU dependency).
 Route selection at room join based on expected participant count + Pro-tier gate. UI: speaker grid,
 active-speaker emphasis, raise-hand, breakout-room selector. Tokens fetched from vulos-cloud MEET-CP-01.
-AC: [ ] livekit-client wired for >5 [ ] mesh fallback for ≤5 [ ] speaker grid + active-speaker UI [ ] tokens fetched from cloud [ ] npm run build && npm test
+AC: [x] livekit-client wired for >5 [x] mesh fallback for ≤5 [x] speaker grid + active-speaker UI [x] tokens fetched from cloud [x] npm run build && npm test
