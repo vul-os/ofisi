@@ -61,6 +61,48 @@ type Store interface {
 // closed and registration must go through the gated path.
 var ErrNotFirstUser = errors.New("userauth: store already bootstrapped")
 
+// ErrAlreadyMigrated is returned by MigrateSharedPassword when the credential
+// store already holds users (so the shared-password → per-user migration has
+// already happened, or real users exist) and the one-shot migration is a no-op.
+var ErrAlreadyMigrated = errors.New("userauth: credential store already has users; migration not needed")
+
+// MigrateSharedPassword performs the one-shot upgrade from a legacy shared-
+// password deploy to per-user credentials.
+//
+// Before per-user auth existed, every operator logged in with a single shared
+// password and any client-asserted account id. After the upgrade, login on a
+// bootstrapped instance requires a per-user credential — so an upgrade with NO
+// migrated credential would silently lock everyone out (HasUsers()==false keeps
+// shared-password login working, but the moment any user is added the shared
+// password stops authenticating existing operators).
+//
+// This creates the FIRST per-user credential (adminID + the existing shared
+// password) so the operator can log in immediately after upgrading, and from
+// there mint invites / register the rest of the team. It refuses to run if any
+// user already exists (idempotent / safe to invoke on every boot).
+func MigrateSharedPassword(s Store, adminID, sharedPassword string) error {
+	if adminID == "" || sharedPassword == "" {
+		return ErrEmptyInput
+	}
+	hasUsers, err := s.HasUsers()
+	if err != nil {
+		return err
+	}
+	if hasUsers {
+		return ErrAlreadyMigrated
+	}
+	// RegisterFirst is atomic; if a concurrent boot won the race it returns
+	// ErrNotFirstUser which we surface as "already migrated".
+	switch err := s.RegisterFirst(adminID, sharedPassword); err {
+	case nil:
+		return nil
+	case ErrNotFirstUser:
+		return ErrAlreadyMigrated
+	default:
+		return err
+	}
+}
+
 // normalize lower-cases and trims the account id so logins are case-insensitive
 // on the email/handle (matching how identity is treated elsewhere).
 func normalize(accountID string) string {

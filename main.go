@@ -2,15 +2,19 @@ package main
 
 import (
 	"embed"
+	"flag"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 
 	"vulos-office/backend/config"
 	"vulos-office/backend/handlers"
 	"vulos-office/backend/middleware"
 	"vulos-office/backend/obs"
 	"vulos-office/backend/storage"
+	"vulos-office/backend/userauth"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -20,6 +24,18 @@ import (
 var distFS embed.FS
 
 func main() {
+	// One-shot CLI subcommand: migrate a legacy shared-password deploy to a
+	// per-user credential so an upgrade doesn't silently lock everyone out.
+	//
+	//   vulos-office migrate-credential -admin you@vulos.org [-password PW]
+	//
+	// If -password is omitted the shared password from config.yaml (auth.password)
+	// is used. Safe to run repeatedly: it is a no-op once any user exists.
+	if len(os.Args) > 1 && os.Args[1] == "migrate-credential" {
+		runMigrateCredential(os.Args[2:])
+		return
+	}
+
 	obs.Init()
 
 	cfg, err := config.Load("config.yaml")
@@ -89,6 +105,12 @@ func main() {
 	if cfg.Auth.Enabled {
 		protected.Use(middleware.Auth(cfg))
 	}
+
+	// Pin the file-ACL authorizer to the active storage backend BEFORE any file
+	// handler is constructed. Under Postgres this co-locates ACL ownership in the
+	// same DB as the files (transactional + replicated); under sqlite/local it
+	// uses the separate sqlite ACL store.
+	handlers.InitFileAuthz(store)
 
 	fileHandler := handlers.NewFileHandler(store)
 	protected.GET("/files", fileHandler.List)
@@ -227,6 +249,14 @@ func main() {
 	protected.POST("/calendar/subscribe", calSubHandler.Subscribe)
 	protected.GET("/calendar/subscriptions", calSubHandler.List)
 
+	// Admin: invite-token issuance (mint/list/revoke) + audit-log viewer.
+	// Every handler additionally enforces the admin scope (requireAdmin).
+	adminHandler := handlers.NewAdminHandler()
+	protected.POST("/admin/invites", adminHandler.MintInvite)
+	protected.GET("/admin/invites", adminHandler.ListInvites)
+	protected.DELETE("/admin/invites/:id", adminHandler.RevokeInvite)
+	protected.GET("/admin/audit", adminHandler.ListAudit)
+
 	// Contacts: VCF import/export, dedup, merge.
 	contactsHandler := handlers.NewContactsVCFHandler()
 	protected.POST("/contacts/import", contactsHandler.ImportVCF)
@@ -265,8 +295,11 @@ func main() {
 	// User status (OFFICE-SPACES-4)
 	protected.PUT("/spaces/users/me/status", forumHandler.SetStatus)
 	protected.GET("/spaces/users/:userId/status", forumHandler.GetStatus)
-	// Search (OFFICE-SPACES-5)
+	// Search (OFFICE-SPACES-5) — FTS5-backed when the Persister supports it.
 	protected.GET("/spaces/channels/:channelId/search", forumHandler.SearchMessages)
+	// Threading: thread view + thread-scoped reply.
+	protected.GET("/spaces/channels/:channelId/threads/:parentId", forumHandler.ListThread)
+	protected.POST("/spaces/channels/:channelId/threads/:parentId/reply", forumHandler.ReplyThread)
 
 	// Serve embedded frontend (SPA fallback to index.html)
 	staticFS, err := fs.Sub(distFS, "dist")
@@ -297,5 +330,53 @@ func main() {
 	log.Printf("Vulos Office running → http://localhost%s", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// runMigrateCredential implements the `migrate-credential` subcommand.
+func runMigrateCredential(args []string) {
+	fs := flag.NewFlagSet("migrate-credential", flag.ExitOnError)
+	adminID := fs.String("admin", "", "admin account id to create the first per-user credential for (required)")
+	password := fs.String("password", "", "password for the credential (default: auth.password from config.yaml)")
+	dbPath := fs.String("db", "", "credential DB path (default: $VULOS_USERAUTH_DB or ./data/userauth.db)")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load("config.yaml")
+	if err != nil {
+		cfg = config.Default()
+	}
+	pw := *password
+	if pw == "" {
+		pw = cfg.Auth.Password
+	}
+	if *adminID == "" || pw == "" {
+		fmt.Fprintln(os.Stderr, "migrate-credential: -admin is required, and a password must be available "+
+			"(via -password or auth.password in config.yaml)")
+		os.Exit(2)
+	}
+
+	dsn := *dbPath
+	if dsn == "" {
+		if v := os.Getenv("VULOS_USERAUTH_DB"); v != "" {
+			dsn = v
+		} else {
+			dsn = "./data/userauth.db"
+		}
+	}
+
+	store, err := userauth.NewSQLiteStore(dsn)
+	if err != nil {
+		log.Fatalf("migrate-credential: open credential store %q: %v", dsn, err)
+	}
+	defer store.Close()
+
+	switch err := userauth.MigrateSharedPassword(store, *adminID, pw); err {
+	case nil:
+		fmt.Printf("migrate-credential: created per-user credential for %q in %s\n", *adminID, dsn)
+		fmt.Println("You can now log in with that account + password, then mint invites for the rest of your team.")
+	case userauth.ErrAlreadyMigrated:
+		fmt.Println("migrate-credential: credential store already has users — nothing to do (no lockout risk).")
+	default:
+		log.Fatalf("migrate-credential: %v", err)
 	}
 }

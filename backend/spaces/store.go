@@ -149,6 +149,55 @@ type Persister interface {
 	ListPins() ([]*models.PinnedMessage, error)
 }
 
+// Searcher is an OPTIONAL capability a Persister may implement to provide a real
+// full-text index instead of a linear scan. The SQLitePersister implements it
+// with an FTS5 virtual table; callers should type-assert and fall back to an
+// in-memory scan when the Persister does not support it (NullPersister).
+type Searcher interface {
+	// SearchMessages returns the ids of messages in channelID whose body matches
+	// the free-text query, ordered by recency. terms is a list of plain word
+	// tokens (operators like from:/before: are applied by the caller against the
+	// returned messages); an empty terms slice returns no ids.
+	SearchMessages(channelID string, terms []string) ([]string, error)
+}
+
+// SearchIndexed returns matching message ids using the Persister's full-text
+// index when it implements Searcher, in recency order. ok=false means the
+// Persister has no FTS capability and the caller should fall back to a scan.
+func (s *SpacesStore) SearchIndexed(channelID string, terms []string) (ids []string, ok bool) {
+	srch, isSearcher := s.persist.(Searcher)
+	if !isSearcher {
+		return nil, false
+	}
+	res, err := srch.SearchMessages(channelID, terms)
+	if err != nil {
+		return nil, false
+	}
+	return res, true
+}
+
+// MessageByID returns a message by id within a channel (in-memory index).
+func (s *SpacesStore) MessageByID(channelID, msgID string) (*models.Message, bool) {
+	return s.GetMessage(channelID, msgID)
+}
+
+// ThreadReplies returns the active (non-tombstoned) replies whose ThreadParent
+// is parentID, in SeqClock order. Lives on the store so both the REST handler
+// and tests share one threading definition.
+func (s *SpacesStore) ThreadReplies(channelID, parentID string) []*models.Message {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	msgs := s.messages[channelID]
+	out := make([]*models.Message, 0)
+	for _, m := range msgs {
+		if m.ThreadParent == parentID {
+			out = append(out, m)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].SeqClock < out[j].SeqClock })
+	return out
+}
+
 // SpacesStore is a CRDT message store for one node/replica.
 type SpacesStore struct {
 	mu      sync.RWMutex

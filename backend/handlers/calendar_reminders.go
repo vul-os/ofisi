@@ -123,10 +123,11 @@ func ClearCalStore() {
 // ─── calendar subscription handler ────────────────────────────────────────────
 
 type calSubscription struct {
-	ID    string    `json:"id"`
-	URL   string    `json:"url"`
-	Name  string    `json:"name"`
-	Added time.Time `json:"added"`
+	ID      string    `json:"id"`
+	OwnerID string    `json:"owner_id,omitempty"`
+	URL     string    `json:"url"`
+	Name    string    `json:"name"`
+	Added   time.Time `json:"added"`
 }
 
 var subsMu sync.RWMutex
@@ -150,10 +151,11 @@ func (h *CalendarSubscribeHandler) Subscribe(c *gin.Context) {
 		return
 	}
 	sub := &calSubscription{
-		ID:    uuid.NewString(),
-		URL:   req.URL,
-		Name:  req.Name,
-		Added: time.Now().UTC(),
+		ID:      uuid.NewString(),
+		OwnerID: requesterID(c),
+		URL:     req.URL,
+		Name:    req.Name,
+		Added:   time.Now().UTC(),
 	}
 	subsMu.Lock()
 	calSubscriptions[sub.ID] = sub
@@ -167,11 +169,16 @@ func (h *CalendarSubscribeHandler) Subscribe(c *gin.Context) {
 
 // ListSubscriptions GET /api/calendar/subscriptions
 func (h *CalendarSubscribeHandler) List(c *gin.Context) {
+	requester, isAdmin := callerScope(c)
 	subsMu.RLock()
 	defer subsMu.RUnlock()
 	out := make([]*calSubscription, 0, len(calSubscriptions))
 	for _, s := range calSubscriptions {
-		out = append(out, s)
+		// Scope to the caller's own subscriptions (admins see all; unowned/legacy
+		// subscriptions stay visible for OSS local mode).
+		if isAdmin || s.OwnerID == "" || s.OwnerID == requester {
+			out = append(out, s)
+		}
 	}
 	c.JSON(http.StatusOK, out)
 }
@@ -214,6 +221,9 @@ func fetchSubscription(sub *calSubscription) {
 	for i := range events {
 		events[i].CreatedAt = now
 		events[i].UpdatedAt = now
+		// Imported feed events belong to the subscriber so they are scoped to the
+		// same owner as their personal events (not world-visible).
+		events[i].OwnerID = sub.OwnerID
 		calStore.put(&events[i])
 	}
 	log.Printf("subscription %q: imported %d events", sub.Name, len(events))

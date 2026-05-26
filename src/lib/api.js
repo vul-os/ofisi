@@ -184,6 +184,35 @@ export const api = {
   spacesSearch: (channelId, q) =>
     request(`/spaces/channels/${channelId}/search?q=${encodeURIComponent(q)}`),
 
+  // Threading: list replies to a parent message (thread-scoped).
+  spacesListThread: (channelId, parentId) =>
+    request(`/spaces/channels/${channelId}/threads/${parentId}`),
+  // Reply within a thread (thread_parent bound server-side to the parent).
+  spacesReplyThread: (channelId, parentId, body) =>
+    request(`/spaces/channels/${channelId}/threads/${parentId}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    }),
+
+  // Admin: invite-token issuance + audit log (admin scope required; non-admins
+  // receive 403).
+  adminMintInvite: ({ note = '', maxUses = 1, ttlHours = 168 } = {}) =>
+    request('/admin/invites', {
+      method: 'POST',
+      body: JSON.stringify({ note, max_uses: maxUses, ttl_hours: ttlHours }),
+    }),
+  adminListInvites: () => request('/admin/invites'),
+  adminRevokeInvite: (id) => request(`/admin/invites/${id}`, { method: 'DELETE' }),
+  adminListAudit: (limit = 200) => request(`/admin/audit?limit=${limit}`),
+
+  // Registration consuming an invite/registration token (header-gated).
+  register: (accountId, password, token = '') =>
+    request('/auth/register', {
+      method: 'POST',
+      headers: token ? { 'X-Registration-Token': token } : {},
+      body: JSON.stringify({ account_id: accountId, password }),
+    }),
+
   // OFFICE-41: signing envelope CRUD
   listEnvelopes: () => request('/envelopes'),
   getEnvelope: (id) => request(`/envelopes/${id}`),

@@ -423,25 +423,49 @@ func (h *SpacesHandlerExt) canSeeUserStatus(requester, target string) bool {
 // Supports plain terms plus operators:
 //   from:user  before:date  after:date  has:link  has:file
 //
-// Pure in-memory linear scan (equivalent to SQLite FTS5 for the current MVP;
-// swap in a Persister.Search() call when durability is added).
+// The plain word terms are matched against a real FTS5 inverted index when the
+// Persister supports it (SQLitePersister); the operator filters (from/before/
+// after/has) are then applied to the matched messages. When the index is
+// unavailable (NullPersister) it falls back to the tokenized in-memory scan.
 func (h *SpacesHandlerExt) SearchMessages(c *gin.Context) {
 	channelID := c.Param("channelId")
 	if !h.requireChannelAccess(c, channelID, requesterID(c)) {
 		return
 	}
 	raw := strings.TrimSpace(c.Query("q"))
-
-	msgs := h.store.ListMessages(channelID)
-
 	if raw == "" {
 		c.JSON(http.StatusOK, []*models.Message{})
 		return
 	}
 
 	filter := parseSearchFilter(raw)
+
+	// Prefer the FTS index for the free-text terms. When there are terms and the
+	// Persister is a Searcher, narrow to the matched ids first (O(matches)
+	// instead of O(all messages)); the operator filters run on that subset.
 	var results []*models.Message
-	for _, m := range msgs {
+	if len(filter.terms) > 0 {
+		if ids, ok := h.store.SearchIndexed(channelID, filter.terms); ok {
+			for _, id := range ids {
+				if m, found := h.store.GetMessage(channelID, id); found {
+					if m.State == models.MessageStateTombed {
+						continue
+					}
+					if matchMsg(m, filter) {
+						results = append(results, m)
+					}
+				}
+			}
+			if results == nil {
+				results = []*models.Message{}
+			}
+			c.JSON(http.StatusOK, results)
+			return
+		}
+	}
+
+	// Fallback: linear scan (no FTS index, or an operator-only query).
+	for _, m := range h.store.ListMessages(channelID) {
 		if m.State == models.MessageStateTombed {
 			continue
 		}
@@ -453,6 +477,65 @@ func (h *SpacesHandlerExt) SearchMessages(c *gin.Context) {
 		results = []*models.Message{}
 	}
 	c.JSON(http.StatusOK, results)
+}
+
+// -------------------------------------------------------------------------
+// Threading
+// -------------------------------------------------------------------------
+
+// ListThread GET /api/spaces/channels/:channelId/threads/:parentId
+//
+// Returns the parent message followed by its replies (thread view). Thread-
+// scoped authz: the caller must be able to access the channel, and the parent
+// message must exist in it.
+func (h *SpacesHandlerExt) ListThread(c *gin.Context) {
+	channelID := c.Param("channelId")
+	parentID := c.Param("parentId")
+	if !h.requireChannelAccess(c, channelID, requesterID(c)) {
+		return
+	}
+	parent, ok := h.store.GetMessage(channelID, parentID)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "thread parent not found"})
+		return
+	}
+	replies := h.store.ThreadReplies(channelID, parentID)
+	out := make([]*models.Message, 0, len(replies)+1)
+	out = append(out, parent)
+	out = append(out, replies...)
+	c.JSON(http.StatusOK, gin.H{"parent": parent, "replies": replies, "messages": out})
+}
+
+// ReplyThread POST /api/spaces/channels/:channelId/threads/:parentId/reply
+//
+// Posts a reply whose ThreadParent is bound server-side to the path's parentId
+// (the client cannot retarget another thread). The parent must exist in the
+// channel and the caller must be a member.
+func (h *SpacesHandlerExt) ReplyThread(c *gin.Context) {
+	channelID := c.Param("channelId")
+	parentID := c.Param("parentId")
+	var req models.SendMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	authorID := requesterID(c)
+	if !h.requireChannelAccess(c, channelID, authorID) {
+		return
+	}
+	// The parent must exist in THIS channel — a reply cannot graft onto a thread
+	// in a channel the caller named but the parent doesn't belong to.
+	if _, ok := h.store.GetMessage(channelID, parentID); !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "thread parent not found"})
+		return
+	}
+	// thread_parent is bound to the path param, NOT the request body.
+	msg, err := h.store.SendMessage(channelID, authorID, req.Body, parentID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, msg)
 }
 
 // ---- search filter -----------------------------------------------------------

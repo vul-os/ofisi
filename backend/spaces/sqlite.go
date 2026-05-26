@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"vulos-office/backend/models"
@@ -38,7 +39,8 @@ func unmarshalMessage(s string) (*models.Message, error) {
 // Use a file path (e.g. "./data/spaces.db") for durability, or ":memory:" for
 // an ephemeral DB in tests.
 type SQLitePersister struct {
-	db *sql.DB
+	db  *sql.DB
+	fts bool // true when the FTS5 virtual table is available
 }
 
 // NewSQLitePersister opens (or creates) the database at dsn and ensures the
@@ -145,6 +147,20 @@ func (p *SQLitePersister) init() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("spaces: init schema: %w", err)
+	}
+	// Full-text search index (FTS5). The virtual table indexes message bodies
+	// keyed by (channel_id, msg_id) so SearchMessages is a real inverted-index
+	// MATCH instead of a linear scan. modernc/sqlite ships FTS5; if the build
+	// lacks it we degrade to the in-memory scan (see ftsAvailable). Use an
+	// external-content-free table (own copy of body) for simplicity.
+	if _, ferr := p.db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+			msg_id UNINDEXED, channel_id UNINDEXED, body, tokenize='unicode61'
+		)`); ferr == nil {
+		p.fts = true
+		// Backfill any rows that predate the FTS index (idempotent: clear+reload).
+		_, _ = p.db.Exec(`DELETE FROM messages_fts`)
+		_, _ = p.db.Exec(`INSERT INTO messages_fts (msg_id, channel_id, body)
+			SELECT id, channel_id, body FROM messages WHERE state != 'tombed'`)
 	}
 	// Migration: add memberships.display_name to databases created before the
 	// name-capture flow landed. CREATE TABLE IF NOT EXISTS above is a no-op for
@@ -276,7 +292,94 @@ func (p *SQLitePersister) SaveMessage(msg *models.Message) error {
 		   updated_at=excluded.updated_at`,
 		msg.ID, msg.ChannelID, msg.ThreadParent, msg.AuthorID, msg.Body,
 		string(msg.State), msg.SeqClock, msg.CreatedAt.UnixNano(), msg.UpdatedAt.UnixNano())
-	return err
+	if err != nil {
+		return err
+	}
+	p.indexMessage(msg)
+	return nil
+}
+
+// indexMessage keeps the FTS5 index in sync with a saved/edited/tombstoned
+// message. A tombstoned (deleted) message is removed from the index so deleted
+// content is not searchable. Errors are swallowed: search is best-effort and
+// must never block a message write.
+func (p *SQLitePersister) indexMessage(msg *models.Message) {
+	if !p.fts {
+		return
+	}
+	// Replace any existing row for this message id, then insert the current body
+	// unless the message is tombstoned (deleted).
+	_, _ = p.db.Exec(`DELETE FROM messages_fts WHERE msg_id = ?`, msg.ID)
+	if msg.State == models.MessageStateTombed {
+		return
+	}
+	_, _ = p.db.Exec(
+		`INSERT INTO messages_fts (msg_id, channel_id, body) VALUES (?, ?, ?)`,
+		msg.ID, msg.ChannelID, msg.Body)
+}
+
+// SearchMessages runs a real FTS5 MATCH over the channel's message bodies and
+// returns matching message ids most-recent first. Implements spaces.Searcher.
+func (p *SQLitePersister) SearchMessages(channelID string, terms []string) ([]string, error) {
+	if !p.fts || len(terms) == 0 {
+		return nil, nil
+	}
+	match := buildFTSMatch(terms)
+	if match == "" {
+		return nil, nil
+	}
+	rows, err := p.db.Query(
+		`SELECT f.msg_id FROM messages_fts f
+		 JOIN messages m ON m.id = f.msg_id AND m.channel_id = f.channel_id
+		 WHERE f.channel_id = ? AND f.body MATCH ? AND m.state != 'tombed'
+		 ORDER BY m.seq_clock DESC`,
+		channelID, match)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// buildFTSMatch turns plain word tokens into a safe FTS5 MATCH expression:
+// each token becomes a prefix query (`term*`) quoted to neutralise FTS5
+// operators, AND-ed together. Returns "" when no usable token remains.
+func buildFTSMatch(terms []string) string {
+	var parts []string
+	for _, t := range terms {
+		clean := sanitizeFTSToken(t)
+		if clean == "" {
+			continue
+		}
+		// Quote the term (escaping embedded quotes) and add a prefix wildcard so
+		// "deploy" matches "deployment". The wildcard sits OUTSIDE the quotes.
+		parts = append(parts, `"`+strings.ReplaceAll(clean, `"`, `""`)+`"*`)
+	}
+	return strings.Join(parts, " AND ")
+}
+
+// sanitizeFTSToken strips characters that are FTS5 syntax so user input can
+// never inject an operator/column filter. Keeps letters, digits, and a few
+// in-word separators.
+func sanitizeFTSToken(t string) string {
+	var b strings.Builder
+	for _, r := range t {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_' || r == '-' || r == '@' || r == '.':
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (p *SQLitePersister) scanMessages(rows *sql.Rows) ([]*models.Message, error) {

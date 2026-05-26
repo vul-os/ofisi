@@ -334,7 +334,10 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
 
   async function sendThreadReply(text, parentId) {
     setError(null)
-    await api.spacesSendMessage(channel.id, text, parentId)
+    // Use the dedicated thread-reply endpoint: the backend binds thread_parent
+    // to the path parentId (the client can't retarget) and enforces that the
+    // parent exists in the channel + the caller is a member (thread-scoped authz).
+    await api.spacesReplyThread(channel.id, parentId, text)
     await loadMessages()
   }
 

@@ -27,6 +27,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"vulos-office/backend/middleware"
 	"vulos-office/backend/services/calendar_rrule"
 )
 
@@ -58,6 +59,14 @@ type Reminder struct {
 // CalEvent is the full rich event model.
 type CalEvent struct {
 	ID          string      `json:"id"`
+	// OwnerID is the verified account id (JWT subject) that created the event.
+	// It is stamped server-side on create and is NOT client-settable: every
+	// Get/List/Update/Delete is scoped to the calling identity so one user can
+	// never read or mutate another user's events (closes the calendar IDOR).
+	// An empty OwnerID denotes a legacy/unowned event (created before authz or
+	// in auth-disabled local mode) and stays visible to everyone — matching the
+	// fileacl fail-safe for OSS single-user mode.
+	OwnerID     string      `json:"owner_id,omitempty"`
 	CalendarID  string      `json:"calendar_id"`
 	Title       string      `json:"title"`
 	AllDay      bool        `json:"all_day,omitempty"`
@@ -85,11 +94,28 @@ type calendarStore struct {
 
 var calStore = &calendarStore{events: map[string]*CalEvent{}}
 
-func (s *calendarStore) list(from, to time.Time, calID string) []*CalEvent {
+// canAccessEvent reports whether requester may touch e. Admins always pass.
+// An event with no recorded owner is unowned/legacy and accessible to everyone
+// (OSS single-user fail-safe). Otherwise only the owner has access.
+func canAccessEvent(e *CalEvent, requester string, isAdmin bool) bool {
+	if isAdmin {
+		return true
+	}
+	if e.OwnerID == "" {
+		return true
+	}
+	return e.OwnerID == requester
+}
+
+// list returns only the events the caller (requester/isAdmin) may access.
+func (s *calendarStore) list(from, to time.Time, calID, requester string, isAdmin bool) []*CalEvent {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var out []*CalEvent
 	for _, e := range s.events {
+		if !canAccessEvent(e, requester, isAdmin) {
+			continue
+		}
 		if calID != "" && e.CalendarID != calID {
 			continue
 		}
@@ -101,7 +127,25 @@ func (s *calendarStore) list(from, to time.Time, calID string) []*CalEvent {
 	return out
 }
 
-func (s *calendarStore) get(id string) (*CalEvent, bool) {
+// get returns the event ONLY if the caller may access it. A non-owner (or a
+// missing event) returns ok=false so the handler responds 404 — never leaking
+// whether an event the caller cannot see exists.
+func (s *calendarStore) get(id, requester string, isAdmin bool) (*CalEvent, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	e, ok := s.events[id]
+	if !ok {
+		return nil, false
+	}
+	if !canAccessEvent(e, requester, isAdmin) {
+		return nil, false
+	}
+	return e, true
+}
+
+// getRaw returns an event ignoring ownership. Used by the reminder worker and
+// tests, NEVER by request handlers.
+func (s *calendarStore) getRaw(id string) (*CalEvent, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	e, ok := s.events[id]
@@ -127,6 +171,11 @@ type CalendarEventHandler struct{}
 
 func NewCalendarEventHandler() *CalendarEventHandler { return &CalendarEventHandler{} }
 
+// callerScope returns the verified identity and admin flag for the request.
+func callerScope(c *gin.Context) (requester string, isAdmin bool) {
+	return requesterID(c), c.GetBool(middleware.CtxIsAdmin)
+}
+
 // ListEvents GET /api/calendar/events?from=RFC3339&to=RFC3339&cal=calID
 func (h *CalendarEventHandler) ListEvents(c *gin.Context) {
 	from, to, err := parseDateRange(c)
@@ -135,7 +184,8 @@ func (h *CalendarEventHandler) ListEvents(c *gin.Context) {
 		return
 	}
 	calID := c.Query("cal")
-	events := calStore.list(from, to, calID)
+	requester, isAdmin := callerScope(c)
+	events := calStore.list(from, to, calID, requester, isAdmin)
 	c.JSON(http.StatusOK, events)
 }
 
@@ -150,6 +200,9 @@ func (h *CalendarEventHandler) CreateEvent(c *gin.Context) {
 	req.ID = uuid.NewString()
 	req.CreatedAt = now
 	req.UpdatedAt = now
+	// Stamp the verified creating identity as owner so the event is private by
+	// default. The client cannot set this — any owner_id in the body is ignored.
+	req.OwnerID = requesterID(c)
 	if req.CalendarID == "" {
 		req.CalendarID = "personal"
 	}
@@ -171,7 +224,8 @@ func (h *CalendarEventHandler) CreateEvent(c *gin.Context) {
 // UpdateEvent PUT /api/calendar/events/:id
 func (h *CalendarEventHandler) UpdateEvent(c *gin.Context) {
 	id := c.Param("id")
-	existing, ok := calStore.get(id)
+	requester, isAdmin := callerScope(c)
+	existing, ok := calStore.get(id, requester, isAdmin)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
 		return
@@ -185,6 +239,9 @@ func (h *CalendarEventHandler) UpdateEvent(c *gin.Context) {
 	req.ID = id
 	req.CreatedAt = existing.CreatedAt
 	req.UpdatedAt = time.Now().UTC()
+	// Ownership is immutable via update — preserve the original owner so a
+	// caller cannot reassign an event to themselves (or orphan it).
+	req.OwnerID = existing.OwnerID
 	if req.CalendarID == "" {
 		req.CalendarID = existing.CalendarID
 	}
@@ -201,7 +258,8 @@ func (h *CalendarEventHandler) UpdateEvent(c *gin.Context) {
 // DeleteEvent DELETE /api/calendar/events/:id
 func (h *CalendarEventHandler) DeleteEvent(c *gin.Context) {
 	id := c.Param("id")
-	if _, ok := calStore.get(id); !ok {
+	requester, isAdmin := callerScope(c)
+	if _, ok := calStore.get(id, requester, isAdmin); !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
 		return
 	}
@@ -212,7 +270,8 @@ func (h *CalendarEventHandler) DeleteEvent(c *gin.Context) {
 // RSVPEvent POST /api/calendar/events/:id/rsvp  body: {"status":"accepted","email":"x@y.com"}
 func (h *CalendarEventHandler) RSVPEvent(c *gin.Context) {
 	id := c.Param("id")
-	event, ok := calStore.get(id)
+	requester, isAdmin := callerScope(c)
+	event, ok := calStore.get(id, requester, isAdmin)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
 		return
@@ -263,7 +322,8 @@ func (h *CalendarEventHandler) ExportICS(c *gin.Context) {
 	from := now.Add(-30 * 24 * time.Hour)       // 30 days back
 	to := now.Add(365 * 24 * time.Hour)         // 12 months forward
 
-	events := calStore.list(from, to, calID)
+	requester, isAdmin := callerScope(c)
+	events := calStore.list(from, to, calID, requester, isAdmin)
 
 	var sb strings.Builder
 	sb.WriteString("BEGIN:VCALENDAR\r\n")

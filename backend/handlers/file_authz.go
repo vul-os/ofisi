@@ -17,6 +17,7 @@ import (
 
 	"vulos-office/backend/fileacl"
 	"vulos-office/backend/middleware"
+	"vulos-office/backend/storage"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,6 +47,28 @@ var (
 // the Spaces handler's NullPersister fallback.
 func SharedFileAuthz() *FileAuthz {
 	fileAuthzOnce.Do(func() {
+		if st, err := fileacl.NewSQLiteStore(fileACLDBPath()); err == nil {
+			defaultFileAuthz = &FileAuthz{acl: st}
+		} else {
+			defaultFileAuthz = &FileAuthz{acl: fileacl.NewNullStore()}
+		}
+	})
+	return defaultFileAuthz
+}
+
+// InitFileAuthz wires the process-wide FileAuthz to the ACL store that travels
+// with the active storage backend. When the backend implements
+// storage.ACLProvider (Postgres), its co-located ACL store is used so ownership
+// is in the SAME database (transactional + replicated) as the files. Otherwise
+// (sqlite/local backend) the separate sqlite ACL store is used. Call ONCE from
+// main() before constructing the file handlers; it pins the sync.Once so later
+// SharedFileAuthz() calls return the same authorizer.
+func InitFileAuthz(store storage.Storage) *FileAuthz {
+	fileAuthzOnce.Do(func() {
+		if p, ok := store.(storage.ACLProvider); ok {
+			defaultFileAuthz = &FileAuthz{acl: p.ACLStore()}
+			return
+		}
 		if st, err := fileacl.NewSQLiteStore(fileACLDBPath()); err == nil {
 			defaultFileAuthz = &FileAuthz{acl: st}
 		} else {

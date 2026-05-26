@@ -85,3 +85,30 @@ func TestSQLiteUserAuthPersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("credential did not survive restart: id=%q err=%v", id, err)
 	}
 }
+
+// TestMigrateSharedPassword proves the one-shot shared-password → per-user
+// migration creates the first credential and is idempotent (no lockout, no
+// double-create) on subsequent runs.
+func TestMigrateSharedPassword(t *testing.T) {
+	s := userauth.NewNullStore()
+
+	// First run: creates the admin credential from the shared password.
+	if err := userauth.MigrateSharedPassword(s, "admin@vulos.org", "shared-secret-123"); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	// Admin can now authenticate with the shared password.
+	if id, err := s.Verify("admin@vulos.org", "shared-secret-123"); err != nil || id != "admin@vulos.org" {
+		t.Fatalf("migrated credential cannot authenticate: id=%q err=%v", id, err)
+	}
+
+	// Second run: store already has users → no-op (idempotent).
+	if err := userauth.MigrateSharedPassword(s, "admin@vulos.org", "shared-secret-123"); err != userauth.ErrAlreadyMigrated {
+		t.Fatalf("second migrate: got %v (want ErrAlreadyMigrated)", err)
+	}
+
+	// Empty input rejected.
+	fresh := userauth.NewNullStore()
+	if err := userauth.MigrateSharedPassword(fresh, "", "pw"); err != userauth.ErrEmptyInput {
+		t.Fatalf("empty admin: got %v (want ErrEmptyInput)", err)
+	}
+}

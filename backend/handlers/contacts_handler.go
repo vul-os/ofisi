@@ -28,33 +28,58 @@ import (
 
 // ─── in-memory contact store (supplements CardDAV) ────────────────────────────
 
+// contactStore keeps each contact plus a parallel ownership map keyed by UID.
+// Ownership is tracked out-of-band (rather than on the external contacts_vcf
+// .Contact type) so a contact imported by one user is never readable, editable,
+// exportable, or merge-able by another (closes the contacts IDOR). An empty
+// owner denotes a legacy/unowned contact (auth-disabled local mode) visible to
+// everyone — the same fail-safe used for files/calendar.
 type contactStore struct {
 	mu       sync.RWMutex
 	contacts map[string]*contacts_vcf.Contact
+	owners   map[string]string // UID → owner account id
 }
 
-var ctStore = &contactStore{contacts: map[string]*contacts_vcf.Contact{}}
+var ctStore = &contactStore{
+	contacts: map[string]*contacts_vcf.Contact{},
+	owners:   map[string]string{},
+}
 
-func (s *contactStore) list() []*contacts_vcf.Contact {
+// canAccessContact reports whether requester may touch the contact at uid.
+func (s *contactStore) canAccess(uid, requester string, isAdmin bool) bool {
+	if isAdmin {
+		return true
+	}
+	owner := s.owners[uid]
+	return owner == "" || owner == requester
+}
+
+// listFor returns only the contacts the caller may access.
+func (s *contactStore) listFor(requester string, isAdmin bool) []*contacts_vcf.Contact {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*contacts_vcf.Contact, 0, len(s.contacts))
-	for _, c := range s.contacts {
-		out = append(out, c)
+	for uid, c := range s.contacts {
+		if s.canAccess(uid, requester, isAdmin) {
+			out = append(out, c)
+		}
 	}
 	return out
 }
 
-func (s *contactStore) put(c *contacts_vcf.Contact) {
+// putOwned stores a contact and records its owner.
+func (s *contactStore) putOwned(c *contacts_vcf.Contact, owner string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.contacts[c.UID] = c
+	s.owners[c.UID] = owner
 }
 
 func (s *contactStore) delete(uid string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.contacts, uid)
+	delete(s.owners, uid)
 }
 
 // ─── handler ──────────────────────────────────────────────────────────────────
@@ -79,6 +104,7 @@ func (h *ContactsVCFHandler) ImportVCF(c *gin.Context) {
 		return
 	}
 
+	owner := requesterID(c)
 	now := time.Now().UTC()
 	var imported []contacts_vcf.Contact
 	for _, contact := range contacts {
@@ -87,7 +113,8 @@ func (h *ContactsVCFHandler) ImportVCF(c *gin.Context) {
 		}
 		contact.CreatedAt = now
 		contact.UpdatedAt = now
-		ctStore.put(&contact)
+		// Stamp the importing identity as owner so the contact is private to them.
+		ctStore.putOwned(&contact, owner)
 		imported = append(imported, contact)
 	}
 
@@ -106,7 +133,8 @@ func (h *ContactsVCFHandler) ImportVCF(c *gin.Context) {
 // ExportVCF GET /api/contacts/export?version=4.0
 func (h *ContactsVCFHandler) ExportVCF(c *gin.Context) {
 	version := c.DefaultQuery("version", "4.0")
-	list := ctStore.list()
+	requester, isAdmin := callerScope(c)
+	list := ctStore.listFor(requester, isAdmin)
 	contacts := make([]contacts_vcf.Contact, len(list))
 	for i, c := range list {
 		contacts[i] = *c
@@ -131,7 +159,8 @@ type DuplicateCandidate struct {
 
 // FindDuplicates GET /api/contacts/duplicates
 func (h *ContactsVCFHandler) FindDuplicates(c *gin.Context) {
-	list := ctStore.list()
+	requester, isAdmin := callerScope(c)
+	list := ctStore.listFor(requester, isAdmin)
 	var candidates []DuplicateCandidate
 
 	// Index by email
@@ -215,12 +244,19 @@ func (h *ContactsVCFHandler) MergeContacts(c *gin.Context) {
 		return
 	}
 
+	requester, isAdmin := callerScope(c)
+
 	ctStore.mu.Lock()
 	defer ctStore.mu.Unlock()
 
 	keep, ok1 := ctStore.contacts[req.KeepUID]
 	del, ok2 := ctStore.contacts[req.DeleteUID]
-	if !ok1 || !ok2 {
+	// Scope the merge to contacts the caller may access. If either side is
+	// missing OR owned by someone else, respond 404 (no existence leak) so a
+	// caller cannot fold another user's contact into their own (or probe for it).
+	if !ok1 || !ok2 ||
+		!ctStore.canAccess(req.KeepUID, requester, isAdmin) ||
+		!ctStore.canAccess(req.DeleteUID, requester, isAdmin) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "one or both contacts not found"})
 		return
 	}
@@ -252,6 +288,7 @@ func (h *ContactsVCFHandler) MergeContacts(c *gin.Context) {
 
 	keep.UpdatedAt = time.Now().UTC()
 	delete(ctStore.contacts, req.DeleteUID)
+	delete(ctStore.owners, req.DeleteUID)
 
 	c.JSON(http.StatusOK, keep)
 }

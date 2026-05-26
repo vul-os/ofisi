@@ -25,12 +25,18 @@ package fileacl
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 
 	_ "modernc.org/sqlite"
 )
+
+// ErrEmptyFileID is returned when a file id (or required account id) is empty.
+// Exported so alternate Store backends (e.g. the co-located Postgres ACL store)
+// can return the same sentinel.
+var ErrEmptyFileID = errors.New("fileacl: empty file id or account id")
 
 // Record is the stored ACL for a single file.
 type Record struct {

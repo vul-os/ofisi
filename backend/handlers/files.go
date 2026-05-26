@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	"vulos-office/backend/audit"
 	"vulos-office/backend/models"
 	"vulos-office/backend/storage"
 
@@ -13,16 +14,24 @@ import (
 type FileHandler struct {
 	store storage.Storage
 	authz *FileAuthz
+	audit audit.Store
 }
 
 func NewFileHandler(store storage.Storage) *FileHandler {
-	return &FileHandler{store: store, authz: SharedFileAuthz()}
+	return &FileHandler{store: store, authz: SharedFileAuthz(), audit: SharedAuditStore()}
 }
 
 // NewFileHandlerWithAuthz builds a handler over a caller-supplied authorizer
-// (tests use an in-memory NullStore so they never touch disk).
+// (tests use an in-memory NullStore so they never touch disk). The audit store
+// defaults to the shared one; use NewFileHandlerWithAudit to inject it.
 func NewFileHandlerWithAuthz(store storage.Storage, authz *FileAuthz) *FileHandler {
-	return &FileHandler{store: store, authz: authz}
+	return &FileHandler{store: store, authz: authz, audit: SharedAuditStore()}
+}
+
+// NewFileHandlerWithAudit builds a handler over caller-supplied authorizer +
+// audit store (tests).
+func NewFileHandlerWithAudit(store storage.Storage, authz *FileAuthz, aud audit.Store) *FileHandler {
+	return &FileHandler{store: store, authz: authz, audit: aud}
 }
 
 func (h *FileHandler) List(c *gin.Context) {
@@ -157,5 +166,11 @@ func (h *FileHandler) Share(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Append-only audit of the ACL change (grantee recorded in the detail).
+	action := audit.ActionACLGrant
+	if req.Revoke {
+		action = audit.ActionACLRevoke
+	}
+	recordAudit(h.audit, requesterID(c), action, id, "grantee="+req.AccountID)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

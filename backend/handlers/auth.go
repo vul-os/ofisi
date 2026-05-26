@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"vulos-office/backend/audit"
 	"vulos-office/backend/config"
+	"vulos-office/backend/invites"
 	"vulos-office/backend/middleware"
 	"vulos-office/backend/models"
 	"vulos-office/backend/userauth"
@@ -31,6 +33,11 @@ type AuthHandler struct {
 	// login verifies against it and the JWT subject is bound to the
 	// authenticated account (no longer self-asserted by the client).
 	creds userauth.Store
+	// invites mints/consumes single-use registration invite tokens (additive to
+	// the static VULOS_OFFICE_REGISTRATION_TOKEN + admin-JWT paths).
+	invites invites.Store
+	// audit records registration / invite-consume events (append-only).
+	audit audit.Store
 }
 
 // userAuthDBPath resolves the credential SQLite DSN from env.
@@ -53,16 +60,33 @@ func NewAuthHandler(cfg *config.Config) *AuthHandler {
 		cfg:      cfg,
 		attempts: make(map[string]*attemptRecord),
 		creds:    creds,
+		invites:  SharedInviteStore(),
+		audit:    SharedAuditStore(),
 	}
 }
 
 // NewAuthHandlerWithCreds builds a handler over a caller-supplied credential
-// store (tests use an in-memory NullStore).
+// store (tests use an in-memory NullStore). Invite + audit stores default to
+// in-memory NullStores; use NewAuthHandlerWithStores to inject them.
 func NewAuthHandlerWithCreds(cfg *config.Config, creds userauth.Store) *AuthHandler {
 	return &AuthHandler{
 		cfg:      cfg,
 		attempts: make(map[string]*attemptRecord),
 		creds:    creds,
+		invites:  invites.NewNullStore(),
+		audit:    audit.NewNullStore(),
+	}
+}
+
+// NewAuthHandlerWithStores builds a handler over caller-supplied credential,
+// invite, and audit stores (tests).
+func NewAuthHandlerWithStores(cfg *config.Config, creds userauth.Store, inv invites.Store, aud audit.Store) *AuthHandler {
+	return &AuthHandler{
+		cfg:      cfg,
+		attempts: make(map[string]*attemptRecord),
+		creds:    creds,
+		invites:  inv,
+		audit:    aud,
 	}
 }
 
@@ -408,7 +432,32 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	// validating an optional admin JWT on the request directly.
 	tokenConfigured, tokenValid := registrationTokenOK(c)
 	isAdmin := c.GetBool(middleware.CtxIsAdmin) || h.requestIsAdmin(c)
-	authorized := tokenValid || isAdmin
+
+	// Invite-token path (additive to the static token + admin JWT). The same
+	// X-Registration-Token header may carry a single-use/expiring invite minted
+	// by an admin. We only VALIDATE here (no consume yet) so a token is burned
+	// only once the account is actually created below.
+	headerTok := strings.TrimSpace(c.GetHeader("X-Registration-Token"))
+	inviteValid := false
+	if !tokenValid && !isAdmin && headerTok != "" && h.invites != nil {
+		if _, err := h.invites.Valid(headerTok); err == nil {
+			inviteValid = true
+		}
+	}
+
+	authorized := tokenValid || isAdmin || inviteValid
+
+	// consumeInvite burns the invite token after a successful create and records
+	// it in the audit log. A no-op unless this registration was authorized by an
+	// invite (not by the static token / admin).
+	consumeInvite := func(accountID string) {
+		if !inviteValid {
+			return
+		}
+		if inv, err := h.invites.Consume(headerTok); err == nil {
+			recordAudit(h.audit, accountID, audit.ActionInviteConsume, inv.ID, "account="+accountID)
+		}
+	}
 
 	// A privileged/system id may only be claimed by an authorized caller (token
 	// or admin) — never by anonymous self-registration, even as the first user.
@@ -423,6 +472,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		// returns ErrNotFirstUser and we fall through to the gated requirement.
 		switch err := h.creds.RegisterFirst(req.AccountID, req.Password); err {
 		case nil:
+			recordAudit(h.audit, req.AccountID, audit.ActionRegister, req.AccountID, "first-user bootstrap")
 			c.JSON(http.StatusCreated, models.LoginResponse{Message: "registered"})
 			return
 		case userauth.ErrUserExists:
@@ -449,6 +499,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	switch err := h.creds.Register(req.AccountID, req.Password); err {
 	case nil:
+		consumeInvite(req.AccountID)
+		via := "static-token-or-admin"
+		if inviteValid {
+			via = "invite-token"
+		}
+		recordAudit(h.audit, req.AccountID, audit.ActionRegister, req.AccountID, "via="+via)
 		c.JSON(http.StatusCreated, models.LoginResponse{Message: "registered"})
 	case userauth.ErrUserExists:
 		c.JSON(http.StatusConflict, models.ErrorResponse{Error: "account already registered"})
