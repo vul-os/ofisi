@@ -8,11 +8,11 @@
 //  1. Event is created/updated with a Reminders list.
 //  2. Worker computes fire time = event.Start − reminder.MinutesBefore.
 //  3. When now ≥ fire time AND the reminder has not yet fired, it fires.
-//  4. Fired reminders are tracked in firedReminders set (in-memory; replace
-//     with DB in production).
+//  4. Fired reminders are tracked in firedReminders set (in-memory; resets on
+//     restart, which is acceptable — an early reminder is better than none).
 //
-// Subscriptions (external .ics feeds) are stored in calSubscriptions; a second
-// goroutine fetches them daily.
+// Subscriptions (external .ics feeds) are stored in the durable calstore and
+// a goroutine fetches them daily.
 package handlers
 
 import (
@@ -26,6 +26,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	"vulos-office/backend/storage/calstore"
 )
 
 // ─── reminder worker ──────────────────────────────────────────────────────────
@@ -68,17 +70,13 @@ func StartReminderWorker(notify NotifyFunc) {
 // fireReminders is the core logic — exported so tests can call it directly
 // without waiting for the ticker.
 func fireReminders(now time.Time, notify NotifyFunc) {
-	calStore.mu.RLock()
-	events := make([]*CalEvent, 0, len(calStore.events))
-	for _, e := range calStore.events {
-		events = append(events, e)
-	}
-	calStore.mu.RUnlock()
+	storeEvents := durableCalStore().AllEvents()
 
 	firedMu.Lock()
 	defer firedMu.Unlock()
 
-	for _, event := range events {
+	for _, s := range storeEvents {
+		event := fromStoreEvent(s)
 		for _, r := range event.Reminders {
 			fireAt := event.Start.Add(-time.Duration(r.MinutesBefore) * time.Minute)
 			key := firedKey(event.ID, r)
@@ -103,35 +101,37 @@ func FireRemindersAt(now time.Time, notify NotifyFunc) {
 	fireReminders(now, notify)
 }
 
-// PutCalEvent is exported for test use — inserts an event into the store.
+// PutCalEvent is exported for test use — inserts an event into the durable store.
 func PutCalEvent(e *CalEvent) {
-	calStore.put(e)
+	durableCalStore().Put(toStoreEvent(e)) //nolint:errcheck
 }
 
-// DeleteCalEvent is exported for test use — removes an event from the store.
+// DeleteCalEvent is exported for test use — removes an event from the durable store.
 func DeleteCalEvent(id string) {
-	calStore.delete(id)
+	// Delete regardless of ownership (test helper).
+	s := durableCalStore()
+	raw, ok := s.GetRaw(id)
+	if !ok {
+		return
+	}
+	s.Delete(id, raw.AccountID, true) // isAdmin=true bypasses ownership
 }
 
 // ClearCalStore is exported for test use — removes all events.
 func ClearCalStore() {
-	calStore.mu.Lock()
-	calStore.events = map[string]*CalEvent{}
-	calStore.mu.Unlock()
+	durableCalStore().Clear()
+}
+
+// GetCalEventRaw is exported for test use — returns an event regardless of ownership.
+func GetCalEventRaw(id string) (*CalEvent, bool) {
+	s, ok := durableCalStore().GetRaw(id)
+	if !ok {
+		return nil, false
+	}
+	return fromStoreEvent(s), true
 }
 
 // ─── calendar subscription handler ────────────────────────────────────────────
-
-type calSubscription struct {
-	ID      string    `json:"id"`
-	OwnerID string    `json:"owner_id,omitempty"`
-	URL     string    `json:"url"`
-	Name    string    `json:"name"`
-	Added   time.Time `json:"added"`
-}
-
-var subsMu sync.RWMutex
-var calSubscriptions = map[string]*calSubscription{}
 
 // CalendarSubscribeHandler handles external .ics subscriptions.
 type CalendarSubscribeHandler struct{}
@@ -150,16 +150,17 @@ func (h *CalendarSubscribeHandler) Subscribe(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	sub := &calSubscription{
-		ID:      uuid.NewString(),
-		OwnerID: requesterID(c),
-		URL:     req.URL,
-		Name:    req.Name,
-		Added:   time.Now().UTC(),
+	sub := &calstore.CalSubscription{
+		ID:        uuid.NewString(),
+		AccountID: requesterID(c),
+		URL:       req.URL,
+		Name:      req.Name,
+		Added:     time.Now().UTC(),
 	}
-	subsMu.Lock()
-	calSubscriptions[sub.ID] = sub
-	subsMu.Unlock()
+	if err := durableCalStore().PutSubscription(sub); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "storage error"})
+		return
+	}
 
 	// Fetch immediately in the background.
 	go fetchSubscription(sub)
@@ -170,17 +171,8 @@ func (h *CalendarSubscribeHandler) Subscribe(c *gin.Context) {
 // ListSubscriptions GET /api/calendar/subscriptions
 func (h *CalendarSubscribeHandler) List(c *gin.Context) {
 	requester, isAdmin := callerScope(c)
-	subsMu.RLock()
-	defer subsMu.RUnlock()
-	out := make([]*calSubscription, 0, len(calSubscriptions))
-	for _, s := range calSubscriptions {
-		// Scope to the caller's own subscriptions (admins see all; unowned/legacy
-		// subscriptions stay visible for OSS local mode).
-		if isAdmin || s.OwnerID == "" || s.OwnerID == requester {
-			out = append(out, s)
-		}
-	}
-	c.JSON(http.StatusOK, out)
+	subs := durableCalStore().ListSubscriptions(requester, isAdmin)
+	c.JSON(http.StatusOK, subs)
 }
 
 // StartSubscriptionRefresher refreshes all subscriptions once per day.
@@ -189,12 +181,7 @@ func StartSubscriptionRefresher() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
 		for range ticker.C {
-			subsMu.RLock()
-			subs := make([]*calSubscription, 0, len(calSubscriptions))
-			for _, s := range calSubscriptions {
-				subs = append(subs, s)
-			}
-			subsMu.RUnlock()
+			subs := durableCalStore().ListSubscriptions("", true) // isAdmin=true → all
 			for _, s := range subs {
 				fetchSubscription(s)
 			}
@@ -202,7 +189,7 @@ func StartSubscriptionRefresher() {
 	}()
 }
 
-func fetchSubscription(sub *calSubscription) {
+func fetchSubscription(sub *calstore.CalSubscription) {
 	resp, err := http.Get(sub.URL) //nolint:gosec // user-supplied URL is intentional
 	if err != nil {
 		log.Printf("subscription fetch %q: %v", sub.URL, err)
@@ -221,10 +208,9 @@ func fetchSubscription(sub *calSubscription) {
 	for i := range events {
 		events[i].CreatedAt = now
 		events[i].UpdatedAt = now
-		// Imported feed events belong to the subscriber so they are scoped to the
-		// same owner as their personal events (not world-visible).
-		events[i].OwnerID = sub.OwnerID
-		calStore.put(&events[i])
+		// Imported feed events belong to the subscriber — same owner as sub.
+		events[i].OwnerID = sub.AccountID
+		durableCalStore().Put(toStoreEvent(&events[i])) //nolint:errcheck
 	}
 	log.Printf("subscription %q: imported %d events", sub.Name, len(events))
 }

@@ -11,17 +11,17 @@
 //	POST   /api/calendar/subscribe         — subscribe to external .ics URL
 //	POST   /api/calendar/rrule/expand      — expand RRULE in a window (helper for frontend)
 //
-// These handlers are intentionally thin: they delegate CalDAV persistence to
-// the existing vulos-mail CalDAV package and store event metadata (invitees,
-// reminders, colour, recurrence, etc.) in the in-memory store below (replacing
-// with a real DB is a 1-line change).
+// Storage: backed by the durable, account-scoped calstore SQLite store.
+// Every event row is keyed by (id, account_id) so one tenant can never read
+// or mutate another tenant's events. Call InitCalStore(dsn) from main() before
+// any request handler runs; the default (":memory:") is safe for tests.
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +29,7 @@ import (
 
 	"vulos-office/backend/middleware"
 	"vulos-office/backend/services/calendar_rrule"
+	"vulos-office/backend/storage/calstore"
 )
 
 // ─── domain types ─────────────────────────────────────────────────────────────
@@ -56,112 +57,101 @@ type Reminder struct {
 	Channel       string `json:"channel"`        // "email" | "push" | "in-app"
 }
 
-// CalEvent is the full rich event model.
+// CalEvent is the full rich event model (HTTP request/response shape).
 type CalEvent struct {
-	ID          string      `json:"id"`
+	ID          string    `json:"id"`
 	// OwnerID is the verified account id (JWT subject) that created the event.
-	// It is stamped server-side on create and is NOT client-settable: every
-	// Get/List/Update/Delete is scoped to the calling identity so one user can
-	// never read or mutate another user's events (closes the calendar IDOR).
-	// An empty OwnerID denotes a legacy/unowned event (created before authz or
-	// in auth-disabled local mode) and stays visible to everyone — matching the
-	// fileacl fail-safe for OSS single-user mode.
-	OwnerID     string      `json:"owner_id,omitempty"`
-	CalendarID  string      `json:"calendar_id"`
-	Title       string      `json:"title"`
-	AllDay      bool        `json:"all_day,omitempty"`
-	Start       time.Time   `json:"start"`
-	End         time.Time   `json:"end"`
-	TimeZone    string      `json:"time_zone,omitempty"`
-	Location    string      `json:"location,omitempty"`
-	Description string      `json:"description,omitempty"`
-	Invitees    []Invitee   `json:"invitees,omitempty"`
-	Recurrence  string      `json:"recurrence,omitempty"` // RRULE string
-	Reminders   []Reminder  `json:"reminders,omitempty"`
-	Color       string      `json:"color,omitempty"` // hex from palette
-	Visibility  string      `json:"visibility,omitempty"` // "public" | "private" | "default"
-	MeetURL     string      `json:"meet_url,omitempty"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
+	// It is stamped server-side on create and is NOT client-settable.
+	OwnerID     string    `json:"owner_id,omitempty"`
+	CalendarID  string    `json:"calendar_id"`
+	Title       string    `json:"title"`
+	AllDay      bool      `json:"all_day,omitempty"`
+	Start       time.Time `json:"start"`
+	End         time.Time `json:"end"`
+	TimeZone    string    `json:"time_zone,omitempty"`
+	Location    string    `json:"location,omitempty"`
+	Description string    `json:"description,omitempty"`
+	Invitees    []Invitee `json:"invitees,omitempty"`
+	Recurrence  string    `json:"recurrence,omitempty"` // RRULE string
+	Reminders   []Reminder `json:"reminders,omitempty"`
+	Color       string    `json:"color,omitempty"` // hex from palette
+	Visibility  string    `json:"visibility,omitempty"` // "public" | "private" | "default"
+	MeetURL     string    `json:"meet_url,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// ─── in-memory store (replace with DB) ────────────────────────────────────────
+// ─── durable store ────────────────────────────────────────────────────────────
 
-type calendarStore struct {
-	mu     sync.RWMutex
-	events map[string]*CalEvent // keyed by event ID
+// durableCalStore is the process-wide durable calendar store.
+// It is initialised lazily via calstore.Default() (in-memory SQLite) unless
+// InitCalStore is called from main with a file DSN.
+func durableCalStore() *calstore.Store {
+	return calstore.Default()
 }
 
-var calStore = &calendarStore{events: map[string]*CalEvent{}}
+// InitCalStore wires the process-wide calendar store to the given SQLite DSN.
+// Must be called before any handler runs (e.g. from main). Pass ":memory:" for tests.
+func InitCalStore(dsn string) error {
+	return calstore.InitDefault(dsn)
+}
 
-// canAccessEvent reports whether requester may touch e. Admins always pass.
-// An event with no recorded owner is unowned/legacy and accessible to everyone
-// (OSS single-user fail-safe). Otherwise only the owner has access.
-func canAccessEvent(e *CalEvent, requester string, isAdmin bool) bool {
-	if isAdmin {
-		return true
+// ─── conversion helpers ───────────────────────────────────────────────────────
+
+func toStoreEvent(e *CalEvent) *calstore.CalEvent {
+	invJSON, _ := json.Marshal(e.Invitees)
+	remJSON, _ := json.Marshal(e.Reminders)
+	return &calstore.CalEvent{
+		ID:            e.ID,
+		AccountID:     e.OwnerID,
+		CalendarID:    e.CalendarID,
+		Title:         e.Title,
+		AllDay:        e.AllDay,
+		Start:         e.Start,
+		End:           e.End,
+		TimeZone:      e.TimeZone,
+		Location:      e.Location,
+		Description:   e.Description,
+		InviteesJSON:  string(invJSON),
+		Recurrence:    e.Recurrence,
+		RemindersJSON: string(remJSON),
+		Color:         e.Color,
+		Visibility:    e.Visibility,
+		MeetURL:       e.MeetURL,
+		CreatedAt:     e.CreatedAt,
+		UpdatedAt:     e.UpdatedAt,
 	}
-	if e.OwnerID == "" {
-		return true
+}
+
+func fromStoreEvent(s *calstore.CalEvent) *CalEvent {
+	var invitees []Invitee
+	var reminders []Reminder
+	if s.InviteesJSON != "" {
+		_ = json.Unmarshal([]byte(s.InviteesJSON), &invitees)
 	}
-	return e.OwnerID == requester
-}
-
-// list returns only the events the caller (requester/isAdmin) may access.
-func (s *calendarStore) list(from, to time.Time, calID, requester string, isAdmin bool) []*CalEvent {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var out []*CalEvent
-	for _, e := range s.events {
-		if !canAccessEvent(e, requester, isAdmin) {
-			continue
-		}
-		if calID != "" && e.CalendarID != calID {
-			continue
-		}
-		// Include if event overlaps [from, to)
-		if e.End.After(from) && e.Start.Before(to) {
-			out = append(out, e)
-		}
+	if s.RemindersJSON != "" {
+		_ = json.Unmarshal([]byte(s.RemindersJSON), &reminders)
 	}
-	return out
-}
-
-// get returns the event ONLY if the caller may access it. A non-owner (or a
-// missing event) returns ok=false so the handler responds 404 — never leaking
-// whether an event the caller cannot see exists.
-func (s *calendarStore) get(id, requester string, isAdmin bool) (*CalEvent, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	e, ok := s.events[id]
-	if !ok {
-		return nil, false
+	return &CalEvent{
+		ID:          s.ID,
+		OwnerID:     s.AccountID,
+		CalendarID:  s.CalendarID,
+		Title:       s.Title,
+		AllDay:      s.AllDay,
+		Start:       s.Start,
+		End:         s.End,
+		TimeZone:    s.TimeZone,
+		Location:    s.Location,
+		Description: s.Description,
+		Invitees:    invitees,
+		Recurrence:  s.Recurrence,
+		Reminders:   reminders,
+		Color:       s.Color,
+		Visibility:  s.Visibility,
+		MeetURL:     s.MeetURL,
+		CreatedAt:   s.CreatedAt,
+		UpdatedAt:   s.UpdatedAt,
 	}
-	if !canAccessEvent(e, requester, isAdmin) {
-		return nil, false
-	}
-	return e, true
-}
-
-// getRaw returns an event ignoring ownership. Used by the reminder worker and
-// tests, NEVER by request handlers.
-func (s *calendarStore) getRaw(id string) (*CalEvent, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	e, ok := s.events[id]
-	return e, ok
-}
-
-func (s *calendarStore) put(e *CalEvent) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.events[e.ID] = e
-}
-
-func (s *calendarStore) delete(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.events, id)
 }
 
 // ─── handler ──────────────────────────────────────────────────────────────────
@@ -185,8 +175,12 @@ func (h *CalendarEventHandler) ListEvents(c *gin.Context) {
 	}
 	calID := c.Query("cal")
 	requester, isAdmin := callerScope(c)
-	events := calStore.list(from, to, calID, requester, isAdmin)
-	c.JSON(http.StatusOK, events)
+	storeEvents := durableCalStore().List(from, to, calID, requester, isAdmin)
+	out := make([]*CalEvent, 0, len(storeEvents))
+	for _, s := range storeEvents {
+		out = append(out, fromStoreEvent(s))
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 // CreateEvent POST /api/calendar/events
@@ -217,7 +211,10 @@ func (h *CalendarEventHandler) CreateEvent(c *gin.Context) {
 			return
 		}
 	}
-	calStore.put(&req)
+	if err := durableCalStore().Put(toStoreEvent(&req)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "storage error"})
+		return
+	}
 	c.JSON(http.StatusCreated, &req)
 }
 
@@ -225,7 +222,7 @@ func (h *CalendarEventHandler) CreateEvent(c *gin.Context) {
 func (h *CalendarEventHandler) UpdateEvent(c *gin.Context) {
 	id := c.Param("id")
 	requester, isAdmin := callerScope(c)
-	existing, ok := calStore.get(id, requester, isAdmin)
+	existing, ok := durableCalStore().Get(id, requester, isAdmin)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
 		return
@@ -239,9 +236,8 @@ func (h *CalendarEventHandler) UpdateEvent(c *gin.Context) {
 	req.ID = id
 	req.CreatedAt = existing.CreatedAt
 	req.UpdatedAt = time.Now().UTC()
-	// Ownership is immutable via update — preserve the original owner so a
-	// caller cannot reassign an event to themselves (or orphan it).
-	req.OwnerID = existing.OwnerID
+	// Ownership is immutable via update — preserve the original owner.
+	req.OwnerID = existing.AccountID
 	if req.CalendarID == "" {
 		req.CalendarID = existing.CalendarID
 	}
@@ -251,7 +247,10 @@ func (h *CalendarEventHandler) UpdateEvent(c *gin.Context) {
 			return
 		}
 	}
-	calStore.put(&req)
+	if err := durableCalStore().Put(toStoreEvent(&req)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "storage error"})
+		return
+	}
 	c.JSON(http.StatusOK, &req)
 }
 
@@ -259,11 +258,10 @@ func (h *CalendarEventHandler) UpdateEvent(c *gin.Context) {
 func (h *CalendarEventHandler) DeleteEvent(c *gin.Context) {
 	id := c.Param("id")
 	requester, isAdmin := callerScope(c)
-	if _, ok := calStore.get(id, requester, isAdmin); !ok {
+	if deleted := durableCalStore().Delete(id, requester, isAdmin); !deleted {
 		c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
 		return
 	}
-	calStore.delete(id)
 	c.Status(http.StatusNoContent)
 }
 
@@ -271,7 +269,7 @@ func (h *CalendarEventHandler) DeleteEvent(c *gin.Context) {
 func (h *CalendarEventHandler) RSVPEvent(c *gin.Context) {
 	id := c.Param("id")
 	requester, isAdmin := callerScope(c)
-	event, ok := calStore.get(id, requester, isAdmin)
+	storeEvent, ok := durableCalStore().Get(id, requester, isAdmin)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
 		return
@@ -296,6 +294,7 @@ func (h *CalendarEventHandler) RSVPEvent(c *gin.Context) {
 		return
 	}
 
+	event := fromStoreEvent(storeEvent)
 	updated := false
 	for i := range event.Invitees {
 		if strings.EqualFold(event.Invitees[i].Email, req.Email) {
@@ -311,7 +310,10 @@ func (h *CalendarEventHandler) RSVPEvent(c *gin.Context) {
 		})
 	}
 	event.UpdatedAt = time.Now().UTC()
-	calStore.put(event)
+	if err := durableCalStore().Put(toStoreEvent(event)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "storage error"})
+		return
+	}
 	c.JSON(http.StatusOK, event)
 }
 
@@ -319,11 +321,11 @@ func (h *CalendarEventHandler) RSVPEvent(c *gin.Context) {
 func (h *CalendarEventHandler) ExportICS(c *gin.Context) {
 	calID := c.Param("calID")
 	now := time.Now().UTC()
-	from := now.Add(-30 * 24 * time.Hour)       // 30 days back
-	to := now.Add(365 * 24 * time.Hour)         // 12 months forward
+	from := now.Add(-30 * 24 * time.Hour)   // 30 days back
+	to := now.Add(365 * 24 * time.Hour)     // 12 months forward
 
 	requester, isAdmin := callerScope(c)
-	events := calStore.list(from, to, calID, requester, isAdmin)
+	storeEvents := durableCalStore().List(from, to, calID, requester, isAdmin)
 
 	var sb strings.Builder
 	sb.WriteString("BEGIN:VCALENDAR\r\n")
@@ -332,7 +334,8 @@ func (h *CalendarEventHandler) ExportICS(c *gin.Context) {
 	sb.WriteString("CALSCALE:GREGORIAN\r\n")
 	sb.WriteString("METHOD:PUBLISH\r\n")
 
-	for _, e := range events {
+	for _, s := range storeEvents {
+		e := fromStoreEvent(s)
 		sb.WriteString("BEGIN:VEVENT\r\n")
 		sb.WriteString("UID:" + e.ID + "\r\n")
 		sb.WriteString("SUMMARY:" + icsEscape(e.Title) + "\r\n")

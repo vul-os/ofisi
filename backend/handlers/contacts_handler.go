@@ -7,79 +7,99 @@
 //	GET  /api/contacts/duplicates      — find potential duplicates
 //	POST /api/contacts/merge           — merge two contacts
 //
-// Contact CRUD (create/read/update/delete) is handled by the existing CardDAV
-// layer; these endpoints are additive and focus on import/export and
-// server-side dedup.
+// Storage: backed by the durable, account-scoped contactstore SQLite store.
+// Every row is keyed by (uid, account_id) so one tenant can never read or
+// mutate another tenant's contacts. Call InitContactStore(dsn) from main()
+// before any request handler runs; the default (":memory:") is safe for tests.
 package handlers
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"vulos-office/backend/services/contacts_vcf"
+	"vulos-office/backend/storage/contactstore"
 )
 
-// ─── in-memory contact store (supplements CardDAV) ────────────────────────────
+// ─── durable store ────────────────────────────────────────────────────────────
 
-// contactStore keeps each contact plus a parallel ownership map keyed by UID.
-// Ownership is tracked out-of-band (rather than on the external contacts_vcf
-// .Contact type) so a contact imported by one user is never readable, editable,
-// exportable, or merge-able by another (closes the contacts IDOR). An empty
-// owner denotes a legacy/unowned contact (auth-disabled local mode) visible to
-// everyone — the same fail-safe used for files/calendar.
-type contactStore struct {
-	mu       sync.RWMutex
-	contacts map[string]*contacts_vcf.Contact
-	owners   map[string]string // UID → owner account id
+// durableContactStore returns the process-wide durable contact store.
+func durableContactStore() *contactstore.Store {
+	return contactstore.Default()
 }
 
-var ctStore = &contactStore{
-	contacts: map[string]*contacts_vcf.Contact{},
-	owners:   map[string]string{},
+// InitContactStore wires the process-wide contact store to the given SQLite DSN.
+// Must be called before any handler runs (e.g. from main). Pass ":memory:" for tests.
+func InitContactStore(dsn string) error {
+	return contactstore.InitDefault(dsn)
 }
 
-// canAccessContact reports whether requester may touch the contact at uid.
-func (s *contactStore) canAccess(uid, requester string, isAdmin bool) bool {
-	if isAdmin {
-		return true
+// ─── conversion helpers ───────────────────────────────────────────────────────
+
+// vcfToStore converts a contacts_vcf.Contact to a contactstore.Contact.
+func vcfToStore(c *contacts_vcf.Contact, accountID string) *contactstore.Contact {
+	emails := make([]contactstore.Email, len(c.Emails))
+	for i, e := range c.Emails {
+		emails[i] = contactstore.Email{Address: e.Address, Label: e.Label}
 	}
-	owner := s.owners[uid]
-	return owner == "" || owner == requester
+	phones := make([]contactstore.Phone, len(c.Phones))
+	for i, p := range c.Phones {
+		phones[i] = contactstore.Phone{Number: p.Number, Label: p.Label}
+	}
+	// Store the full VCF contact as JSON blob for round-trip fidelity.
+	blob, _ := json.Marshal(c)
+	return &contactstore.Contact{
+		UID:       c.UID,
+		AccountID: accountID,
+		FullName:  c.DisplayName,
+		Emails:    emails,
+		Phones:    phones,
+		Notes:     c.Notes,
+		Blob:      string(blob),
+		CreatedAt: c.CreatedAt,
+		UpdatedAt: c.UpdatedAt,
+	}
 }
 
-// listFor returns only the contacts the caller may access.
-func (s *contactStore) listFor(requester string, isAdmin bool) []*contacts_vcf.Contact {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*contacts_vcf.Contact, 0, len(s.contacts))
-	for uid, c := range s.contacts {
-		if s.canAccess(uid, requester, isAdmin) {
-			out = append(out, c)
+// storeToVCF converts a contactstore.Contact back to a contacts_vcf.Contact.
+// If the blob round-trips cleanly we use it directly; otherwise reconstruct.
+func storeToVCF(s *contactstore.Contact) contacts_vcf.Contact {
+	// Try the blob first (full round-trip fidelity).
+	if s.Blob != "" && s.Blob != "{}" {
+		var c contacts_vcf.Contact
+		if json.Unmarshal([]byte(s.Blob), &c) == nil && c.UID != "" {
+			// Make sure UID and timestamps are correct (overwrite from DB truth).
+			c.UID = s.UID
+			c.CreatedAt = s.CreatedAt
+			c.UpdatedAt = s.UpdatedAt
+			return c
 		}
 	}
-	return out
-}
-
-// putOwned stores a contact and records its owner.
-func (s *contactStore) putOwned(c *contacts_vcf.Contact, owner string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.contacts[c.UID] = c
-	s.owners[c.UID] = owner
-}
-
-func (s *contactStore) delete(uid string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.contacts, uid)
-	delete(s.owners, uid)
+	// Fallback: reconstruct from structured columns.
+	emails := make([]contacts_vcf.EmailEntry, len(s.Emails))
+	for i, e := range s.Emails {
+		emails[i] = contacts_vcf.EmailEntry{Address: e.Address, Label: e.Label}
+	}
+	phones := make([]contacts_vcf.PhoneEntry, len(s.Phones))
+	for i, p := range s.Phones {
+		phones[i] = contacts_vcf.PhoneEntry{Number: p.Number, Label: p.Label}
+	}
+	return contacts_vcf.Contact{
+		UID:         s.UID,
+		DisplayName: s.FullName,
+		Notes:       s.Notes,
+		Emails:      emails,
+		Phones:      phones,
+		CreatedAt:   s.CreatedAt,
+		UpdatedAt:   s.UpdatedAt,
+	}
 }
 
 // ─── handler ──────────────────────────────────────────────────────────────────
@@ -114,7 +134,13 @@ func (h *ContactsVCFHandler) ImportVCF(c *gin.Context) {
 		contact.CreatedAt = now
 		contact.UpdatedAt = now
 		// Stamp the importing identity as owner so the contact is private to them.
-		ctStore.putOwned(&contact, owner)
+		sc := vcfToStore(&contact, owner)
+		sc.CreatedAt = now
+		sc.UpdatedAt = now
+		if putErr := durableContactStore().Put(sc); putErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "storage error"})
+			return
+		}
 		imported = append(imported, contact)
 	}
 
@@ -134,10 +160,10 @@ func (h *ContactsVCFHandler) ImportVCF(c *gin.Context) {
 func (h *ContactsVCFHandler) ExportVCF(c *gin.Context) {
 	version := c.DefaultQuery("version", "4.0")
 	requester, isAdmin := callerScope(c)
-	list := ctStore.listFor(requester, isAdmin)
-	contacts := make([]contacts_vcf.Contact, len(list))
-	for i, c := range list {
-		contacts[i] = *c
+	storeContacts := durableContactStore().List(requester, isAdmin)
+	contacts := make([]contacts_vcf.Contact, 0, len(storeContacts))
+	for _, sc := range storeContacts {
+		contacts = append(contacts, storeToVCF(sc))
 	}
 
 	data, err := contacts_vcf.Export(contacts, version)
@@ -160,32 +186,11 @@ type DuplicateCandidate struct {
 // FindDuplicates GET /api/contacts/duplicates
 func (h *ContactsVCFHandler) FindDuplicates(c *gin.Context) {
 	requester, isAdmin := callerScope(c)
-	list := ctStore.listFor(requester, isAdmin)
-	var candidates []DuplicateCandidate
+	cs := durableContactStore()
 
-	// Index by email
-	emailIndex := map[string][]string{} // email → []UID
-	for _, ct := range list {
-		for _, e := range ct.Emails {
-			addr := strings.ToLower(strings.TrimSpace(e.Address))
-			if addr == "" {
-				continue
-			}
-			emailIndex[addr] = append(emailIndex[addr], ct.UID)
-		}
-	}
-
-	// Index by phone (normalised: digits only)
-	phoneIndex := map[string][]string{} // digits → []UID
-	for _, ct := range list {
-		for _, p := range ct.Phones {
-			digits := normalisePhone(p.Number)
-			if digits == "" {
-				continue
-			}
-			phoneIndex[digits] = append(phoneIndex[digits], ct.UID)
-		}
-	}
+	// Use the indexed dup-detection methods on the durable store.
+	emailDups := cs.DupsByEmail(requester, isAdmin)
+	phoneDups := cs.DupsByPhone(requester, isAdmin)
 
 	seen := map[string]bool{}
 	pairKey := func(a, b string) string {
@@ -195,6 +200,7 @@ func (h *ContactsVCFHandler) FindDuplicates(c *gin.Context) {
 		return a + ":" + b
 	}
 
+	var candidates []DuplicateCandidate
 	addPairs := func(uids []string, reason string) {
 		for i := 0; i < len(uids); i++ {
 			for j := i + 1; j < len(uids); j++ {
@@ -203,25 +209,25 @@ func (h *ContactsVCFHandler) FindDuplicates(c *gin.Context) {
 					continue
 				}
 				seen[k] = true
-
-				ctStore.mu.RLock()
-				a, aok := ctStore.contacts[uids[i]]
-				b, bok := ctStore.contacts[uids[j]]
-				ctStore.mu.RUnlock()
-
+				a, aok := cs.Get(uids[i], requester, isAdmin)
+				b, bok := cs.Get(uids[j], requester, isAdmin)
 				if aok && bok {
-					candidates = append(candidates, DuplicateCandidate{A: *a, B: *b, Reason: reason})
+					candidates = append(candidates, DuplicateCandidate{
+						A:      storeToVCF(a),
+						B:      storeToVCF(b),
+						Reason: reason,
+					})
 				}
 			}
 		}
 	}
 
-	for _, uids := range emailIndex {
+	for _, uids := range emailDups {
 		if len(uids) > 1 {
 			addPairs(uids, "email")
 		}
 	}
-	for _, uids := range phoneIndex {
+	for _, uids := range phoneDups {
 		if len(uids) > 1 {
 			addPairs(uids, "phone")
 		}
@@ -245,21 +251,18 @@ func (h *ContactsVCFHandler) MergeContacts(c *gin.Context) {
 	}
 
 	requester, isAdmin := callerScope(c)
+	cs := durableContactStore()
 
-	ctStore.mu.Lock()
-	defer ctStore.mu.Unlock()
-
-	keep, ok1 := ctStore.contacts[req.KeepUID]
-	del, ok2 := ctStore.contacts[req.DeleteUID]
-	// Scope the merge to contacts the caller may access. If either side is
-	// missing OR owned by someone else, respond 404 (no existence leak) so a
-	// caller cannot fold another user's contact into their own (or probe for it).
-	if !ok1 || !ok2 ||
-		!ctStore.canAccess(req.KeepUID, requester, isAdmin) ||
-		!ctStore.canAccess(req.DeleteUID, requester, isAdmin) {
+	keepStore, ok1 := cs.Get(req.KeepUID, requester, isAdmin)
+	delStore, ok2 := cs.Get(req.DeleteUID, requester, isAdmin)
+	// Both contacts must exist and belong to the caller (Get already enforces this).
+	if !ok1 || !ok2 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "one or both contacts not found"})
 		return
 	}
+
+	keep := storeToVCF(keepStore)
+	del := storeToVCF(delStore)
 
 	// Merge: append missing emails/phones from del into keep.
 	emailSet := map[string]bool{}
@@ -287,8 +290,16 @@ func (h *ContactsVCFHandler) MergeContacts(c *gin.Context) {
 	}
 
 	keep.UpdatedAt = time.Now().UTC()
-	delete(ctStore.contacts, req.DeleteUID)
-	delete(ctStore.owners, req.DeleteUID)
+
+	// Persist the merged contact and delete the source.
+	mergedStore := vcfToStore(&keep, requester)
+	mergedStore.CreatedAt = keepStore.CreatedAt
+	mergedStore.UpdatedAt = keep.UpdatedAt
+	if err := cs.Put(mergedStore); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "storage error"})
+		return
+	}
+	cs.Delete(req.DeleteUID, requester, isAdmin)
 
 	c.JSON(http.StatusOK, keep)
 }

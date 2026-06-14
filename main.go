@@ -13,6 +13,7 @@ import (
 	"vulos-office/backend/handlers"
 	"vulos-office/backend/middleware"
 	"vulos-office/backend/obs"
+	"vulos-office/backend/services/meeting"
 	"vulos-office/backend/storage"
 	"vulos-office/backend/userauth"
 
@@ -57,6 +58,43 @@ func main() {
 	if err != nil {
 		log.Fatal("Storage init failed:", err)
 	}
+
+	// ── Durable account-scoped stores ─────────────────────────────────────────
+	// Each store defaults to an in-memory SQLite DB. We upgrade to file-backed
+	// SQLite here so data survives restarts. The env vars below can point to
+	// separate files or to a shared directory.
+	calDSN := os.Getenv("VULOS_CALSTORE_DB")
+	if calDSN == "" {
+		calDSN = cfg.Server.DataDir + "/cal.db"
+	}
+	if err := handlers.InitCalStore(calDSN); err != nil {
+		log.Fatalf("Calendar store init failed (%s): %v", calDSN, err)
+	}
+	log.Printf("Calendar store → %s", calDSN)
+
+	contactDSN := os.Getenv("VULOS_CONTACTSTORE_DB")
+	if contactDSN == "" {
+		contactDSN = cfg.Server.DataDir + "/contacts.db"
+	}
+	if err := handlers.InitContactStore(contactDSN); err != nil {
+		log.Fatalf("Contact store init failed (%s): %v", contactDSN, err)
+	}
+	log.Printf("Contact store → %s", contactDSN)
+
+	lobbyDSN := os.Getenv("VULOS_LOBBY_DB")
+	if lobbyDSN == "" {
+		lobbyDSN = cfg.Server.DataDir + "/lobby.db"
+	}
+	if err := meeting.InitDefault(lobbyDSN); err != nil {
+		log.Fatalf("Lobby store init failed (%s): %v", lobbyDSN, err)
+	}
+	log.Printf("Lobby store → %s", lobbyDSN)
+
+	// ── Org-bucket object store ───────────────────────────────────────────────
+	// ResolveOrgBucket reads VULOS_ORG_ID (cloud-injected org identifier) and
+	// scopes all object keys by org/account. If the env is absent the binary
+	// still boots and logs a warning (OSS self-host, no cloud required).
+	storage.InitOrgBucket()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()

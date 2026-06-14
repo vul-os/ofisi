@@ -54,6 +54,20 @@ func Default() *LobbyManager {
 	return defaultLobby
 }
 
+// InitDefault replaces the process-wide LobbyManager with one backed by dsn.
+// Must be called before any handler runs (e.g. from main). Idempotent if
+// defaultLobbyOnce has already fired — in that case it resets the singleton
+// (intended for testing and main() only).
+func InitDefault(dsn string) error {
+	lm, err := NewLobbyManager(dsn)
+	if err != nil {
+		return err
+	}
+	defaultLobbyOnce.Do(func() {}) // ensure once has fired
+	defaultLobby = lm
+	return nil
+}
+
 // NewLobbyManager opens (or creates) a SQLite-backed LobbyManager at dsn.
 // Use ":memory:" for in-process storage or a file path for persistence.
 func NewLobbyManager(dsn string) (*LobbyManager, error) {

@@ -20,6 +20,7 @@ package storage
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 )
@@ -127,6 +128,86 @@ func ResolveOfficeBackend() (*ResolvedBackend, error) {
 		rb.Client = client
 	}
 	return rb, nil
+}
+
+// ─── org-bucket resolver ──────────────────────────────────────────────────────
+
+// Environment variables for org-bucket scoping.
+// These are injected by the Vulos cloud control-plane at instance startup and
+// are NOT read from config.yaml — they are deployment-time secrets.
+//
+//	VULOS_ORG_ID          — the organisation identifier (cloud-managed UUID or slug).
+//	                        Used as the top-level key prefix so all orgs share a
+//	                        single Tigris/MinIO bucket without collisions.
+//	                        For BYO self-hosted deployments this may be the
+//	                        hostname or instance name; if absent, no prefix is
+//	                        applied (single-tenant OSS mode).
+//
+// Object key layout inside the bucket:
+//
+//	<orgID>/<accountID>/<name>     (multi-tenant cloud)
+//	<name>                         (OSS / single-tenant — VULOS_ORG_ID absent)
+//
+// The "seam" for the cloud: the cloud must set VULOS_ORG_ID before starting
+// the office binary. It may also override TIGRIS_* or VULOS_MINIO_* vars to
+// point at the per-org bucket (or a shared bucket with the org prefix). No
+// further code change is required here.
+const EnvOrgID = "VULOS_ORG_ID"
+
+// orgBucketClient is the process-wide org-scoped S3 client, set once by
+// InitOrgBucket(). Nil when no S3 backend is configured (OSS no-cloud mode).
+var orgBucketClient *OfficeS3Client
+
+// InitOrgBucket resolves the org bucket at startup, logs the result, and
+// stores the client for OrgScopedKey / OrgBucketClient use.
+// Called once from main() after ResolveOfficeBackend (or independently).
+// Never panics; if no S3 backend is reachable it logs a warning and continues.
+func InitOrgBucket() {
+	rb, err := ResolveOfficeBackend()
+	if err != nil {
+		log.Printf("[storage] org-bucket: ResolveOfficeBackend error: %v — object store disabled", err)
+		return
+	}
+	if rb.Client == nil {
+		log.Printf("[storage] org-bucket: no S3 credentials configured — object store disabled (OSS mode)")
+		return
+	}
+	orgID := strings.TrimSpace(os.Getenv(EnvOrgID))
+	if orgID == "" {
+		log.Printf("[storage] org-bucket: VULOS_ORG_ID not set — single-tenant mode (no org prefix)")
+	} else {
+		log.Printf("[storage] org-bucket: kind=%s org=%s", rb.Kind, orgID)
+	}
+	orgBucketClient = rb.Client
+}
+
+// OrgBucketClient returns the process-wide org-scoped S3 client, or nil if
+// no S3 backend was configured. Callers must nil-check before use.
+func OrgBucketClient() *OfficeS3Client {
+	return orgBucketClient
+}
+
+// OrgScopedKey returns the full object key for a given (accountID, name) pair,
+// scoped by the org prefix so objects from different orgs/accounts never collide.
+//
+// Layout:
+//   - When VULOS_ORG_ID is set:   "<orgID>/<accountID>/<name>"
+//   - When VULOS_ORG_ID is unset: "<accountID>/<name>"  (single-org)
+//   - When accountID is empty:    omits the account segment (shared org-level object)
+//
+// This is the authoritative key builder — all handlers that write to the org
+// bucket must call this function instead of constructing keys ad-hoc.
+func OrgScopedKey(accountID, name string) string {
+	orgID := strings.TrimSpace(os.Getenv(EnvOrgID))
+	var parts []string
+	if orgID != "" {
+		parts = append(parts, orgID)
+	}
+	if accountID != "" {
+		parts = append(parts, accountID)
+	}
+	parts = append(parts, name)
+	return strings.Join(parts, "/")
 }
 
 // readMinIOCreds returns (accessKey, secretKey, error) for a MinIO endpoint.
