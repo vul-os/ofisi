@@ -136,19 +136,24 @@ func (h *OrchestrationHandler) Remind(c *gin.Context) {
 		return
 	}
 
-	var reminded []string
+	var pending []string
 	for _, sg := range env.Signers {
 		if sg.Status == models.SignerStatusPending ||
 			sg.Status == models.SignerStatusSent ||
 			sg.Status == models.SignerStatusViewed {
 			emitReminder(env, sg)
-			reminded = append(reminded, sg.ID)
+			pending = append(pending, sg.ID)
 		}
 	}
 
+	// reminded is empty until SMTP is wired; we only report signers as reminded
+	// once a delivery channel actually sends. For now we return the pending list
+	// with delivered=false so callers know the nudge was logged but not emailed.
 	c.JSON(http.StatusOK, gin.H{
 		"envelope_id": envelopeID,
-		"reminded":    reminded,
+		"pending":     pending,
+		"delivered":   false,
+		"message":     "reminders logged; email delivery not yet configured",
 	})
 }
 

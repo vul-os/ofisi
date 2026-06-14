@@ -14,12 +14,6 @@ import {
   Video, Mic, MicOff, VideoOff, ArrowLeft, Users, Calendar,
 } from 'lucide-react'
 import CallView from './CallView'
-import LiveKitCallView from './components/LiveKitCallView.jsx'
-import {
-  selectCallRoute,
-  DEFAULT_MESH_THRESHOLD,
-  readLiveKitFlag,
-} from '@vulos/relay-client/call'
 import { Button, Card, Input, Tooltip } from '../../components/ui'
 
 // Attempt to fetch meeting metadata (title, invitees, etc).  Non-blocking.
@@ -118,19 +112,6 @@ export default function Room() {
   }
 
   if (phase === 'call') {
-    // MEET-SPACES-01 route selection: ≤5 → mesh (fabric.js); >5 + Pro flag → LiveKit SFU.
-    // The Pro entitlement is resolved by the cloud token endpoint (MEET-CP-01);
-    // here we honour the local feature flag + the invitee count from meta.
-    const expectedParticipants = Array.isArray(meta?.meeting?.invitees)
-      ? meta.meeting.invitees.length
-      : 0
-    const { useLiveKit } = selectCallRoute({
-      expectedParticipants,
-      meshThreshold: DEFAULT_MESH_THRESHOLD,
-      livekitEnabled: readLiveKitFlag(),
-      forceMode: meta?.meeting?.force_mode,
-    })
-
     return (
       <div className="flex flex-col h-screen" style={{ background: 'var(--ink)' }}>
         <div className="flex-shrink-0 px-4 h-11 flex items-center gap-3 text-paper text-sm border-b border-paper/10">
@@ -154,21 +135,12 @@ export default function Room() {
         </div>
 
         <div className="flex-1 min-h-0">
-          {useLiveKit ? (
-            <LiveKitCallView
-              sessionId={sessionId}
-              identity={identity}
-              video={videoOn}
-              onLeave={handleLeave}
-            />
-          ) : (
-            <CallView
-              sessionId={sessionId}
-              identity={identity}
-              video={videoOn}
-              onLeave={handleLeave}
-            />
-          )}
+          <CallView
+            sessionId={sessionId}
+            identity={identity}
+            video={videoOn}
+            onLeave={handleLeave}
+          />
         </div>
       </div>
     )
@@ -187,10 +159,10 @@ export default function Room() {
             <h1 className="text-2xl font-serif tracking-tightish text-ink">
               {meetingTitle}
             </h1>
-            {(meta?.meeting?.host_vumail || meta?.meeting?.scheduled_at) && (
+            {(meta?.meeting?.host_vulos || meta?.meeting?.scheduled_at) && (
               <p className="text-2xs text-ink-muted">
-                {meta?.meeting?.host_vumail && <>Hosted by {meta.meeting.host_vumail}</>}
-                {meta?.meeting?.host_vumail && meta?.meeting?.scheduled_at && ' · '}
+                {meta?.meeting?.host_vulos && <>Hosted by {meta.meeting.host_vulos}</>}
+                {meta?.meeting?.host_vulos && meta?.meeting?.scheduled_at && ' · '}
                 {meta?.meeting?.scheduled_at && (
                   <span className="inline-flex items-center gap-1">
                     <Calendar size={10} className="text-ink-faint" />

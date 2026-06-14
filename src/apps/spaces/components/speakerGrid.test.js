@@ -1,6 +1,6 @@
 /**
  * speakerGrid.test.js — covers the 1/2/4/9/16/25 responsive ladder used by
- * both the mesh (CallView) and SFU (LiveKitCallView) speaker grids.
+ * the mesh (CallView) speaker grid.
  */
 import { describe, it, expect } from 'vitest'
 import { gridColumnsFor, gridLayout } from './speakerGrid.js'

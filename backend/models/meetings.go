@@ -19,7 +19,7 @@ type Meeting struct {
 	ID          string        `json:"id"`
 	Title       string        `json:"title"`
 	SessionID   string        `json:"session_id"` // fabric session / room id fed into createCall
-	HostVumail  string        `json:"host_vumail"`
+	HostVulos   string        `json:"host_vulos"`
 	Invitees    []string      `json:"invitees"`   // Vulos account addresses (@vulos.org)
 	ScheduledAt *time.Time    `json:"scheduled_at,omitempty"`
 	DurationMin int           `json:"duration_min,omitempty"` // 0 = open-ended
@@ -31,7 +31,7 @@ type Meeting struct {
 
 // MeetingParticipant tracks who has joined a live room (ephemeral, in-memory only).
 type MeetingParticipant struct {
-	Vumail      string    `json:"vumail"`
+	Vulos       string    `json:"vulos"`
 	DisplayName string    `json:"display_name"`
 	JoinedAt    time.Time `json:"joined_at"`
 }
@@ -40,7 +40,7 @@ type MeetingParticipant struct {
 
 type CreateMeetingRequest struct {
 	Title       string     `json:"title" binding:"required"`
-	HostVumail  string     `json:"host_vumail"`
+	HostVulos   string     `json:"host_vulos"`
 	Invitees    []string   `json:"invitees"`
 	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 	DurationMin int        `json:"duration_min,omitempty"`

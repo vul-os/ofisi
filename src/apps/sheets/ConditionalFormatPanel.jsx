@@ -51,11 +51,51 @@ function ruleToFS(rule, rangeText) {
   return base
 }
 
-// Parse "A1:B10" style range to Fortune Sheet conditionRange format.
-function parseRange(text) {
-  if (!text || text.trim() === '') return [{ row: [0, 9], column: [0, 1] }]
-  // Simplified: just return a placeholder — Fortune Sheet re-calculates on render.
-  return [{ row: [0, 99], column: [0, 25] }]
+// Parse "A1:B10" style A1-notation range to Fortune Sheet conditionRange format.
+// Supports:
+//   "A1:Z100"  → { row: [0, 99], column: [0, 25] }  (0-indexed, inclusive)
+//   "B2"       → { row: [1, 1],  column: [1, 1] }
+// Column letters: A=0, Z=25, AA=26, AZ=51, BA=52, …
+// Invalid input falls back to a sensible whole-sheet default.
+export function colLetterToIndex(letters) {
+  const s = letters.toUpperCase()
+  let idx = 0
+  for (let i = 0; i < s.length; i++) {
+    idx = idx * 26 + (s.charCodeAt(i) - 64)
+  }
+  return idx - 1  // 0-indexed
+}
+
+export function parseCellRef(ref) {
+  // ref like "A1", "BC200"
+  const m = ref.match(/^([A-Za-z]+)(\d+)$/)
+  if (!m) return null
+  return {
+    col: colLetterToIndex(m[1]),
+    row: parseInt(m[2], 10) - 1,  // 0-indexed
+  }
+}
+
+export function parseRange(text) {
+  const FALLBACK = [{ row: [0, 99], column: [0, 25] }]
+  if (!text || text.trim() === '') return FALLBACK
+  const parts = text.trim().toUpperCase().split(':')
+  if (parts.length === 1) {
+    // Single cell
+    const cell = parseCellRef(parts[0])
+    if (!cell) return FALLBACK
+    return [{ row: [cell.row, cell.row], column: [cell.col, cell.col] }]
+  }
+  if (parts.length === 2) {
+    const start = parseCellRef(parts[0])
+    const end   = parseCellRef(parts[1])
+    if (!start || !end) return FALLBACK
+    return [{
+      row:    [Math.min(start.row, end.row),    Math.max(start.row, end.row)],
+      column: [Math.min(start.col, end.col),    Math.max(start.col, end.col)],
+    }]
+  }
+  return FALLBACK
 }
 
 const DEFAULT_RULE = {

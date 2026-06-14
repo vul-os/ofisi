@@ -233,13 +233,13 @@ function MeetingCard({ meeting: m, copied, onJoin, onCopyLink, onDelete }) {
             </div>
           </div>
 
-          {(m.host_vumail ||
+          {(m.host_vulos ||
             (Array.isArray(m.invitees) && m.invitees.length > 0)) && (
             <div className="flex flex-wrap items-center gap-2 text-2xs">
-              {m.host_vumail && (
+              {m.host_vulos && (
                 <span className="text-ink-muted">
                   <span className="text-ink-faint uppercase tracking-eyebrow mr-1">Host</span>
-                  {m.host_vumail}
+                  {m.host_vulos}
                 </span>
               )}
               {Array.isArray(m.invitees) && m.invitees.length > 0 && (
@@ -317,7 +317,7 @@ function ToggleRow({ label, hint, checked, onChange, icon: Icon }) {
 function CreateModal({ open, onCreated, onClose }) {
   const [form, setForm] = useState({
     title: '',
-    host_vumail: '',
+    host_vulos: '',
     invitees_raw: '',
     scheduled_at: '',
     duration_min: 60,
@@ -338,7 +338,7 @@ function CreateModal({ open, onCreated, onClose }) {
     try {
       const body = {
         title: form.title.trim(),
-        host_vumail: form.host_vumail.trim() || undefined,
+        host_vulos: form.host_vulos.trim() || undefined,
         invitees: form.invitees_raw
           .split(',')
           .map((s) => s.trim())
@@ -371,7 +371,7 @@ function CreateModal({ open, onCreated, onClose }) {
           ...schedRes.meeting,
           session_id: `meeting:${schedRes.meeting?.room_id || schedRes.meeting?.id}`,
           join_link: schedRes.join_link,
-          host_vumail: body.host_vumail,
+          host_vulos: body.host_vulos,
           invitees: body.invitees,
         }
       } catch (_) {
@@ -380,7 +380,7 @@ function CreateModal({ open, onCreated, onClose }) {
       }
       onCreated(m)
       setForm({
-        title: '', host_vumail: '', invitees_raw: '', scheduled_at: '', duration_min: 60,
+        title: '', host_vulos: '', invitees_raw: '', scheduled_at: '', duration_min: 60,
         lobby_required: true, signin_required: false, recording_enabled: false,
       })
     } catch (e) {
@@ -405,8 +405,8 @@ function CreateModal({ open, onCreated, onClose }) {
           <Input
             label="Your Vulos account address"
             placeholder="you@vulos"
-            value={form.host_vumail}
-            onChange={(e) => update('host_vumail', e.target.value)}
+            value={form.host_vulos}
+            onChange={(e) => update('host_vulos', e.target.value)}
           />
           <Input
             label="Invitees"

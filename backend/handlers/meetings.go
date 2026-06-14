@@ -74,7 +74,7 @@ func (h *MeetingHandler) Create(c *gin.Context) {
 		ID:          id,
 		Title:       strings.TrimSpace(req.Title),
 		SessionID:   sessionID,
-		HostVumail:  strings.TrimSpace(req.HostVumail),
+		HostVulos:  strings.TrimSpace(req.HostVulos),
 		Invitees:    invitees,
 		ScheduledAt: req.ScheduledAt,
 		DurationMin: req.DurationMin,

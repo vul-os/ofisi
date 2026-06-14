@@ -58,28 +58,6 @@ func main() {
 		log.Fatal("Storage init failed:", err)
 	}
 
-	// FIX-OFFICE-STORE-WIRE-01: consume the storage-backend selector that
-	// OFFICE-STORE-01 shipped but main.go never read. The resolver maps the
-	// OS-side env contract (VULOS_STORAGE_MODE + VULOS_MINIO_*) onto an
-	// OfficeBackendConfig and instantiates an S3 client when applicable.
-	// All endpoint-selection logic lives in storage.ResolveOfficeBackend;
-	// main.go only logs the resolved endpoint.
-	backend, err := storage.ResolveOfficeBackend()
-	if err != nil {
-		log.Fatal("Office storage backend resolve failed:", err)
-	}
-	if backend.Client != nil {
-		log.Printf("office storage: kind=%s endpoint=%s sync=%s client=ready",
-			backend.Kind, backend.Endpoint, backend.SyncMode)
-	} else {
-		log.Printf("office storage: kind=%s endpoint=%s sync=%s client=not-configured",
-			backend.Kind, backend.Endpoint, backend.SyncMode)
-	}
-	// `backend.Client` is held for OFFICE-SYNC-01 wiring (CRDT push/pull); the
-	// file-CRUD Storage interface above (`store`) is the local/postgres path
-	// and remains the source of truth for the REST file API.
-	_ = backend
-
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 

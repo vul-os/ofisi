@@ -11,8 +11,7 @@
  *                    "Lower hand" button for the local entry
  *
  * The queue is intentionally a thin sidebar widget so it can be slotted into
- * either CallView (mesh) or LiveKitCallView (SFU) — both already track the
- * `peerHands` state.
+ * CallView (mesh) — it already tracks the `peerHands` state.
  */
 import { Hand, X } from 'lucide-react'
 
