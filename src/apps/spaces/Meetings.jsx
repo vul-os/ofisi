@@ -3,7 +3,7 @@
 // Shows scheduled/active/ended meeting rooms, lets the host create new ones,
 // and provides a copy-to-clipboard join link per meeting.
 // "New meeting" modal: title, date/time, duration, invitees (autocomplete),
-// lobby on/off, recording stub on/off, require sign-in toggle.
+// lobby on/off, recording on/off (real MediaRecorder backend), require sign-in toggle.
 // Clicking "Join" navigates to /room/<sessionId> which renders Room.jsx.
 //
 // Design pass: warm paper dashboard, Cards for each meeting, Modal for create,

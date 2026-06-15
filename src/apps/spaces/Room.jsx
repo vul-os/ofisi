@@ -14,6 +14,7 @@ import {
   Video, Mic, MicOff, VideoOff, ArrowLeft, Users, Calendar,
 } from 'lucide-react'
 import CallView from './CallView'
+import { RecordingsList } from './components/RecordingStub.jsx'
 import { Button, Card, Input, Tooltip } from '../../components/ui'
 
 // Attempt to fetch meeting metadata (title, invitees, etc).  Non-blocking.
@@ -101,9 +102,16 @@ export default function Room() {
 
   if (phase === 'ended') {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-bg text-ink gap-4 px-4">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-bg text-ink gap-4 px-4 py-10">
         <h2 className="text-2xl font-serif tracking-tightish">You have left the meeting.</h2>
         <p className="text-sm text-ink-muted">{meetingTitle}</p>
+        {/* Show recordings (if any) so organisers can download after the call. */}
+        <div className="w-full max-w-xs text-left">
+          <RecordingsList
+            roomId={sessionId?.replace(/^meeting:/, '') ?? sessionId}
+            isOrganizer
+          />
+        </div>
         <Button variant="primary" size="lg" onClick={handleBack} className="mt-2">
           Back to meetings
         </Button>
@@ -139,6 +147,11 @@ export default function Room() {
             sessionId={sessionId}
             identity={identity}
             video={videoOn}
+            isOrganizer={
+              !!(identity?.accountAddress &&
+                meta?.meeting?.organizer_id &&
+                identity.accountAddress === meta.meeting.organizer_id)
+            }
             onLeave={handleLeave}
           />
         </div>

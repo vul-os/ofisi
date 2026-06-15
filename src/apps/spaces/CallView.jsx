@@ -7,7 +7,7 @@
  *   - Transport badge (P2P vs Relay): tiny accent-tint pill (or warning when relay).
  *   - Controls: IconButtons in a dock-style cluster; leave is the only persimmon.
  *   - Screen-share area: kept at 55% height per spec.
- *   - Raise hand, reactions, background blur, presenter focus, captions, recording stub.
+ *   - Raise hand, reactions, background blur, presenter focus, captions, recording (MediaRecorder).
  *
  * Props:
  *   sessionId    — fabric session id for this call (channel id, DM id, room id)

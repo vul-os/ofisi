@@ -324,12 +324,11 @@ tree. The subdomain builds integrate with the `vulos-cloud` multi-target routing
 Do not touch `src/apps/*/lib.jsx`, `vite.config.*`, or `package.json` — those are owned by
 the subdomain agent while it is active.
 
-### Deep-link routing per app
-Each app surface exposes a canonical deep-link scheme (`vulos-office://docs/{id}`,
-`vulos-office://meet/{roomId}`, etc.) so the OS launcher, notification taps, and inter-app
-links can navigate directly to a document, sheet, meeting room, or calendar event. Routing
-table in `src/App.jsx` handles both the web-subdomain URL pattern and the OS deep-link
-scheme. Coordinate with the multi-target build work above.
+### Deep-link routing per app ✓ (done — Wave E)
+`src/App.jsx` handles `/meet/:meetId` (resolves to `/room/:sessionId`), `/pdf/:id`, and
+`/room/:sessionId` as public routes. The `web+vulosoffice://` protocol handler is registered
+on mount; `?goto=<path>` is parsed and navigated. Coordinate with the multi-target build
+work above for OS launcher integration.
 
 ---
 
@@ -341,10 +340,19 @@ scheme. Coordinate with the multi-target build work above.
   REST + durable SQLite backed (no LiveKit dependency; P2P mesh via `@vulos/relay-client`
   for voice/video).
 - **Meetings** are collapsed to a single system: lobby + meeting join + TURN credential
-  minting via the Vulos relay circuit, P2P WebRTC mesh for ≤5 participants.
+  minting via the Vulos relay circuit, P2P WebRTC mesh for ≤6 participants.
+- **Meeting recording**: MediaRecorder captures the local stream, uploads as WebM to
+  `/api/meet/:roomId/recordings`; falls back to `data/recordings/` when no S3 bucket
+  is configured; organisers can list and download past recordings from the call UI.
 - **Calendar** and **Contacts** are durable, account-scoped, SQLite-backed.
-- **Org-bucket wiring** (`OfficeBackendConfig`) is defined and injectable; the running
-  binary still falls back to `storage.New` — wiring is the next task.
+- **Org-bucket wiring** (`OfficeBackendConfig`) is fully wired (`FIX-OFFICE-STORE-WIRE-01`):
+  file CRUD, recording upload/download, and sealed PDFs read/write to the S3-compatible
+  bucket (Tigris or MinIO) when `VULOS_ORG_ID` is set; falls back to local storage otherwise.
+- **PPTX import**: JSZip + OOXML XML parsing extracts slide text from `ppt/slides/*.xml`;
+  builds a slides-editor-compatible content model for both drag-and-drop and backend-served files.
+- **Deep-link routing**: `/meet/:meetId` route resolves meeting ID → session → `/room/:sessionId`;
+  `web+vulosoffice://` protocol handler registered on mount; `?goto=` param parsed and navigated.
+- **Presence**: REST/poll presence (OFFICE-62) — heartbeat + roster, 15 s interval.
 - **Security**: .ics SSRF guard, meeting-list scoping, per-file ACLs.
 - **CRDT**: client-side CRDT modules (`src/lib/crdt/`) and the Spaces message store
   (`backend/spaces/store.go`) are live. Live P2P document sync over the peer fabric
@@ -352,15 +360,12 @@ scheme. Coordinate with the multi-target build work above.
 
 ### Near-term items
 
-- **Wire `OfficeBackendConfig`** (`FIX-OFFICE-STORE-WIRE-01`): plumb the per-org S3
-  endpoint + credentials from the control plane into the running binary so the
-  Tigris/MinIO backend is actually selected at runtime.
 - **Live P2P document collab over the relay** (`COLLAB-FABRIC-01`): re-introduce the
   CRDT doc-sync channel over the Vulos relay fabric (WebRTC data channels + relay
   fallback). This is the **real** Section 2 of the roadmap — currently dormant.
-- **Vite chunk fix** (`FIX-VITE-FABRIC-IMPORT-01`): `src/lib/fabric.js` is both
-  statically and dynamically imported, defeating the Vite chunk split. Normalise
-  to dynamic-only.
-- **Large-room calling** (`MEET-LARGE-ROOM-01`): P2P mesh degrades past ~5
+- **Multi-target builds** (`vite.config.*`): build each app as both a standalone web
+  bundle (subdomain serving) and an embeddable `lib.jsx` export (OS shell). Currently
+  owned by the subdomain agent — do not edit these files in parallel.
+- **Large-room calling** (`MEET-LARGE-ROOM-01`): P2P mesh degrades past ~6
   participants. A self-hostable SFU (via vulos-relay) is the path for Pro-tier
   large rooms. Timeline TBD pending relay SFU readiness.

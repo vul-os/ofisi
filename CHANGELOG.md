@@ -56,11 +56,7 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - P2-7: Call cap: render capacity warning at ≥6 participants; MEET-SPACES-01 clarified: P2P mesh only, no SFU/LiveKit (intentional product limit — no change)
 - P2-8: Replace alert() in importFile.js with thrown errors (caller handles UI feedback)
 
----
-
-## [Unreleased] (prior)
-
-### Added
+### Added (Wave C / prior unreleased)
 - Build-time version injection via `-ldflags "-X main.Version=vX.Y.Z"`.
 - `GET /version` endpoint returns the build version as JSON.
 - `--version` / `version` CLI subcommand prints the build version and exits.
@@ -69,7 +65,7 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lib, generates SHA-256 checksums, creates a GitHub Release, and optionally
   publishes to npm (gated on `NPM_TOKEN` secret).
 
-### Changed
+### Changed (Wave C / prior unreleased)
 - Renamed internal `forumHandler` variable → `spacesHandler` in `main.go`
   (the `/api/spaces/*` routes are Spaces, not a forum).
 - `docs/ARCHITECTURE.md` rewritten to reflect current reality: REST-based

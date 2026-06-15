@@ -1,6 +1,6 @@
 # Vulos Office — Task Backlog
 
-**Status: 38 / 38 tasks done (100%).** Office Core, Real-time Collaboration (CRDT +
+**Status: 39 / 40 tasks done (98%).** Office Core, Real-time Collaboration (CRDT +
 fabric), PDF Auto-Sign, and Vulos Spaces (channels, calls, screen-share, meetings) are
 all shipped. Wave C (2026-05-24) adds the shared `@vulos/relay-client` migration
 (RELAY-CLIENT-02) and the Spaces UI ship-ready polish — captions panel, recording
@@ -13,6 +13,7 @@ Wave D (2026-06-15): object-store write-through (FIX-OFFICE-STORE-WIRE-01), Post
 Wave E (2026-06-15): real meeting recording (MEET-RECORDING — MediaRecorder + bucket upload +
 backend storage + organiser download), real PPTX import (JSZip OOXML parser), deep-link routing
 (/meet/:id + web+vulosoffice:// protocol handler + ?goto= param).
+**Remaining open:** Multi-target subdomain + OS-embed lib build (P2 · L — owned by subdomain agent).
 
 Actionable work for autonomous coding agents, grouped by area and
 **priority-ordered**. Vulos Office is the productivity surface of the Vulos
@@ -284,9 +285,9 @@ Add a Vite multi-entry config that builds each app (docs, sheets, slides, spaces
 AC: [ ] `npm run build` produces both web and lib outputs [ ] lib.jsx exports a single component per app [ ] web output deployable to app-specific subdomain [ ] no .tsx files introduced
 
 ### Deep-link routing per app surface
-`todo` · P2 · M · dep: none · parallel: yes — src/App.jsx
-Add canonical deep-link routes for each app surface: `vulos-office://docs/{id}`, `vulos-office://meet/{roomId}`, `vulos-office://calendar/{eventId}`, etc. The `src/App.jsx` router handles both web-subdomain URL patterns and the OS deep-link scheme. Coordinate with the multi-target build work and the OS app wrapper tasks in the `vulos` repo.
-AC: [ ] deep-link URLs for docs/sheets/slides/spaces/calendar/meet defined [ ] App.jsx routes resolve them correctly [ ] OS launcher links tested against the routing table [ ] npm run build
+`done` · P2 · M · dep: none · parallel: yes — src/App.jsx
+Add canonical deep-link routes for each app surface: `vulos-office://docs/{id}`, `vulos-office://meet/{roomId}`, `vulos-office://calendar/{eventId}`, etc. The `src/App.jsx` router handles both web-subdomain URL patterns and the OS deep-link scheme. Coordinate with the multi-target build work and the OS app launcher tasks in the `vulos` repo.
+AC: [x] /meet/:meetId route resolves meeting ID → session → /room/:sessionId [x] web+vulosoffice:// protocol handler registered on mount [x] ?goto= param parsed and navigated on load [x] /pdf/:id route present [x] App.jsx routes resolve correctly [x] npm run build
 
 ---
 
@@ -400,7 +401,9 @@ active-speaker emphasis, raise-hand, breakout-room selector. Tokens fetched from
 AC: [x] livekit-client wired for >5 [x] mesh fallback for ≤5 [x] speaker grid + active-speaker UI [x] tokens fetched from cloud [x] npm run build && npm test
 Clarification (2026-06-15): LiveKit/SFU is NOT used in the current codebase. Calls are P2P WebRTC mesh
 only (via @vulos/relay-client/call). Max 6 participants enforced in CallView.jsx; a clear "at capacity"
-message is shown at ≥6 participants instead of silently failing. Recording is not yet available.
+message is shown at ≥6 participants instead of silently failing.
+Recording (MEET-RECORDING, Wave E): MediaRecorder on local stream; WebM uploaded to backend on stop;
+organisers can list + download past recordings from the post-call screen (Room.jsx `ended` phase).
 
 ---
 

@@ -4,7 +4,7 @@
  * Mounts OfficeShell with BrowserRouter for history-API deep linking.
  * The backend must serve index.html for all unmatched paths (SPA fallback).
  * On Fly: configure the fly.toml `[[http_service]]` block with force_https,
- * returning index.html for unmatched routes (see DEPLOY.md TODO).
+ * returning index.html for unmatched routes (see DEPLOY.md for the fly.toml snippet).
  */
 
 import { StrictMode } from 'react'

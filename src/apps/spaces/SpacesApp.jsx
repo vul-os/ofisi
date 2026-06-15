@@ -3,8 +3,8 @@
  * Routes: /spaces  /spaces/:channelId
  *
  * Channel sidebar (public/private channels + DMs) + ChannelView message pane.
- * Backed by the CRDT message store (OFFICE-60); presence hooks are stubs
- * pending OFFICE-24 being wired in (OFFICE-62 extends).
+ * Backed by the CRDT message store (OFFICE-60); REST/poll presence live via
+ * useRestPresence (OFFICE-62 — heartbeat + roster, 15 s interval).
  *
  * Design pass: rebuilt against `src/components/ui/*` primitives (Sidebar,
  * Input, Modal, Button) and the warm-paper / single-teal-accent tokens —
