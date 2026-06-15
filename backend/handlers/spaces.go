@@ -446,3 +446,44 @@ func (h *SpacesHandler) MergeOps(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"applied": len(ops)})
 }
+
+// -------------------------------------------------------------------------
+// Private-channel invite (P1-4)
+// -------------------------------------------------------------------------
+
+// InviteMember handles POST /api/spaces/channels/:channelId/members.
+// Body: { account_id: string, display_name?: string }
+// Authz: the requester must already be a member of the channel to invite others.
+// Private and DM channels enforce membership; public channels allow any member to invite.
+// Returns 409 if the account is already a member.
+func (h *SpacesHandler) InviteMember(c *gin.Context) {
+	channelID := c.Param("channelId")
+	requester := requesterID(c)
+
+	// The requester must be a member (or the channel must be accessible).
+	if !h.requireChannelAccess(c, channelID, requester) {
+		return
+	}
+
+	var req struct {
+		AccountID   string `json:"account_id" binding:"required"`
+		DisplayName string `json:"display_name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 409 if already a member.
+	if h.store.IsMember(channelID, req.AccountID) {
+		c.JSON(http.StatusConflict, gin.H{"error": "already a member"})
+		return
+	}
+
+	m, err := h.store.AddMemberWithName(channelID, req.AccountID, req.DisplayName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, m)
+}

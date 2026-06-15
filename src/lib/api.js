@@ -184,6 +184,21 @@ export const api = {
   spacesSearch: (channelId, q) =>
     request(`/spaces/channels/${channelId}/search?q=${encodeURIComponent(q)}`),
 
+  // OFFICE-62: REST/poll presence — heartbeat + roster
+  spacesHeartbeat: (status, statusText, displayName) =>
+    request('/spaces/presence/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({ status, status_text: statusText, display_name: displayName }),
+    }),
+  spacesGetRoster: () => request('/spaces/presence/roster'),
+
+  // P1-4: private-channel invite
+  spacesInviteMember: (channelId, accountId, displayName) =>
+    request(`/spaces/channels/${channelId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId, display_name: displayName }),
+    }),
+
   // Threading: list replies to a parent message (thread-scoped).
   spacesListThread: (channelId, parentId) =>
     request(`/spaces/channels/${channelId}/threads/${parentId}`),

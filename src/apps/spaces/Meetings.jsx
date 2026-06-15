@@ -431,7 +431,7 @@ function CreateModal({ open, onCreated, onClose }) {
             />
             <ToggleRow
               label="Recording"
-              hint="Coming soon — stub only. All participants will be notified before recording starts."
+              hint="Recording is not yet available in this release."
               checked={false}
               onChange={() => {}}
               icon={Circle}

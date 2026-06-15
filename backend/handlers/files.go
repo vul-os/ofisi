@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"log"
 	"net/http"
 
 	"vulos-office/backend/audit"
@@ -85,6 +87,16 @@ func (h *FileHandler) Create(c *gin.Context) {
 	}
 	// Record the creating identity as owner so the file is private by default.
 	h.authz.recordOwner(c, file.ID)
+
+	// Async write-through to org bucket when content is present.
+	if file.Content != nil {
+		if contentBytes, err := json.Marshal(file.Content); err == nil {
+			if err := SharedBucketStore().PutObject(requesterID(c), "file/"+file.ID, contentBytes, "application/json"); err != nil {
+				log.Printf("[files] bucket sync create file=%s: %v (SQLite is primary — continuing)", file.ID, err)
+			}
+		}
+	}
+
 	c.JSON(http.StatusCreated, file)
 }
 
@@ -115,6 +127,16 @@ func (h *FileHandler) Update(c *gin.Context) {
 	}
 
 	updated, _ := h.store.GetFile(file.ID)
+
+	// Sync updated content blob to bucket (SQLite is still the primary source).
+	if file.Content != nil {
+		if contentBytes, err := json.Marshal(file.Content); err == nil {
+			if err := SharedBucketStore().PutObject(requesterID(c), "file/"+id, contentBytes, "application/json"); err != nil {
+				log.Printf("[files] bucket sync update file=%s: %v (SQLite is primary — continuing)", id, err)
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, updated)
 }
 
@@ -133,6 +155,13 @@ func (h *FileHandler) Delete(c *gin.Context) {
 	}
 	// Drop ACL state for the deleted file.
 	_ = h.authz.Store().Delete(id)
+
+	// Best-effort removal from the org bucket (ignore error — bucket object
+	// may not exist if S3 was not configured when the file was created).
+	if err := SharedBucketStore().DeleteObject(requesterID(c), "file/"+id); err != nil {
+		log.Printf("[files] bucket sync delete file=%s: %v (ignoring)", id, err)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 

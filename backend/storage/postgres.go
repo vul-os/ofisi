@@ -745,26 +745,113 @@ func (s *PostgresStorage) DeleteMeeting(id string) error {
 }
 
 // ============================================================
-// Suggestions (OFFICE-27) — stub implementations
+// Suggestions (OFFICE-27) — Postgres implementations
 // ============================================================
 
+// migrateSuggestionsSchema creates the suggestions table when it does not exist.
+// Safe to call on every startup; uses CREATE TABLE IF NOT EXISTS.
+func (s *PostgresStorage) migrateSuggestionsSchema() {
+	_, _ = s.pool.Exec(context.Background(), `
+CREATE TABLE IF NOT EXISTS suggestions (
+    id          TEXT NOT NULL,
+    file_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    state       TEXT NOT NULL DEFAULT 'pending',
+    author_id   TEXT NOT NULL DEFAULT '',
+    from_pos    INTEGER NOT NULL DEFAULT 0,
+    to_pos      INTEGER NOT NULL DEFAULT 0,
+    text        TEXT NOT NULL DEFAULT '',
+    seq_clock   TEXT NOT NULL DEFAULT '',
+    reviewer_id TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (file_id, id)
+)`)
+}
+
 func (s *PostgresStorage) CreateSuggestion(sg *models.Suggestion) error {
-	return fmt.Errorf("suggestions not yet implemented in postgres storage")
+	s.migrateSuggestionsSchema()
+	now := time.Now().UTC()
+	sg.CreatedAt = now
+	sg.UpdatedAt = now
+	_, err := s.pool.Exec(context.Background(), `
+INSERT INTO suggestions (id, file_id, kind, state, author_id, from_pos, to_pos, text, seq_clock, reviewer_id, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		sg.ID, sg.FileID, string(sg.Kind), string(sg.State), sg.AuthorID,
+		sg.From, sg.To, sg.Text, sg.SeqClock, sg.ReviewerID,
+		sg.CreatedAt, sg.UpdatedAt,
+	)
+	return err
 }
 
 func (s *PostgresStorage) GetSuggestion(fileID, suggestionID string) (*models.Suggestion, error) {
-	return nil, fmt.Errorf("suggestions not yet implemented in postgres storage")
+	s.migrateSuggestionsSchema()
+	row := s.pool.QueryRow(context.Background(), `
+SELECT id, file_id, kind, state, author_id, from_pos, to_pos, text, seq_clock, reviewer_id, created_at, updated_at
+FROM suggestions WHERE file_id=$1 AND id=$2`, fileID, suggestionID)
+	var sg models.Suggestion
+	var kind, state string
+	err := row.Scan(&sg.ID, &sg.FileID, &kind, &state, &sg.AuthorID,
+		&sg.From, &sg.To, &sg.Text, &sg.SeqClock, &sg.ReviewerID,
+		&sg.CreatedAt, &sg.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("suggestion not found")
+	}
+	sg.Kind = models.SuggestionKind(kind)
+	sg.State = models.SuggestionState(state)
+	return &sg, nil
 }
 
 func (s *PostgresStorage) ListSuggestions(fileID string) ([]*models.Suggestion, error) {
-	return []*models.Suggestion{}, nil
+	s.migrateSuggestionsSchema()
+	rows, err := s.pool.Query(context.Background(), `
+SELECT id, file_id, kind, state, author_id, from_pos, to_pos, text, seq_clock, reviewer_id, created_at, updated_at
+FROM suggestions WHERE file_id=$1 ORDER BY created_at ASC`, fileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.Suggestion
+	for rows.Next() {
+		var sg models.Suggestion
+		var kind, state string
+		if err := rows.Scan(&sg.ID, &sg.FileID, &kind, &state, &sg.AuthorID,
+			&sg.From, &sg.To, &sg.Text, &sg.SeqClock, &sg.ReviewerID,
+			&sg.CreatedAt, &sg.UpdatedAt); err != nil {
+			return nil, err
+		}
+		sg.Kind = models.SuggestionKind(kind)
+		sg.State = models.SuggestionState(state)
+		out = append(out, &sg)
+	}
+	if out == nil {
+		out = []*models.Suggestion{}
+	}
+	return out, nil
 }
 
 func (s *PostgresStorage) UpdateSuggestion(sg *models.Suggestion) error {
-	return fmt.Errorf("suggestions not yet implemented in postgres storage")
+	s.migrateSuggestionsSchema()
+	sg.UpdatedAt = time.Now().UTC()
+	_, err := s.pool.Exec(context.Background(), `
+UPDATE suggestions SET state=$1, reviewer_id=$2, seq_clock=$3, updated_at=$4
+WHERE file_id=$5 AND id=$6`,
+		string(sg.State), sg.ReviewerID, sg.SeqClock, sg.UpdatedAt,
+		sg.FileID, sg.ID,
+	)
+	return err
 }
 
 func (s *PostgresStorage) DeleteSuggestion(fileID, suggestionID string) error {
-	return fmt.Errorf("suggestions not yet implemented in postgres storage")
+	s.migrateSuggestionsSchema()
+	tag, err := s.pool.Exec(context.Background(), `
+DELETE FROM suggestions WHERE file_id=$1 AND id=$2`, fileID, suggestionID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("suggestion not found")
+	}
+	return nil
 }
 

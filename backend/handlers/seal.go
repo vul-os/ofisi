@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -148,6 +149,11 @@ func (h *SealHandler) Download(c *gin.Context) {
 	if err := h.store.StoreSealedPDF(envelopeID, sealedBytes); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("persist sealed PDF: %v", err)})
 		return
+	}
+
+	// Best-effort push to org bucket — SQLite/local is still the primary source.
+	if err := SharedBucketStore().PutObject(requesterID(c), "seal/"+envelopeID+".pdf", sealedBytes, "application/pdf"); err != nil {
+		log.Printf("[seal] bucket sync envelope=%s: %v (ignoring)", envelopeID, err)
 	}
 
 	// Record final hash + status on envelope.

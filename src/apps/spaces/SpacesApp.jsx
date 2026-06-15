@@ -10,16 +10,95 @@
  * Input, Modal, Button) and the warm-paper / single-teal-accent tokens —
  * matches the DocsEditor + CommentsPanel revamp.
  */
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Hash, Lock, AtSign, Plus, Users, Search, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import ChannelView from './ChannelView.jsx'
 import { api } from '../../lib/api.js'
-import { usePresence, STATUS_ONLINE } from '@vulos/relay-client/presence'
+import { STATUS_ONLINE } from '@vulos/relay-client/presence'
 import { PresenceDot, StatusPicker } from '../../components/PresenceBar.jsx'
 import { Button, IconButton, Input, Modal, Sidebar } from '../../components/ui'
+
+// ---------------------------------------------------------------------------
+// useRestPresence — OFFICE-62 REST/poll presence (replaces fabric stub)
+//
+// Polls GET /api/spaces/presence/roster every 15 s.
+// Sends POST /api/spaces/presence/heartbeat every 15 s.
+// Returns { roster, setStatus } where roster has the presencePeer shape:
+//   { accountId, displayName, status, statusText, color, online }
+// ---------------------------------------------------------------------------
+
+const PRESENCE_COLORS = [
+  '#0f6a6c', '#4f7a4d', '#c08436', '#b8453a', '#4a6b8a', '#6e5b8a',
+  '#7a5a3d', '#3d6b5a', '#6a3d6a', '#8a6a2a',
+]
+
+function colorFromUserID(userID) {
+  if (!userID) return PRESENCE_COLORS[0]
+  let h = 0
+  for (let i = 0; i < userID.length; i++) {
+    h = ((h << 5) - h + userID.charCodeAt(i)) | 0
+  }
+  return PRESENCE_COLORS[Math.abs(h) % PRESENCE_COLORS.length]
+}
+
+function useRestPresence() {
+  const [roster, setRoster] = useState([])
+  const statusRef = useRef({ status: 'online', text: '' })
+
+  const doHeartbeat = useCallback(async () => {
+    try {
+      await api.spacesHeartbeat(
+        statusRef.current.status,
+        statusRef.current.text,
+        '',
+      )
+    } catch {
+      // network error — silent, will retry
+    }
+  }, [])
+
+  const doRoster = useCallback(async () => {
+    try {
+      const entries = await api.spacesGetRoster()
+      const peers = (entries || []).map((e) => ({
+        accountId: e.user_id,
+        displayName: e.display_name || e.user_id,
+        status: e.status || 'online',
+        statusText: e.status_text || '',
+        color: colorFromUserID(e.user_id),
+        online: true,
+      }))
+      setRoster(peers)
+    } catch {
+      // network error — keep existing roster
+    }
+  }, [])
+
+  useEffect(() => {
+    // Immediate on mount
+    doHeartbeat()
+    doRoster()
+
+    const hbInterval = setInterval(doHeartbeat, 15000)
+    const rosterInterval = setInterval(doRoster, 15000)
+
+    return () => {
+      clearInterval(hbInterval)
+      clearInterval(rosterInterval)
+    }
+  }, [doHeartbeat, doRoster])
+
+  const setStatus = useCallback((status, text = '') => {
+    statusRef.current = { status, text }
+    // Send immediately so the change is reflected without waiting for the next tick.
+    api.spacesHeartbeat(status, text, '').catch(() => {})
+  }, [])
+
+  return { roster, setStatus }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -456,15 +535,15 @@ export default function SpacesApp() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  // OFFICE-62: presence — fabric is null until OFFICE-20 is wired.
-  const { roster, manager: presenceManager } = usePresence({ fabric: null })
+  // OFFICE-62: REST/poll presence (replaced fabric-null stub).
+  const { roster, setStatus: setRestStatus } = useRestPresence()
   const [localStatus, setLocalStatus] = useState(STATUS_ONLINE)
   const [localStatusText, setLocalStatusText] = useState('')
 
   function handleSetStatus(status, text) {
     setLocalStatus(status)
     setLocalStatusText(text)
-    if (presenceManager) presenceManager.setStatus(status, text)
+    setRestStatus(status, text)
   }
 
   const currentUser = 'me'

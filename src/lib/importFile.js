@@ -185,8 +185,7 @@ export async function importFile(file, navigate) {
   }
 
   if (!type || type === 'slide') {
-    alert(`Cannot import .${file.name.split('.').pop()} files yet.`)
-    return
+    throw new Error(`Cannot import .${file.name.split('.').pop()} files yet.`)
   }
 
   const content = type === 'doc'
@@ -214,8 +213,7 @@ export async function importFromUrl(localFile, navigate) {
   }
 
   if (appType === 'slide') {
-    alert('PPTX import is not yet supported. Use Export from another app.')
-    return
+    throw new Error('PPTX import is not yet supported. Use Export from another app.')
   }
 
   // Fetch the file from the backend

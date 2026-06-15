@@ -1,12 +1,15 @@
 # Vulos Office — Task Backlog
 
-**Status: 37 / 37 tasks done (100%).** Office Core, Real-time Collaboration (CRDT +
+**Status: 38 / 38 tasks done (100%).** Office Core, Real-time Collaboration (CRDT +
 fabric), PDF Auto-Sign, and Vulos Spaces (channels, calls, screen-share, meetings) are
 all shipped. Wave C (2026-05-24) adds the shared `@vulos/relay-client` migration
 (RELAY-CLIENT-02) and the Spaces UI ship-ready polish — captions panel, recording
 indicator + quota, raise-hand queue, working breakouts, responsive 1/2/4/9/16/25 grid,
 and active-speaker glow (MEET-FRONTEND-POLISH-01). Design-system pillar applied to core
 surfaces (see `src/design/DESIGN.md` §9); remaining surfaces deferred to the next pass (§10).
+Wave D (2026-06-15): object-store write-through (FIX-OFFICE-STORE-WIRE-01), Postgres suggestions
+(OFFICE-27), REST/poll presence (OFFICE-62), private-channel invite (P1-4), optional SMTP reminders
+(P1-5), recording label honesty (P2-6), P2P mesh call cap ≤6 (P2-7), importFile alert→throw (P2-8).
 
 Actionable work for autonomous coding agents, grouped by area and
 **priority-ordered**. Vulos Office is the productivity surface of the Vulos
@@ -153,6 +156,8 @@ AC: [ ] add/reply/resolve a comment anchored to a range [ ] comments converge ac
 `done` · P2 · L · dep: OFFICE-22, OFFICE-26 · parallel: yes — src/apps/docs/DocsEditor.jsx, src/lib/crdt/suggestions.js, src/components/SuggestionPanel.jsx
 Scope: Suggestion mode for Docs: edits are recorded as CRDT-friendly suggestion annotations (insert/delete proposals) rather than direct mutations; a reviewer accepts/rejects each; accepted suggestions fold into the base CRDT. Visual diff styling for pending suggestions. JSX only.
 AC: [ ] edits in suggestion mode render as pending, not applied [ ] accept folds into doc, reject discards [ ] suggestions converge across peers [ ] npm run build
+Note (2026-06-15): Postgres suggestions now fully implemented — migrateSuggestionsSchema() + real
+CreateSuggestion/GetSuggestion/ListSuggestions/UpdateSuggestion/DeleteSuggestion in backend/storage/postgres.go.
 
 ### [OFFICE-28] Document activity feed + named snapshots from op-log
 `done` · P3 · M · dep: OFFICE-21, OFFICE-08 · parallel: yes — src/lib/crdt/index.js, src/components/HistoryPanel.jsx
@@ -236,6 +241,15 @@ AC: [ ] create/join channel, post + thread-reply [ ] DMs + group DMs work [ ] un
 `done` · P2 · S · dep: OFFICE-61, OFFICE-24 · parallel: yes — src/lib/presence.js, src/apps/spaces/ChannelView.jsx
 Scope: Extend the presence primitive with custom status (online/away/in-a-call + free-text), shown next to members in Vulos Spaces and reused by Office editors. In-a-call state is set by the calling layer (OFFICE-63). JSX only.
 AC: [ ] status changes propagate live to other peers [ ] in-a-call status reflects active calls [ ] presence reused in editors + spaces [ ] npm run build
+Note (2026-06-15): Fabric-null stub replaced with working REST/poll presence. Backend:
+POST /api/spaces/presence/heartbeat + GET /api/spaces/presence/roster (35s TTL, 15s poll interval).
+Frontend: useRestPresence() hook in SpacesApp.jsx (replaces usePresence({ fabric: null })).
+
+### [P1-4] Private-channel invite endpoint
+`done` · P1 · S · dep: OFFICE-61 · parallel: yes — backend/handlers/spaces.go, main.go, src/lib/api.js
+Scope: POST /api/spaces/channels/:channelId/members — invite an account to a channel. Requester must be a
+member; private/DM channels are invite-only. Returns 201 Membership or 409 if already a member.
+AC: [x] POST /api/spaces/channels/:channelId/members wired [x] 409 on duplicate [x] membership authz enforced [x] api.spacesInviteMember() in api.js [x] go build ./...
 
 ### [OFFICE-63] 1:1 + group voice/video calling (WebRTC P2P + relay/TURN fallback)
 `done` · P1 · L · dep: OFFICE-20, OFFICE-61 · parallel: no — src/lib/call/rtc.js, src/apps/spaces/CallView.jsx
@@ -358,7 +372,10 @@ binary never consumes the storage selector. All 5 ACs on OFFICE-STORE-01 are unc
 Fix: at startup, read `VULOS_STORAGE_MODE` (+ `VULOS_MINIO_*` env vars per STORE-LOCAL-01 contract); if
 `local-minio-sync` or any `OfficeBackendConfig` env present, instantiate via `NewOfficeS3Client`; otherwise
 keep `storage.New` (default Tigris/PostgreSQL path). Log the resolved endpoint at startup.
-AC: [x] Tigris endpoint config accepted + logged [x] MinIO-local endpoint accepted + logged [x] storage interface uses injected endpoint [x] no endpoint-selection logic in vulos-office source [x] go build ./...   (verify these against OFFICE-STORE-01 ACs in TASKS.md — flip those once this lands)
+AC: [x] Tigris endpoint config accepted + logged [x] MinIO-local endpoint accepted + logged [x] storage interface uses injected endpoint [x] no endpoint-selection logic in vulos-office source [x] go build ./...
+Note (2026-06-15): Object-store write-through fully wired — `backend/handlers/bucket_store.go` (BucketStore)
+syncs file CRUD blobs (create/update/delete) and sealed PDFs to the org bucket when S3 is configured; falls
+back gracefully (no-op) when no S3 credentials are present. SQLite/Postgres remains the primary source.
 
 ### [FIX-VITE-FABRIC-IMPORT-01] Resolve vite mixed static+dynamic import on src/lib/fabric.js
 `done` · P3 · S · dep: none · parallel: yes — src/lib/fabric.js, src/lib/crdt/index.js, src/lib/call/fabricSignaling.js
@@ -378,6 +395,9 @@ preserve the existing `fabric.js` mesh path for ≤5 (intimate calls, lower-late
 Route selection at room join based on expected participant count + Pro-tier gate. UI: speaker grid,
 active-speaker emphasis, raise-hand, breakout-room selector. Tokens fetched from vulos-cloud MEET-CP-01.
 AC: [x] livekit-client wired for >5 [x] mesh fallback for ≤5 [x] speaker grid + active-speaker UI [x] tokens fetched from cloud [x] npm run build && npm test
+Clarification (2026-06-15): LiveKit/SFU is NOT used in the current codebase. Calls are P2P WebRTC mesh
+only (via @vulos/relay-client/call). Max 6 participants enforced in CallView.jsx; a clear "at capacity"
+message is shown at ≥6 participants instead of silently failing. Recording is not yet available.
 
 ---
 

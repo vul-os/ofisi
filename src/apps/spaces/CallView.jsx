@@ -180,7 +180,29 @@ export default function CallView({
     )
   }
 
+  // MEET-SPACES-01: P2P mesh cap — max 6 participants (local + 5 peers).
+  // When at capacity, render a clear message instead of silently failing.
   const totalTiles = peers.length + 1
+  if (totalTiles > 6 && state === 'connected') {
+    return (
+      <div
+        className="flex flex-col items-center justify-center h-full p-8 text-paper"
+        style={{ background: 'var(--ink)' }}
+      >
+        <div className="text-xl mb-1 font-serif">This call is at capacity</div>
+        <div className="text-sm text-paper/60 mb-6">
+          Vulos Spaces calls support up to 6 participants (P2P mesh). This call is full.
+        </div>
+        <button
+          type="button"
+          onClick={handleLeave}
+          className="px-4 h-8 rounded-md bg-danger text-white hover:opacity-90 text-sm font-medium tracking-tightish"
+        >
+          Leave
+        </button>
+      </div>
+    )
+  }
 
   const presentingPeer = screenPresenter && screenPresenter !== 'local'
     ? peers.find((p) => p.peerId === screenPresenter) ?? null

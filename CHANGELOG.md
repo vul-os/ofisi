@@ -6,7 +6,23 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [Unreleased] — 2026-06-15
+
+### Fixed
+- FIX-OFFICE-STORE-WIRE-01: Wire OrgBucketClient into file CRUD, sealed PDFs — blob sync to S3/Tigris when configured; SQLite-only fallback when not
+- OFFICE-27 (Postgres): Implement CreateSuggestion/GetSuggestion/UpdateSuggestion/DeleteSuggestion in PostgresStorage
+- OFFICE-62: Replace fabric-null presence stub with working REST/poll heartbeat + roster (15 s interval)
+- P1-4: Add POST /api/spaces/channels/:channelId/members (private-channel invite) with membership authz
+- P1-5: Wire optional SMTP reminder emails (VULOS_SMTP_* env); honest "no mailer configured" when absent
+
+### Changed
+- P2-6: Recording UI label updated to "Recording is not yet available in this release"
+- P2-7: Call cap: render capacity warning at ≥6 participants; MEET-SPACES-01 clarified: P2P mesh only, no SFU/LiveKit
+- P2-8: Replace alert() in importFile.js with thrown errors (caller handles UI feedback)
+
+---
+
+## [Unreleased] (prior)
 
 ### Added
 - Build-time version injection via `-ldflags "-X main.Version=vX.Y.Z"`.

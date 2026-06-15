@@ -295,6 +295,11 @@ func main() {
 	handlers.StartReminderWorker(nil)
 	handlers.StartSubscriptionRefresher()
 
+	// OFFICE-62: REST/poll presence for Vulos Spaces (heartbeat + roster).
+	presenceHandler := handlers.NewPresenceHandler()
+	protected.POST("/spaces/presence/heartbeat", presenceHandler.Heartbeat)
+	protected.GET("/spaces/presence/roster", presenceHandler.Roster)
+
 	// OFFICE-60/61: Vulos Spaces — channels, DMs, threads, messages.
 	// OFFICE-SPACES-1/4/5/6: reactions, status, search, pins (additive via SpacesHandlerExt).
 	spacesHandler := handlers.NewSpacesHandlerExt()
@@ -302,6 +307,7 @@ func main() {
 	protected.POST("/spaces/channels", spacesHandler.CreateChannel)
 	protected.POST("/spaces/channels/:channelId/join", spacesHandler.JoinChannel)
 	protected.GET("/spaces/channels/:channelId/members", spacesHandler.ListMembers)
+	protected.POST("/spaces/channels/:channelId/members", spacesHandler.InviteMember)
 	protected.PUT("/spaces/channels/:channelId/members/me/name", spacesHandler.SetMyDisplayName)
 	protected.GET("/spaces/channels/:channelId/messages", spacesHandler.ListMessages)
 	protected.POST("/spaces/channels/:channelId/messages", spacesHandler.SendMessage)
