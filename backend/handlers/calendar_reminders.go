@@ -19,9 +19,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -150,6 +153,13 @@ func (h *CalendarSubscribeHandler) Subscribe(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// SSRF guard: validate the URL before storing or fetching it.
+	// This gives the caller an immediate error rather than a silent drop at
+	// first-fetch time, and prevents persisting a known-bad URL.
+	if err := checkSSRFURL(req.URL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "subscription URL not allowed: " + err.Error()})
+		return
+	}
 	sub := &calstore.CalSubscription{
 		ID:        uuid.NewString(),
 		AccountID: requesterID(c),
@@ -189,8 +199,105 @@ func StartSubscriptionRefresher() {
 	}()
 }
 
+// ssrfSafeHTTPClient is a package-level client with a custom dialer that
+// refuses connections to private/loopback/metadata IP ranges so that a
+// user-supplied subscription URL cannot be used to probe internal services.
+var ssrfSafeHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Control: ssrfDialControl,
+		}).DialContext,
+	},
+}
+
+// ssrfAllowedSchemes limits the URL schemes accepted for .ics subscriptions.
+var ssrfAllowedSchemes = map[string]bool{"https": true, "http": true}
+
+// checkSSRFURL validates that u is safe to fetch:
+//   - scheme must be http or https (no file://, ftp://, etc.)
+//   - host must not resolve to a loopback, link-local, private, or AWS-metadata address
+//
+// This is the pre-dial check; ssrfDialControl is the defence-in-depth post-dial check.
+func checkSSRFURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if !ssrfAllowedSchemes[strings.ToLower(u.Scheme)] {
+		return fmt.Errorf("URL scheme %q not allowed; use http or https", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL has no host")
+	}
+	// Reject bare IP literals in the URL that map to private ranges.
+	if ip := net.ParseIP(host); ip != nil {
+		if isPrivateIP(ip) {
+			return fmt.Errorf("URL resolves to a private/reserved address")
+		}
+	}
+	return nil
+}
+
+// ssrfDialControl is passed as net.Dialer.Control. It fires after DNS
+// resolution (so it sees the real IP even for hostnames), and blocks the dial
+// if the resolved address is private/loopback/metadata.
+func ssrfDialControl(network, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("could not parse resolved IP %q", host)
+	}
+	if isPrivateIP(ip) {
+		return fmt.Errorf("connection to private/reserved address %s blocked (SSRF guard)", ip)
+	}
+	return nil
+}
+
+// isPrivateIP reports whether ip is in a range that should never be reached by
+// a server-side fetch of a user-supplied URL.
+func isPrivateIP(ip net.IP) bool {
+	ip4 := ip.To4()
+	// Loopback (IPv4 127.x.x.x and IPv6 ::1)
+	if ip.IsLoopback() {
+		return true
+	}
+	// Link-local (169.254.x.x used by AWS/GCP/Azure instance metadata)
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+	// Private RFC-1918 ranges: 10.x, 172.16-31.x, 192.168.x
+	if ip4 != nil {
+		switch {
+		case ip4[0] == 10:
+			return true
+		case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
+			return true
+		case ip4[0] == 192 && ip4[1] == 168:
+			return true
+		// 100.64/10 (Shared Address Space / Tailscale-style)
+		case ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127:
+			return true
+		}
+	}
+	// Unspecified (0.0.0.0 / ::)
+	if ip.IsUnspecified() {
+		return true
+	}
+	return false
+}
+
 func fetchSubscription(sub *calstore.CalSubscription) {
-	resp, err := http.Get(sub.URL) //nolint:gosec // user-supplied URL is intentional
+	// SSRF guard: pre-validate URL before any dial is attempted.
+	if err := checkSSRFURL(sub.URL); err != nil {
+		log.Printf("subscription fetch %q blocked: %v", sub.URL, err)
+		return
+	}
+	resp, err := ssrfSafeHTTPClient.Get(sub.URL) //nolint:noctx
 	if err != nil {
 		log.Printf("subscription fetch %q: %v", sub.URL, err)
 		return

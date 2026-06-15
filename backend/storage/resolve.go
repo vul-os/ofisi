@@ -195,19 +195,41 @@ func OrgBucketClient() *OfficeS3Client {
 //   - When VULOS_ORG_ID is unset: "<accountID>/<name>"  (single-org)
 //   - When accountID is empty:    omits the account segment (shared org-level object)
 //
+// Security: each segment is sanitized by sanitizeKeySegment so that a
+// caller-controlled accountID or name cannot inject path separators ("/" or
+// "..") and escape into another org's or account's key namespace.
+//
 // This is the authoritative key builder — all handlers that write to the org
 // bucket must call this function instead of constructing keys ad-hoc.
 func OrgScopedKey(accountID, name string) string {
 	orgID := strings.TrimSpace(os.Getenv(EnvOrgID))
 	var parts []string
 	if orgID != "" {
-		parts = append(parts, orgID)
+		parts = append(parts, sanitizeKeySegment(orgID))
 	}
 	if accountID != "" {
-		parts = append(parts, accountID)
+		parts = append(parts, sanitizeKeySegment(accountID))
 	}
-	parts = append(parts, name)
+	parts = append(parts, sanitizeKeySegment(name))
 	return strings.Join(parts, "/")
+}
+
+// sanitizeKeySegment strips characters that could be used to escape an
+// object-store key prefix. It collapses any "/" or "\" to "_", removes
+// leading/trailing dots, and replaces ".." sequences so a caller-supplied
+// segment cannot traverse out of its expected prefix layer.
+func sanitizeKeySegment(s string) string {
+	// Replace path separators with underscores.
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.ReplaceAll(s, "\\", "_")
+	// Collapse ".." to prevent traversal even in object-store key semantics.
+	s = strings.ReplaceAll(s, "..", "_")
+	// Trim leading/trailing dots that could create hidden-object names.
+	s = strings.Trim(s, ".")
+	if s == "" {
+		return "_"
+	}
+	return s
 }
 
 // readMinIOCreds returns (accessKey, secretKey, error) for a MinIO endpoint.

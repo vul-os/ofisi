@@ -101,16 +101,40 @@ func (h *MeetingHandler) Create(c *gin.Context) {
 }
 
 // GET /api/meetings
+// Returns only the meetings the caller is involved in: organizer or invitee.
+// Admins (ctx isAdmin=true) see all meetings.
 func (h *MeetingHandler) List(c *gin.Context) {
-	meetings, err := h.store.ListMeetings()
+	callerID := c.GetString("userID")
+	isAdmin := c.GetBool("isAdmin")
+
+	all, err := h.store.ListMeetings()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if meetings == nil {
-		meetings = []*models.Meeting{}
+
+	var out []*models.Meeting
+	for _, m := range all {
+		if isAdmin || callerID == "" {
+			// Admin or unauthenticated (auth-disabled mode) sees everything.
+			out = append(out, m)
+			continue
+		}
+		if m.OrganizerID == callerID {
+			out = append(out, m)
+			continue
+		}
+		for _, inv := range m.Invitees {
+			if inv == callerID {
+				out = append(out, m)
+				break
+			}
+		}
 	}
-	c.JSON(http.StatusOK, meetings)
+	if out == nil {
+		out = []*models.Meeting{}
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 // GET /api/meetings/:id
