@@ -12,7 +12,7 @@ routes instances across the network, with relay/TURN fallback.
 The throughline: Vulos Office never invents its own network. Collaboration,
 chat, and calling reuse the **same fabric the Vulos OS uses for device routing**
 — P2P first (cr-sqlite/CRDT sync to buckets, WebRTC for media), relay/TURN when
-direct connectivity fails. *Vula — open.*
+direct connectivity fails. *Vulos — open.*
 
 > **Stack invariants (FROZEN):** Go backend; React 18 / Vite / Tailwind frontend,
 > **JSX only — never `.tsx`**; MIT license. Collaboration transport is the Vulos
@@ -328,16 +328,34 @@ scheme. Coordinate with the multi-target build work above.
 
 ---
 
-## Audit-fix wave A + Spaces-on-LiveKit (v7.1 — 2026-05-24)
+## Current reality + near-term work (v1.1 wave — 2026-06)
 
-**Audit-fix wave A.** Two office findings from the #125 verification pass: (1) OFFICE-STORE-01 shipped a
-clean `OfficeBackendConfig` library but the running office binary still uses the legacy `storage.New`
-path — all 5 ACs are unchecked. Wire it. (2) `src/lib/fabric.js` is both statically + dynamically imported,
-defeating the vite chunk split. Tasks: `FIX-OFFICE-STORE-WIRE-01`, `FIX-VITE-FABRIC-IMPORT-01`.
+### What is live today
 
-**Video meetings — Spaces on LiveKit (Wave B).** Spaces is the Vulos chat + voice + video surface. Current
-calling uses the mesh `fabric.js` + relay TURN fallback — correct for ≤5 participants, fails past ~15.
-Rebuild on the LiveKit client SDK (MIT) for rooms >5 (Pro tier targets Google-Meet-class 500-participant
-rooms), keep mesh as the intimate-call fallback. Tokens fetched from vulos-cloud `MEET-CP-01`; SFU runs
-in the new `vulos-meet` repo (vulos-relay `MEET-CORE-01`). UI additions: speaker grid, active-speaker
-emphasis, raise-hand, breakout selector, recording toggle. Tasks: `MEET-SPACES-01`.
+- **Spaces** channels, DMs, threads, reactions, pins, search, and threading are
+  REST + durable SQLite backed (no LiveKit dependency; P2P mesh via `@vulos/relay-client`
+  for voice/video).
+- **Meetings** are collapsed to a single system: lobby + meeting join + TURN credential
+  minting via the Vulos relay circuit, P2P WebRTC mesh for ≤5 participants.
+- **Calendar** and **Contacts** are durable, account-scoped, SQLite-backed.
+- **Org-bucket wiring** (`OfficeBackendConfig`) is defined and injectable; the running
+  binary still falls back to `storage.New` — wiring is the next task.
+- **Security**: .ics SSRF guard, meeting-list scoping, per-file ACLs.
+- **CRDT**: client-side CRDT modules (`src/lib/crdt/`) and the Spaces message store
+  (`backend/spaces/store.go`) are live. Live P2P document sync over the peer fabric
+  is **dormant** — the Go CRDT engine was removed; the live path is REST + persistence.
+
+### Near-term items
+
+- **Wire `OfficeBackendConfig`** (`FIX-OFFICE-STORE-WIRE-01`): plumb the per-org S3
+  endpoint + credentials from the control plane into the running binary so the
+  Tigris/MinIO backend is actually selected at runtime.
+- **Live P2P document collab over the relay** (`COLLAB-FABRIC-01`): re-introduce the
+  CRDT doc-sync channel over the Vulos relay fabric (WebRTC data channels + relay
+  fallback). This is the **real** Section 2 of the roadmap — currently dormant.
+- **Vite chunk fix** (`FIX-VITE-FABRIC-IMPORT-01`): `src/lib/fabric.js` is both
+  statically and dynamically imported, defeating the Vite chunk split. Normalise
+  to dynamic-only.
+- **Large-room calling** (`MEET-LARGE-ROOM-01`): P2P mesh degrades past ~5
+  participants. A self-hostable SFU (via vulos-relay) is the path for Pro-tier
+  large rooms. Timeline TBD pending relay SFU readiness.

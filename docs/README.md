@@ -12,7 +12,7 @@
 ## Quick Links
 
 - Backend: `main.go` (Gin HTTP server)
-- CRDT engine: `backend/crdt/`
+- Spaces CRDT store: `backend/spaces/store.go`
 - File/version API: `backend/handlers/`
 - Signing: `backend/signing/`
 - Observability: `backend/obs/` + `/metrics`

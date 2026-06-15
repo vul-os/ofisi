@@ -143,10 +143,9 @@ func (rl *IPRateLimiter) GinMiddleware() func(w http.ResponseWriter, r *http.Req
 }
 
 // ReactionRateLimiter is a per-peer sliding-window rate limiter for reaction
-// signals (10 reactions per 10 seconds per peer). Called by the SFU/signaling
-// layer before relaying a reaction event. In the current architecture reactions
-// travel peer-to-peer over WebRTC DataChannel and never transit the server, so
-// this limiter is available for future SFU integration.
+// signals (10 reactions per 10 seconds per peer). In the current architecture
+// reactions travel peer-to-peer over WebRTC DataChannel and never transit the
+// server, so this limiter is reserved for future signaling-relay integration.
 //
 // P2P mesh limitation: when reactions are sent over direct DataChannel (no
 // server intermediation) a malicious peer can bypass this counter. Mitigation:

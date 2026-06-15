@@ -21,6 +21,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Version is set at build time via -ldflags "-X main.Version=vX.Y.Z".
+// It defaults to "dev" for local builds.
+var Version = "dev"
+
 //go:embed all:dist
 var distFS embed.FS
 
@@ -36,7 +40,12 @@ func main() {
 		runMigrateCredential(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Println(Version)
+		return
+	}
 
+	log.Printf("vulos-office %s starting", Version)
 	obs.Init()
 
 	cfg, err := config.Load("config.yaml")
@@ -107,6 +116,11 @@ func main() {
 
 	// Prometheus metrics (no auth required).
 	r.GET("/metrics", gin.WrapH(obs.Handler()))
+
+	// Build-time version (no auth required).
+	r.GET("/version", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"version": Version})
+	})
 
 	// Auth routes (unauthenticated)
 	authHandler := handlers.NewAuthHandler(cfg)
@@ -281,38 +295,38 @@ func main() {
 	handlers.StartReminderWorker(nil)
 	handlers.StartSubscriptionRefresher()
 
-	// OFFICE-60/61: Vulos Spaces — channels, DMs, threads, messages (CRDT-synced).
+	// OFFICE-60/61: Vulos Spaces — channels, DMs, threads, messages.
 	// OFFICE-SPACES-1/4/5/6: reactions, status, search, pins (additive via SpacesHandlerExt).
-	forumHandler := handlers.NewSpacesHandlerExt()
-	protected.GET("/spaces/channels", forumHandler.ListChannels)
-	protected.POST("/spaces/channels", forumHandler.CreateChannel)
-	protected.POST("/spaces/channels/:channelId/join", forumHandler.JoinChannel)
-	protected.GET("/spaces/channels/:channelId/members", forumHandler.ListMembers)
-	protected.PUT("/spaces/channels/:channelId/members/me/name", forumHandler.SetMyDisplayName)
-	protected.GET("/spaces/channels/:channelId/messages", forumHandler.ListMessages)
-	protected.POST("/spaces/channels/:channelId/messages", forumHandler.SendMessage)
-	protected.PUT("/spaces/channels/:channelId/messages/:msgId", forumHandler.EditMessage)
-	protected.DELETE("/spaces/channels/:channelId/messages/:msgId", forumHandler.DeleteMessage)
-	protected.POST("/spaces/channels/:channelId/read", forumHandler.MarkRead)
-	protected.GET("/spaces/channels/:channelId/read", forumHandler.GetReadState)
-	protected.GET("/spaces/channels/:channelId/ops", forumHandler.ExportOps)
-	protected.POST("/spaces/ops", forumHandler.MergeOps)
+	spacesHandler := handlers.NewSpacesHandlerExt()
+	protected.GET("/spaces/channels", spacesHandler.ListChannels)
+	protected.POST("/spaces/channels", spacesHandler.CreateChannel)
+	protected.POST("/spaces/channels/:channelId/join", spacesHandler.JoinChannel)
+	protected.GET("/spaces/channels/:channelId/members", spacesHandler.ListMembers)
+	protected.PUT("/spaces/channels/:channelId/members/me/name", spacesHandler.SetMyDisplayName)
+	protected.GET("/spaces/channels/:channelId/messages", spacesHandler.ListMessages)
+	protected.POST("/spaces/channels/:channelId/messages", spacesHandler.SendMessage)
+	protected.PUT("/spaces/channels/:channelId/messages/:msgId", spacesHandler.EditMessage)
+	protected.DELETE("/spaces/channels/:channelId/messages/:msgId", spacesHandler.DeleteMessage)
+	protected.POST("/spaces/channels/:channelId/read", spacesHandler.MarkRead)
+	protected.GET("/spaces/channels/:channelId/read", spacesHandler.GetReadState)
+	protected.GET("/spaces/channels/:channelId/ops", spacesHandler.ExportOps)
+	protected.POST("/spaces/ops", spacesHandler.MergeOps)
 	// Reactions (OFFICE-SPACES-1)
-	protected.GET("/spaces/channels/:channelId/reactions", forumHandler.ListReactions)
-	protected.POST("/spaces/messages/:msgId/react", forumHandler.React)
-	protected.DELETE("/spaces/messages/:msgId/react", forumHandler.Unreact)
+	protected.GET("/spaces/channels/:channelId/reactions", spacesHandler.ListReactions)
+	protected.POST("/spaces/messages/:msgId/react", spacesHandler.React)
+	protected.DELETE("/spaces/messages/:msgId/react", spacesHandler.Unreact)
 	// Pins (OFFICE-SPACES-6)
-	protected.GET("/spaces/channels/:channelId/pins", forumHandler.ListPins)
-	protected.POST("/spaces/channels/:channelId/pins", forumHandler.PinMessage)
-	protected.DELETE("/spaces/channels/:channelId/pins/:msgId", forumHandler.UnpinMessage)
+	protected.GET("/spaces/channels/:channelId/pins", spacesHandler.ListPins)
+	protected.POST("/spaces/channels/:channelId/pins", spacesHandler.PinMessage)
+	protected.DELETE("/spaces/channels/:channelId/pins/:msgId", spacesHandler.UnpinMessage)
 	// User status (OFFICE-SPACES-4)
-	protected.PUT("/spaces/users/me/status", forumHandler.SetStatus)
-	protected.GET("/spaces/users/:userId/status", forumHandler.GetStatus)
+	protected.PUT("/spaces/users/me/status", spacesHandler.SetStatus)
+	protected.GET("/spaces/users/:userId/status", spacesHandler.GetStatus)
 	// Search (OFFICE-SPACES-5) — FTS5-backed when the Persister supports it.
-	protected.GET("/spaces/channels/:channelId/search", forumHandler.SearchMessages)
+	protected.GET("/spaces/channels/:channelId/search", spacesHandler.SearchMessages)
 	// Threading: thread view + thread-scoped reply.
-	protected.GET("/spaces/channels/:channelId/threads/:parentId", forumHandler.ListThread)
-	protected.POST("/spaces/channels/:channelId/threads/:parentId/reply", forumHandler.ReplyThread)
+	protected.GET("/spaces/channels/:channelId/threads/:parentId", spacesHandler.ListThread)
+	protected.POST("/spaces/channels/:channelId/threads/:parentId/reply", spacesHandler.ReplyThread)
 
 	// Serve embedded frontend (SPA fallback to index.html)
 	staticFS, err := fs.Sub(distFS, "dist")

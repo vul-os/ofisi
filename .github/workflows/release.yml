@@ -1,0 +1,125 @@
+# .github/workflows/release.yml — build and publish a GitHub Release
+#
+# Triggers on:  push of a tag matching v* (e.g. v1.0.0, v1.2.3-rc.1)
+#
+# Jobs:
+#   release  — cross-compile the Go binary (linux/amd64 + linux/arm64),
+#              build the @vulos/office-client library, generate SHA-256
+#              checksums, create a GitHub Release with all artifacts,
+#              and optionally publish to npm (gated on NPM_TOKEN secret).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Write access needed to create the GitHub Release.
+permissions:
+  contents: write
+
+jobs:
+
+  release:
+    name: Build + publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── Toolchain ─────────────────────────────────────────────────────────────
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      # ── Derive version string from the pushed tag ─────────────────────────────
+      - name: Set version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building release ${VERSION}"
+
+      # ── Frontend: full build + library build ──────────────────────────────────
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build frontend (all targets)
+        run: npm run build:all
+
+      - name: Run frontend tests
+        run: npm test
+
+      # ── Go backend: tests + cross-compile ──────────────────────────────────────
+      - name: Go test
+        run: go test -short ./...
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Cross-compile linux/amd64
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o vulos-office-linux-amd64 \
+            .
+
+      - name: Cross-compile linux/arm64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: '0'
+        run: |
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o vulos-office-linux-arm64 \
+            .
+
+      # ── Checksums ─────────────────────────────────────────────────────────────
+      - name: Generate SHA-256 checksums
+        run: |
+          sha256sum \
+            vulos-office-linux-amd64 \
+            vulos-office-linux-arm64 \
+            > checksums.txt
+          cat checksums.txt
+
+      # ── GitHub Release ─────────────────────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Vulos Office ${{ steps.version.outputs.version }}"
+          generate_release_notes: true
+          files: |
+            vulos-office-linux-amd64
+            vulos-office-linux-arm64
+            checksums.txt
+
+      # ── npm publish (gated — skip gracefully when secret is absent) ────────────
+      # Set the NPM_TOKEN repository secret to enable publishing @vulos/office-client.
+      - name: Publish @vulos/office-client to npm
+        if: ${{ env.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
