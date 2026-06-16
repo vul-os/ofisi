@@ -42,6 +42,23 @@ func NewVerifyHandler(store storage.Storage) *VerifyHandler {
 	return &VerifyHandler{store: store}
 }
 
+// PublicKey — GET /api/sign/pubkey
+// Returns the server's Ed25519 public key in base64.  Callers can use this to
+// independently verify any Ed25519 token produced by OFFICE-44 without
+// contacting the server again.
+func (h *VerifyHandler) PublicKey(c *gin.Context) {
+	pub, err := signing.PublicKeyBase64()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "signing key not initialised"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"algorithm":  "Ed25519",
+		"public_key": pub,
+		"note":       "Use this key to independently verify OFFICE-44 signature tokens.",
+	})
+}
+
 // ─────────────────────────────────────────────────────────
 // Response types
 // ─────────────────────────────────────────────────────────
@@ -147,23 +164,44 @@ func verifyPDFBytes(pdfBytes []byte) VerifyResponse {
 	report.FinalHash = manifest.FinalHash
 	report.TotalEvents = len(manifest.AuditEvents)
 
-	// ── Step 2: re-hash the PDF with the manifest stream replaced by zeros ──
-	// The manifest.final_doc_hash was computed AFTER attaching the manifest,
-	// so we must re-hash the raw uploaded bytes as-is and compare.
-	// However, the FinalHash in the manifest itself was recorded before the
-	// manifest JSON was written (chicken-and-egg), so what we actually verify is:
-	//   sha256(pdfBytes) == manifest.final_doc_hash
-	// If the sealed PDF was built by OFFICE-46 correctly this holds.
-	// If any byte outside the manifest stream changed, the hash won't match.
-	_ = manifestStart
-	_ = manifestEnd
-	actualHash := sha256Hex(pdfBytes)
+	// ── Step 2: re-hash the pre-manifest portion of the PDF ──
+	//
+	// Design (see seal.go buildSealedPDF):
+	//   FinalDocHash = SHA-256( sourcePDF + certificate-page )
+	//                = SHA-256( pdfBytes[0 : manifestStart] )
+	//
+	// The manifest is appended AFTER the cert-page PDF as an incremental update,
+	// so the bytes before the manifest stream are exactly the cert-page PDF whose
+	// hash was recorded in manifest.final_doc_hash.  Re-hashing those bytes and
+	// comparing to manifest.final_doc_hash proves that the original signed content
+	// was not altered.  Any change to the pre-manifest bytes (content, signer
+	// data, certificate page) will produce a different hash.
+	//
+	// Note: manifestStart is the offset of the EmbeddedFile stream DATA (inside
+	// the "stream\n" ... "endstream" block).  The incremental xref section that
+	// wraps the manifest starts earlier (at the "\n10101 0 obj" line).  We want
+	// to hash everything up to (but not including) the manifest's incremental
+	// update section.  A robust way: find the "\n10101 0 obj" marker that
+	// attachManifest writes (objBase 10100+1 = 10101).
+	const attachObjMarker = "\n10101 0 obj"
+	attachIdx := bytes.Index(pdfBytes, []byte(attachObjMarker))
+	var preSealBytes []byte
+	if attachIdx > 0 {
+		preSealBytes = pdfBytes[:attachIdx]
+	} else if manifestStart > 0 {
+		// Fallback: use the raw stream start if obj marker not found.
+		preSealBytes = pdfBytes[:manifestStart]
+	} else {
+		preSealBytes = pdfBytes
+	}
+	actualHash := sha256Hex(preSealBytes)
 	if actualHash == manifest.FinalHash {
 		report.HashMatch = true
 	} else {
 		report.HashMatch = false
 		report.HashErr = fmt.Sprintf("PDF hash mismatch: got %s want %s", actualHash, manifest.FinalHash)
 	}
+	_ = manifestEnd
 
 	// ── Step 3: verify audit hash-chain ──
 	if len(manifest.AuditEvents) > 0 {

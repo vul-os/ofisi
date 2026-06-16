@@ -106,7 +106,7 @@ func (h *SigningHandler) Send(c *gin.Context) {
 		// Non-fatal — tokens are already issued.
 	}
 
-	// Emit a "sent" audit event for the envelope.
+	// Emit a "sent" audit event for the envelope (hash-chained).
 	sentEvent := &models.AuditEvent{
 		ID:         uuid.New().String(),
 		EnvelopeID: envelopeID,
@@ -115,7 +115,7 @@ func (h *SigningHandler) Send(c *gin.Context) {
 		IP:         c.ClientIP(),
 		Identity:   identityFromContext(c),
 	}
-	_ = h.store.AppendAuditEvent(sentEvent)
+	_, _ = appendChainedAuditEvent(h.store, sentEvent)
 
 	c.JSON(http.StatusOK, gin.H{
 		"envelope_id": envelopeID,
@@ -213,7 +213,7 @@ func (h *SigningHandler) GetSignerView(c *gin.Context) {
 			IP:         c.ClientIP(),
 			Identity:   fmt.Sprintf("link:%s", token[:8]),
 		}
-		_ = h.store.AppendAuditEvent(viewedEvent)
+		_, _ = appendChainedAuditEvent(h.store, viewedEvent)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -333,20 +333,9 @@ func (h *SigningHandler) Complete(c *gin.Context) {
 		return
 	}
 
-	// --- Build hash-chain: load prior events, compute prevHash ---
-	priorEvents, err := h.store.ListAuditEvents(envelopeID)
-	if err != nil {
-		// Non-fatal: chain will start fresh if list fails.
-		priorEvents = nil
-	}
-	chainInputs := auditEventsToChainInputs(priorEvents)
-	prevHash, err := signing.LatestEventHash(chainInputs)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("compute prev event hash: %v", err)})
-		return
-	}
-
 	// --- Persist "signed" audit event (immutable, hash-chained) ---
+	// appendChainedAuditEvent loads prior events, computes prevHash, sets
+	// PrevEventHash on signedEvent, and appends it atomically.
 	signedEvent := &models.AuditEvent{
 		ID:            uuid.New().String(),
 		EnvelopeID:    envelopeID,
@@ -358,9 +347,8 @@ func (h *SigningHandler) Complete(c *gin.Context) {
 		DocHashBefore: docHashBefore,
 		DocHashAfter:  docHashAfter,
 		Token:         cryptoToken,
-		PrevEventHash: prevHash,
 	}
-	if err := h.store.AppendAuditEvent(signedEvent); err != nil {
+	if _, err := appendChainedAuditEvent(h.store, signedEvent); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("append audit event: %v", err)})
 		return
 	}
@@ -398,7 +386,7 @@ func (h *SigningHandler) Complete(c *gin.Context) {
 		"doc_hash_after":  docHashAfter,
 		"crypto_token":    cryptoToken,
 		"audit_event_id":  signedEvent.ID,
-		"prev_event_hash": prevHash,
+		"prev_event_hash": signedEvent.PrevEventHash,
 	})
 }
 
@@ -422,6 +410,45 @@ func auditEventsToChainInputs(events []*models.AuditEvent) []signing.AuditChainI
 		})
 	}
 	return inputs
+}
+
+// appendChainedAuditEvent loads prior events, computes the prev-event hash, sets
+// it on ev, then appends ev to the store.  ev must have all fields populated
+// except PrevEventHash.  Returns the new chain hash (for callers that want it)
+// and any error from the append.
+//
+// This ensures EVERY audit event participates in the tamper-evident hash chain,
+// not just "signed" events.  Callers may ignore the returned hash value.
+func appendChainedAuditEvent(store storage.Storage, ev *models.AuditEvent) (string, error) {
+	priorEvents, err := store.ListAuditEvents(ev.EnvelopeID)
+	if err != nil {
+		priorEvents = nil // non-fatal: chain starts fresh
+	}
+	chainInputs := auditEventsToChainInputs(priorEvents)
+	prevHash, err := signing.LatestEventHash(chainInputs)
+	if err != nil {
+		return "", fmt.Errorf("compute prev event hash: %w", err)
+	}
+	ev.PrevEventHash = prevHash
+	if err := store.AppendAuditEvent(ev); err != nil {
+		return "", err
+	}
+	// Compute and return the hash of the just-appended event.
+	newInput := signing.AuditChainInput{
+		ID:            ev.ID,
+		EnvelopeID:    ev.EnvelopeID,
+		SignerID:      ev.SignerID,
+		Action:        string(ev.Action),
+		Timestamp:     ev.Timestamp,
+		IP:            ev.IP,
+		Identity:      ev.Identity,
+		DocHashBefore: ev.DocHashBefore,
+		DocHashAfter:  ev.DocHashAfter,
+		Token:         ev.Token,
+		PrevEventHash: ev.PrevEventHash,
+	}
+	h, _ := signing.HashEvent(newInput)
+	return h, nil
 }
 
 // identityFromContext extracts a Vulos account identity from the request if

@@ -8,6 +8,44 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased] — 2026-06-16
 
+### Fixed (PDF signing pipeline — Wave G)
+- **SEAL-HASH-FIX**: Fixed a circular-dependency bug in the seal→verify hash design.  
+  Previously `FinalDocHash` was computed *after* attaching the manifest JSON to the PDF,
+  meaning the manifest already embedded inside the PDF contained a *stale* hash and
+  `sha256(sealedPDF) ≠ manifest.final_doc_hash` on every round-trip — all verify
+  calls returned `hash_match=false`.  
+  Fix: `FinalDocHash = sha256(certPDF[:lastEOF])` (computed before manifest attachment);
+  verify.go re-extracts the pre-manifest slice from the sealed PDF using the manifest
+  object marker and re-hashes it to confirm. (`seal.go`, `verify.go`)
+- **SEAL-XREF-OFFSET-FIX**: Fixed `startXref` offset recorded in incremental PDF
+  updates (`appendCertificatePage`, `attachManifest`).  The offset was captured at the
+  start of the base section (before the new objects were written) instead of at the
+  position of the `xref` keyword.  PDF readers using the `startxref` value to locate
+  the cross-reference table would jump to the wrong offset.  (`seal.go`)
+- **CHAIN-ALL-EVENTS**: All audit events (created, sent, viewed, signed, declined,
+  voided, completed) now participate in the tamper-evident hash chain, not just
+  `signed` events.  New `appendChainedAuditEvent` helper in `signing.go` loads prior
+  events, computes `prev_event_hash`, and appends atomically — called from
+  `envelopes.go`, `signing.go`, `orchestration.go`, and `seal.go`.
+
+### Added (PDF signing pipeline — Wave G)
+- **PUBKEY-ENDPOINT**: `GET /api/sign/pubkey` returns the server's Ed25519 public key
+  in base64 so external parties can independently verify OFFICE-44 signature tokens
+  without contacting the server again.  (`verify.go`, `main.go`)
+- **SEAL-VERIFY-TESTS**: 10 new end-to-end tests in `backend/handlers/seal_verify_test.go`
+  covering the full sign → seal → verify round-trip, tamper detection (byte-flip in
+  pre-manifest area), HTTP multipart verify endpoint (200 clean / 422 tampered),
+  verify-by-envelope-id, pubkey endpoint, download gate (409 before all signed),
+  manifest FinalHash presence, chain-broken detection, and idempotent sealing.
+- **DASHBOARD-DOWNLOAD-VERIFY**: `EnvelopeDashboard.jsx` — completed envelopes gain a
+  Download sealed PDF anchor (⬇) and a Verify document integrity button (🛡) in the
+  action toolbar.  Clicking Verify runs `api.verifyEnvelope` inline and shows a
+  pass/fail verdict in the expanded signer panel without leaving the page.
+- **SIGNVIEW-VERIFY-LINK**: `SignView.jsx` done-screen now includes a quiet link to
+  `/verify` so signers know where to validate the sealed document once all parties sign.
+- **API-SIGNING-HELPERS**: `api.js` adds `sealedPDFUrl(envelopeId)`, 
+  `verifyEnvelope(envelopeId)`, and `signingPublicKey()`.
+
 ### Added
 - **DOCS-SUB-SUP**: Subscript (`X₂`) and Superscript (`X²`) toolbar buttons in `DocsToolbar.jsx`.
   - Implemented as lightweight inline `Mark.create()` extensions (`Subscript`, `Superscript`) in `DocsEditor.jsx` — no extra npm packages; renders `<sub>`/`<sup>` HTML.

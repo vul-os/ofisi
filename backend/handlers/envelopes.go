@@ -149,14 +149,16 @@ func (h *EnvelopeHandler) Create(c *gin.Context) {
 	// private by default even when SourceFileID is empty/unowned.
 	h.authz.recordOwner(c, env.ID)
 
-	// Emit a "created" audit event.
+	// Emit a "created" audit event (hash-chained — first event, prev="" by design).
 	audit := &models.AuditEvent{
 		ID:         uuid.New().String(),
 		EnvelopeID: env.ID,
 		Action:     models.AuditActionCreated,
 		Timestamp:  now,
+		Identity:   identityFromContext(c),
+		IP:         c.ClientIP(),
 	}
-	_ = h.store.AppendAuditEvent(audit) // best-effort
+	_, _ = appendChainedAuditEvent(h.store, audit) // best-effort
 
 	c.JSON(http.StatusCreated, env)
 }

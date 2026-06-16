@@ -229,6 +229,8 @@ func main() {
 	// OFFICE-47: signature + audit verification tool (public — no auth required).
 	verifyHandler := handlers.NewVerifyHandler(store)
 	api.POST("/sign/verify", verifyHandler.Verify)
+	// PublicKey — expose server Ed25519 public key for independent token verification.
+	api.GET("/sign/pubkey", verifyHandler.PublicKey)
 
 	// SLIDES-07: slide deck PDF/PPTX export.
 	slidesExportHandler := handlers.NewSlidesExportHandler(store)

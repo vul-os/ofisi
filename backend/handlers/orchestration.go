@@ -264,7 +264,7 @@ func (h *OrchestrationHandler) Cancel(c *gin.Context) {
 		IP:         c.ClientIP(),
 		Identity:   identityFromContext(c),
 	}
-	_ = h.store.AppendAuditEvent(cancelEvent)
+	_, _ = appendChainedAuditEvent(h.store, cancelEvent)
 
 	c.JSON(http.StatusOK, gin.H{"envelope_id": envelopeID, "status": env.Status})
 }
@@ -337,7 +337,7 @@ func (h *OrchestrationHandler) Decline(c *gin.Context) {
 		IP:         c.ClientIP(),
 		Identity:   identity,
 	}
-	_ = h.store.AppendAuditEvent(declineEvent)
+	_, _ = appendChainedAuditEvent(h.store, declineEvent)
 
 	log.Printf("[DECLINE] envelope=%s signer=%s (%s) — envelope voided", envelopeID, signerID, signer.Email)
 

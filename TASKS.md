@@ -16,7 +16,15 @@ backend storage + organiser download), real PPTX import (JSZip OOXML parser), de
 Wave F (2026-06-16): Google Docs/Sheets/Slides parity quality pass — subscript/superscript (inline
 Mark extensions), Ctrl+P print shortcut, custom font-size text input, HTML export, line-spacing
 fixed to paragraph-level updateAttributes, Sheets Find & Replace (Ctrl+F / Ctrl+H, SheetsFindReplace.jsx),
-Slides toolbar undo/redo + strikethrough + link + font-size + heading selector, 41 new tests (272 total).
+Slides toolbar undo/redo + strikethrough + font-size + heading selector, 41 new tests (272 total).
+Wave G (2026-06-16): PDF signing pipeline quality + trust hardening — fixed two critical bugs
+(startXref offset wrong in incremental PDF updates; hash circular-dependency in seal→verify round-trip
+made all verify calls return hash_match=false); chain ALL audit events (created/sent/viewed/declined/voided/completed)
+not just signed; new `appendChainedAuditEvent` shared helper; public Ed25519 pubkey endpoint
+(GET /api/sign/pubkey) for independent token verification; 10 new end-to-end seal+verify tests
+(round-trip, tamper detection, chain integrity, HTTP endpoints, idempotency, gating);
+EnvelopeDashboard gains Download + Verify affordances on completed envelopes; SignView done-screen
+links to /verify; api.js adds sealedPDFUrl / verifyEnvelope / signingPublicKey.
 **Remaining open:** Multi-target subdomain + OS-embed lib build (P2 · L — owned by subdomain agent).
 
 Actionable work for autonomous coding agents, grouped by area and

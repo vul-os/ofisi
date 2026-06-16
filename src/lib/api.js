@@ -247,6 +247,19 @@ export const api = {
   signerDecline: (token) =>
     request(`/sign/${token}/decline`, { method: 'POST', body: '{}' }),
 
+  // OFFICE-46: sealed PDF download URL (use as <a href> or window.open)
+  sealedPDFUrl: (envelopeId) => apiUrl(`/sign/${envelopeId}/download`),
+
+  // OFFICE-47: verify a sealed PDF by envelope id
+  verifyEnvelope: (envelopeId) =>
+    request('/sign/verify', {
+      method: 'POST',
+      body: JSON.stringify({ envelope_id: envelopeId }),
+    }),
+
+  // OFFICE-47: server public key for independent token verification
+  signingPublicKey: () => request('/sign/pubkey'),
+
   // Docs export: returns a Blob for download (PDF or DOCX)
   exportDoc: async (fileId, format) => {
     const base = await apiBase()

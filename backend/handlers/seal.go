@@ -163,17 +163,17 @@ func (h *SealHandler) Download(c *gin.Context) {
 	env.UpdatedAt = time.Now()
 	_ = h.store.UpdateEnvelope(env)
 
-	// Append a "completed" audit event.
+	// Append a "completed" audit event (hash-chained).
 	completedEvent := &models.AuditEvent{
-		ID:         uuid.New().String(),
-		EnvelopeID: envelopeID,
-		Action:     models.AuditActionCompleted,
-		Timestamp:  manifest.SealedAt,
-		IP:         c.ClientIP(),
-		Identity:   identityFromContext(c),
+		ID:           uuid.New().String(),
+		EnvelopeID:   envelopeID,
+		Action:       models.AuditActionCompleted,
+		Timestamp:    manifest.SealedAt,
+		IP:           c.ClientIP(),
+		Identity:     identityFromContext(c),
 		DocHashAfter: manifest.FinalHash,
 	}
-	_ = h.store.AppendAuditEvent(completedEvent)
+	_, _ = appendChainedAuditEvent(h.store, completedEvent)
 
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="sealed-%s.pdf"`, envelopeID))
 	c.Data(http.StatusOK, "application/pdf", sealedBytes)
@@ -213,12 +213,20 @@ func (h *SealHandler) Manifest(c *gin.Context) {
 		return
 	}
 
-	manifest := buildManifest(env, events, "")
+	// Use the stored FinalDocHash when available (set by Download after sealing).
+	manifest := buildManifest(env, events, env.FinalDocHash)
 	c.JSON(http.StatusOK, manifest)
 }
 
 // ------------------------------------------------------------
 // buildSealedPDF assembles the final PDF bytes.
+//
+// Hash design (avoids the chicken-and-egg problem):
+//   FinalDocHash = SHA-256(sourcePDF + certificate-page)   — computed BEFORE the
+//   manifest is embedded.  The manifest JSON records this hash, and when the
+//   manifest is later attached the full PDF bytes change, but the hash field does
+//   not.  Verification re-extracts the manifest, reads FinalDocHash, and then
+//   re-hashes the pre-manifest portion of the PDF to confirm they match.
 // ------------------------------------------------------------
 func (h *SealHandler) buildSealedPDF(env *models.Envelope) ([]byte, *AuditManifest, error) {
 	// 1. Load source PDF bytes.
@@ -237,30 +245,41 @@ func (h *SealHandler) buildSealedPDF(env *models.Envelope) ([]byte, *AuditManife
 	}
 
 	// 4. Build the completion-certificate page as a PDF page appended to sourcePDF.
-	sealedBytes, err := appendCertificatePage(sourcePDF, env, events, preHash)
+	certPDF, err := appendCertificatePage(sourcePDF, env, events, preHash)
 	if err != nil {
 		return nil, nil, fmt.Errorf("append certificate page: %w", err)
 	}
 
-	// 5. Final hash of sealed PDF.
-	finalHash := sha256hex(sealedBytes)
+	// 5. FinalDocHash = SHA-256 of the PDF base bytes that attachManifest uses.
+	//    attachManifest strips from the last %%EOF onwards before writing the
+	//    manifest objects.  We hash certPDF[0:lastEOFpos] — exactly what gets
+	//    preserved verbatim in sealedBytes before the manifest attachment section.
+	//    verify.go re-extracts the same prefix from sealedBytes by finding the
+	//    manifest attachment marker, producing the same hash without the circular
+	//    dependency of a hash that covers its own manifest record.
+	certEOFIdx := bytes.LastIndex(certPDF, []byte("%%EOF"))
+	var certBase []byte
+	if certEOFIdx >= 0 {
+		certBase = certPDF[:certEOFIdx]
+	} else {
+		certBase = certPDF
+	}
+	finalHash := sha256hex(certBase)
 
-	// 6. Assemble manifest.
+	// 6. Assemble manifest (FinalHash = hash of certPDF, not of the final PDF).
 	manifest := buildManifest(env, events, finalHash)
-	manifest.FinalHash = finalHash
 
-	// 7. Attach the manifest JSON as a named embedded-file stream inside the PDF.
+	// 7. Attach the manifest JSON as a named embedded-file stream inside certPDF.
+	//    The manifest already contains the correct FinalHash; attaching it does
+	//    not change that field.
 	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal manifest: %w", err)
 	}
-	sealedBytes, err = attachManifest(sealedBytes, manifestJSON)
+	sealedBytes, err := attachManifest(certPDF, manifestJSON)
 	if err != nil {
 		return nil, nil, fmt.Errorf("attach manifest: %w", err)
 	}
-
-	// 8. Recompute final hash after manifest attachment.
-	manifest.FinalHash = sha256hex(sealedBytes)
 
 	return sealedBytes, manifest, nil
 }
@@ -393,8 +412,6 @@ func appendCertificatePage(src []byte, env *models.Envelope, events []*models.Au
 	contentObjNum := objBase + 1
 	pageObjNum := objBase + 2
 
-	startXref := buf.Len()
-
 	// Object: content stream.
 	contentStart := buf.Len()
 	fmt.Fprintf(&buf, "\n%d 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n",
@@ -405,6 +422,10 @@ func appendCertificatePage(src []byte, env *models.Envelope, events []*models.Au
 	fmt.Fprintf(&buf, "\n%d 0 obj\n<< /Type /Page /MediaBox [0 0 595 842] /Contents %d 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F1B << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> >> >> >>\nendobj\n",
 		pageObjNum, contentObjNum)
 
+	// startXref must point to the byte offset of the "xref" keyword in THIS
+	// incremental update — i.e., the position AFTER the objects, not before them.
+	startXref := buf.Len()
+
 	// Minimal cross-reference table for incremental update.
 	fmt.Fprintf(&buf, "\nxref\n%d 2\n", contentObjNum)
 	fmt.Fprintf(&buf, "%010d 00000 n \n", contentStart)
@@ -413,7 +434,6 @@ func appendCertificatePage(src []byte, env *models.Envelope, events []*models.Au
 	fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root 1 0 R >>\n", pageObjNum+1)
 	fmt.Fprintf(&buf, "startxref\n%d\n%%%%EOF\n", startXref)
 
-	_ = startXref // already used in startxref write above
 	return buf.Bytes(), nil
 }
 
@@ -542,8 +562,6 @@ func attachManifest(src []byte, manifestJSON []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	buf.Write(base)
 
-	startXref := buf.Len()
-
 	// Object: embedded file stream.
 	fsStart := buf.Len()
 	fmt.Fprintf(&buf, "\n%d 0 obj\n<< /Type /EmbeddedFile /Subtype /application#2Fjson /Length %d >>\nstream\n",
@@ -555,6 +573,9 @@ func attachManifest(src []byte, manifestJSON []byte) ([]byte, error) {
 	fsSpecStart := buf.Len()
 	fmt.Fprintf(&buf, "\n%d 0 obj\n<< /Type /Filespec /F (audit-manifest.json) /EF << /F %d 0 R >> >>\nendobj\n",
 		fileSpecObj, fileStreamObj)
+
+	// startXref must point to the "xref" keyword below, not to fsStart.
+	startXref := buf.Len()
 
 	// Incremental xref.
 	fmt.Fprintf(&buf, "\nxref\n%d 2\n", fileStreamObj)

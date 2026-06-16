@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   FileSignature, Clock, CheckCircle2, XCircle, AlertCircle,
   RefreshCw, Bell, Trash2, ChevronDown, ChevronUp, Users,
+  Download, ShieldCheck,
 } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { Button, Card, IconButton, Tooltip } from './ui'
@@ -94,6 +95,9 @@ function EnvelopeRow({ envelope, onRemind, onCancel, onRefresh }) {
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [verifyResult, setVerifyResult] = useState(null)
+  const [verifyLoading, setVerifyLoading] = useState(false)
+  const [verifyError, setVerifyError] = useState(null)
 
   const loadStatus = useCallback(async () => {
     setLoading(true)
@@ -107,6 +111,21 @@ function EnvelopeRow({ envelope, onRemind, onCancel, onRefresh }) {
       setLoading(false)
     }
   }, [envelope.id])
+
+  const onVerify = useCallback(async () => {
+    setVerifyLoading(true)
+    setVerifyError(null)
+    setVerifyResult(null)
+    if (!expanded) setExpanded(true)
+    try {
+      const data = await api.verifyEnvelope(envelope.id)
+      setVerifyResult(data)
+    } catch (e) {
+      setVerifyError(e.message || 'Verification failed')
+    } finally {
+      setVerifyLoading(false)
+    }
+  }, [envelope.id, expanded])
 
   useEffect(() => {
     if (expanded && !status) loadStatus()
@@ -183,6 +202,31 @@ function EnvelopeRow({ envelope, onRemind, onCancel, onRefresh }) {
               </Tooltip>
             </>
           )}
+          {envelope.status === 'completed' && (
+            <>
+              <Tooltip label="Download sealed PDF">
+                {/* anchor styled like IconButton — sm size h-7 w-7 */}
+                <a
+                  href={api.sealedPDFUrl(envelope.id)}
+                  download={`sealed-${envelope.id}.pdf`}
+                  className="inline-flex items-center justify-center shrink-0 h-7 w-7 rounded-md text-ink-muted transition-[background,color] duration-fast ease-out hover:bg-success-bg hover:text-success"
+                  title="Download sealed PDF"
+                  aria-label="Download sealed PDF"
+                >
+                  <Download size={13} />
+                </a>
+              </Tooltip>
+              <Tooltip label="Verify document integrity">
+                <IconButton
+                  size="sm"
+                  onClick={onVerify}
+                  className="hover:bg-accent-tint hover:text-accent"
+                >
+                  <ShieldCheck size={13} />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
           <Tooltip label="Refresh">
             <IconButton
               size="sm"
@@ -197,7 +241,7 @@ function EnvelopeRow({ envelope, onRemind, onCancel, onRefresh }) {
         </div>
       </div>
 
-      {/* Expanded signer list */}
+      {/* Expanded signer list + verify panel */}
       {expanded && (
         <div className="border-t border-line px-4 py-3 bg-bg-elev2 animate-fade-in">
           {loading && (
@@ -225,6 +269,42 @@ function EnvelopeRow({ envelope, onRemind, onCancel, onRefresh }) {
             <p className="text-2xs text-ink-faint font-serif italic">
               No signer data — click refresh.
             </p>
+          )}
+
+          {/* Verify panel — shown inline after clicking ShieldCheck */}
+          {verifyResult && (
+            <div className="mt-3 pt-3 border-t border-line">
+              <div className={[
+                'flex items-start gap-2 px-3 py-2 rounded-sm text-xs',
+                verifyResult.ok
+                  ? 'bg-success-bg text-success'
+                  : 'bg-danger-bg text-danger',
+              ].join(' ')}>
+                <ShieldCheck size={14} className="mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <span className="font-semibold tracking-tightish">
+                    {verifyResult.ok ? 'Document verified — all checks passed.' : 'Verification failed.'}
+                  </span>
+                  {!verifyResult.ok && (
+                    <div className="mt-1 space-y-0.5 text-2xs opacity-80">
+                      {verifyResult.hash_error && <div>Hash: {verifyResult.hash_error}</div>}
+                      {verifyResult.chain_error && <div>Chain: {verifyResult.chain_error}</div>}
+                    </div>
+                  )}
+                  {verifyResult.ok && verifyResult.signers?.length > 0 && (
+                    <div className="mt-1 text-2xs opacity-80">
+                      {verifyResult.signers.length} signer{verifyResult.signers.length !== 1 ? 's' : ''} verified
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          {verifyLoading && (
+            <p className="mt-3 text-2xs text-ink-faint font-serif italic">Verifying…</p>
+          )}
+          {verifyError && (
+            <p className="mt-3 text-2xs text-danger">{verifyError}</p>
           )}
         </div>
       )}

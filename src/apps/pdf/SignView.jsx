@@ -506,6 +506,19 @@ export default function SignView() {
         <p className="text-sm text-ink-muted text-center max-w-sm leading-snug">
           Your signature has been submitted and recorded. You may close this window.
         </p>
+        <p className="mt-1 text-xs text-ink-faint text-center max-w-sm">
+          Once all signers complete, the document owner can download the sealed PDF.
+          Anyone can verify its integrity at{' '}
+          <a
+            href="/verify"
+            className="text-accent underline underline-offset-2 hover:text-accent-hover"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            /verify
+          </a>
+          .
+        </p>
         <p className="mt-6 text-2xs text-ink-faint tracking-eyebrow uppercase">
           Vulos Office
         </p>
