@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useEditor, EditorContent, Extension } from '@tiptap/react'
+import { useEditor, EditorContent, Extension, Mark } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
@@ -20,6 +20,21 @@ import TaskItem from '@tiptap/extension-task-item'
 import CharacterCount from '@tiptap/extension-character-count'
 import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
+
+// Lightweight subscript / superscript marks (no extra npm packages needed).
+const Subscript = Mark.create({
+  name: 'subscript',
+  parseHTML() { return [{ tag: 'sub' }] },
+  renderHTML() { return ['sub', 0] },
+  addKeyboardShortcuts() { return { 'Mod-,': () => this.editor.commands.toggleMark(this.name) } },
+})
+
+const Superscript = Mark.create({
+  name: 'superscript',
+  parseHTML() { return [{ tag: 'sup' }] },
+  renderHTML() { return ['sup', 0] },
+  addKeyboardShortcuts() { return { 'Mod-.': () => this.editor.commands.toggleMark(this.name) } },
+})
 import { ArrowLeft, Save, Loader2, AlertCircle, History, Users, MessageSquare, Activity, GitBranch, Check, Circle, Search, Type as TypeIcon } from 'lucide-react'
 import FindReplace from './components/FindReplace'
 import WordCountModal from './components/WordCountModal'
@@ -226,6 +241,8 @@ export default function DocsEditor() {
       CharacterCount,
       Placeholder.configure({ placeholder: 'Start writing…' }),
       Typography,
+      Subscript,
+      Superscript,
       // OFFICE-27: inline suggestion decorations (green insert / red strikethrough delete)
       SuggestionDecorationsExtension,
     ],
@@ -506,6 +523,15 @@ export default function DocsEditor() {
       if (e.key === 'h' || e.key === 'H') {
         e.preventDefault()
         setFindMode((m) => (m === 'replace' ? null : 'replace'))
+        return
+      }
+      if (e.key === 'p' || e.key === 'P') {
+        // Ctrl+P / Cmd+P: print document (set title for the print dialog).
+        e.preventDefault()
+        const old = document.title
+        document.title = titleRef.current || 'Document'
+        window.print()
+        document.title = old
         return
       }
       if (e.key === 'k' || e.key === 'K') {

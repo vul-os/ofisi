@@ -21,10 +21,10 @@ import {
   RemoveFormatting, ChevronDown, Minus, Download,
   Indent, Outdent, MoreHorizontal, Heading1, Heading2,
   Heading3, Heading4, Heading5, Heading6, Type,
-  ListTree,
+  ListTree, Printer,
 } from 'lucide-react'
 import { api } from '../../lib/api'
-import { exportToDocx, exportToPdf, exportToMarkdown } from './docsExport'
+import { exportToDocx, exportToPdf, exportToMarkdown, exportToHtml } from './docsExport'
 import TableOfContents from './components/TableOfContents'
 
 // ---------------------------------------------------------------------------
@@ -219,9 +219,18 @@ function FontFamilySelector({ editor }) {
 function FontSizeSelector({ editor }) {
   const currentSize = editor.getAttributes('textStyle').fontSize || ''
   const numericSize = currentSize ? parseInt(currentSize) : ''
+  const [customVal, setCustomVal] = useState('')
 
   const applySize = (sz) => {
     editor.chain().focus().setMark('textStyle', { fontSize: `${sz}pt` }).run()
+  }
+
+  const handleCustomKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      const n = parseInt(customVal)
+      if (n && n > 0 && n <= 400) applySize(n)
+      setCustomVal('')
+    }
   }
 
   return (
@@ -237,6 +246,25 @@ function FontSizeSelector({ editor }) {
         </button>
       }
     >
+      {/* Custom size input at the top */}
+      <div className="px-2 py-1.5 border-b border-line">
+        <input
+          type="number"
+          min="1"
+          max="400"
+          value={customVal}
+          onChange={(e) => setCustomVal(e.target.value)}
+          onKeyDown={handleCustomKeyDown}
+          placeholder="Custom…"
+          aria-label="Custom font size"
+          className={[
+            'w-full text-xs px-2 py-0.5 rounded-xs border border-line',
+            'bg-bg text-ink placeholder:text-ink-faint',
+            'focus:outline-none focus:border-accent',
+          ].join(' ')}
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
       {FONT_SIZES.map((sz) => (
         <MenuItem
           key={sz}
@@ -275,10 +303,16 @@ function LineSpacingSelector({ editor }) {
         <MenuItem
           key={value}
           onClick={() => {
-            // Apply via inline style on the selection (paragraph-level).
-            // TipTap doesn't have a native lineHeight command in StarterKit,
-            // so we wrap in a mark-based textStyle attribute.
-            editor.chain().focus().setMark('textStyle', { lineHeight: value }).run()
+            // Apply paragraph-level lineHeight via updateAttributes so it
+            // affects the block node (not an inline mark).  The paragraph
+            // extension stores this as a `style` attribute rendered in HTML.
+            editor.chain().focus().updateAttributes('paragraph', {
+              style: `line-height:${value}`,
+            }).run()
+            // Also try heading nodes in case the cursor is inside a heading.
+            editor.chain().focus().updateAttributes('heading', {
+              style: `line-height:${value}`,
+            }).run()
           }}
         >
           {label}
@@ -543,6 +577,22 @@ export default function DocsToolbar({ editor, title }) {
         >
           <Strikethrough size={15} />
         </Btn>
+        <Btn
+          title="Subscript"
+          onClick={() => editor.chain().focus().toggleMark('subscript').run()}
+          active={editor.isActive('subscript')}
+          className="text-xs font-bold"
+        >
+          X<sub style={{ fontSize: '0.6em', lineHeight: 1 }}>2</sub>
+        </Btn>
+        <Btn
+          title="Superscript"
+          onClick={() => editor.chain().focus().toggleMark('superscript').run()}
+          active={editor.isActive('superscript')}
+          className="text-xs font-bold"
+        >
+          X<sup style={{ fontSize: '0.6em', lineHeight: 1 }}>2</sup>
+        </Btn>
 
         {/* Text color */}
         <label className="toolbar-btn relative cursor-pointer" title="Font color" aria-label="Font color">
@@ -718,6 +768,15 @@ export default function DocsToolbar({ editor, title }) {
             <MenuItem onClick={() => exportToMarkdown(editor, title)}>
               <span className="text-2xs font-bold tracking-eyebrow text-ink-faint w-9">MD</span>
               Markdown
+            </MenuItem>
+            <MenuItem onClick={() => exportToHtml(editor, title)}>
+              <span className="text-2xs font-bold tracking-eyebrow text-warning w-9">HTML</span>
+              HTML file
+            </MenuItem>
+            <div className="my-1 border-t border-line" />
+            <MenuItem onClick={() => exportToPdf(title)}>
+              <Printer size={13} className="text-ink-faint" />
+              Print (Ctrl+P)
             </MenuItem>
           </Dropdown>
         </div>

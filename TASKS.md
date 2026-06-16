@@ -13,6 +13,10 @@ Wave D (2026-06-15): object-store write-through (FIX-OFFICE-STORE-WIRE-01), Post
 Wave E (2026-06-15): real meeting recording (MEET-RECORDING — MediaRecorder + bucket upload +
 backend storage + organiser download), real PPTX import (JSZip OOXML parser), deep-link routing
 (/meet/:id + web+vulosoffice:// protocol handler + ?goto= param).
+Wave F (2026-06-16): Google Docs/Sheets/Slides parity quality pass — subscript/superscript (inline
+Mark extensions), Ctrl+P print shortcut, custom font-size text input, HTML export, line-spacing
+fixed to paragraph-level updateAttributes, Sheets Find & Replace (Ctrl+F / Ctrl+H, SheetsFindReplace.jsx),
+Slides toolbar undo/redo + strikethrough + link + font-size + heading selector, 41 new tests (272 total).
 **Remaining open:** Multi-target subdomain + OS-embed lib build (P2 · L — owned by subdomain agent).
 
 Actionable work for autonomous coding agents, grouped by area and

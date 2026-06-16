@@ -6,6 +6,48 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased] — 2026-06-16
+
+### Added
+- **DOCS-SUB-SUP**: Subscript (`X₂`) and Superscript (`X²`) toolbar buttons in `DocsToolbar.jsx`.
+  - Implemented as lightweight inline `Mark.create()` extensions (`Subscript`, `Superscript`) in `DocsEditor.jsx` — no extra npm packages; renders `<sub>`/`<sup>` HTML.
+  - Keyboard shortcuts: `Mod+,` (subscript) and `Mod+.` (superscript).
+  - Buttons appear after Strikethrough in the character-formatting group.
+- **DOCS-PRINT**: Print action wired to `Ctrl+P` / `Cmd+P` in `DocsEditor.jsx`.
+  - Sets `document.title` to the file name before `window.print()` so the print dialog shows the correct filename; restores afterwards.
+  - "Print" menu item added to the Export dropdown in `DocsToolbar.jsx`.
+- **DOCS-CUSTOM-FONTSIZE**: Custom font-size text input in `FontSizeSelector` dropdown.
+  - A number input (1–400) appears at the top of the dropdown; pressing Enter applies the size as `Xpt` via `setMark('textStyle', { fontSize })`.
+- **DOCS-HTML-EXPORT**: HTML export added to the Docs Export dropdown.
+  - `exportToHtml(editor, filename)` in `docsExport.js` calls `editor.getHTML()`, wraps it in a styled HTML5 page, and triggers a `.html` download via `file-saver`.
+- **DOCS-LINESPACING-FIX**: Line spacing now applies at paragraph-node level via `updateAttributes` instead of the incorrect `textStyle` mark.
+  - Uses `editor.chain().focus().updateAttributes('paragraph', { style: 'line-height:X' })` (also attempts `heading` nodes).
+- **SHEETS-FIND-REPLACE**: New `SheetsFindReplace.jsx` component with Ctrl+F / Ctrl+H shortcut in `SheetsEditor.jsx`.
+  - Searches all sheets' `celldata` (case-insensitive or case-sensitive toggle).
+  - Prev/Next navigation (↑↓ buttons or Shift+Enter / Enter).
+  - Replace one / Replace all with live count display.
+  - Search button added to the Sheets topbar actions.
+- **SLIDES-TOOLBAR-PARITY**: Slides inline toolbar (`SlidesEditor.jsx`) extended with:
+  - **Undo / Redo** buttons (disabled when unavailable).
+  - **Heading style selector** (Normal / H1 / H2 / H3) hover dropdown.
+  - **Font size selector** from a curated set (14–72pt).
+  - **Strikethrough** button.
+  - **Link insert** button (window.prompt like Docs; `Link` extension added to slides TipTap instance).
+
+### Changed
+- `DocsToolbar.jsx`: Import `Printer` from `lucide-react`; import `exportToHtml` from `docsExport`.
+- `DocsEditor.jsx`: Import `Mark` from `@tiptap/react`; define `Subscript`/`Superscript` marks locally.
+- `SlidesEditor.jsx`: Import `Link` extension; import additional Lucide icons (`Strikethrough`, `LinkIcon`, `Undo`, `Redo`, `TypeIcon`).
+
+### Tests
+- `docs.test.jsx` +41 tests: subscript/superscript chain routing, custom font size validation,
+  HTML export shape, Sheets `collectCells` / `findMatches` / `applyReplace` helpers (6 cases).
+- `slides.test.jsx` +9 tests: undo/redo/strikethrough/link/heading/setParagraph/font-size chain routing,
+  `SLIDE_FONT_SIZES` constant.
+- Total: **272 tests** (all passing).
+
+---
+
 ## [Unreleased] — 2026-06-15
 
 ### Added

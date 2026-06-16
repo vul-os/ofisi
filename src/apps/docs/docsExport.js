@@ -5,6 +5,32 @@ import {
 } from 'docx'
 import TurndownService from 'turndown'
 
+// HTML
+export function exportToHtml(editor, filename) {
+  const body = editor.getHTML()
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>${filename}</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 760px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #1a1a1a; }
+  h1, h2, h3, h4, h5, h6 { font-family: system-ui, sans-serif; }
+  pre, code { font-family: "Courier New", monospace; background: #f5f5f5; padding: 2px 4px; border-radius: 3px; }
+  pre { padding: 12px; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ddd; padding: 8px; }
+  blockquote { border-left: 3px solid #ccc; margin: 0; padding-left: 16px; color: #555; }
+</style>
+</head>
+<body>
+${body}
+</body>
+</html>`
+  saveAs(new Blob([html], { type: 'text/html;charset=utf-8' }), `${filename}.html`)
+}
+
 // Markdown
 export function exportToMarkdown(editor, filename) {
   const html = editor.getHTML()

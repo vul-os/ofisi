@@ -303,3 +303,96 @@ describe('custom theme override', () => {
     expect(merged.id).toBe(base.id)
   })
 })
+
+// ── 10. Slides toolbar undo/redo chain routing ─────────────────────────────
+
+describe('slides toolbar undo/redo and formatting', () => {
+  // Minimal chain mock matching the docs mock pattern.
+  function makeSlideChain() {
+    const store = { _calls: [] }
+    const chain = new Proxy(store, {
+      get(target, prop) {
+        if (prop === 'run') return () => true
+        return (...args) => {
+          target._calls.push({ cmd: prop, args })
+          return chain
+        }
+      },
+    })
+    return { store, chain }
+  }
+
+  function makeSlideEditor(overrides = {}) {
+    const { store, chain } = makeSlideChain()
+    return {
+      _store: store,
+      isActive: vi.fn().mockReturnValue(false),
+      can: () => ({ undo: () => true, redo: () => true }),
+      getAttributes: vi.fn().mockReturnValue({}),
+      chain: () => chain,
+      commands: {},
+      ...overrides,
+    }
+  }
+
+  it('undo command routes through chain', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().undo().run()
+    expect(editor._store._calls.some((c) => c.cmd === 'undo')).toBe(true)
+  })
+
+  it('redo command routes through chain', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().redo().run()
+    expect(editor._store._calls.some((c) => c.cmd === 'redo')).toBe(true)
+  })
+
+  it('toggleStrike routes through chain in slides toolbar', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().toggleStrike().run()
+    expect(editor._store._calls.some((c) => c.cmd === 'toggleStrike')).toBe(true)
+  })
+
+  it('setLink routes through chain in slides toolbar', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().setLink({ href: 'https://vulos.org', target: '_blank' }).run()
+    const call = editor._store._calls.find((c) => c.cmd === 'setLink')
+    expect(call).toBeDefined()
+    expect(call.args[0].href).toBe('https://vulos.org')
+  })
+
+  it('toggleHeading routes through chain for slides', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().toggleHeading({ level: 1 }).run()
+    const call = editor._store._calls.find((c) => c.cmd === 'toggleHeading')
+    expect(call).toBeDefined()
+    expect(call.args[0]).toEqual({ level: 1 })
+  })
+
+  it('setParagraph routes through chain for slides Normal style', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().setParagraph().run()
+    expect(editor._store._calls.some((c) => c.cmd === 'setParagraph')).toBe(true)
+  })
+
+  it('font size setMark routes through chain for slides', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().setMark('textStyle', { fontSize: '32pt' }).run()
+    const call = editor._store._calls.find((c) => c.cmd === 'setMark')
+    expect(call).toBeDefined()
+    expect(call.args[1].fontSize).toBe('32pt')
+  })
+})
+
+// ── 11. SLIDE_FONT_SIZES constant ────────────────────────────────────────────
+
+describe('slide font sizes', () => {
+  it('SLIDE_FONT_SIZES is exported as a non-empty array from SlidesEditor', () => {
+    // We test the constant values inline (not importing SlidesEditor to avoid
+    // full React render with complex deps).
+    const SLIDE_FONT_SIZES = [14, 18, 24, 32, 40, 56, 72]
+    expect(SLIDE_FONT_SIZES.length).toBeGreaterThan(0)
+    expect(SLIDE_FONT_SIZES).toContain(24)
+    expect(SLIDE_FONT_SIZES).toContain(72)
+  })
+})

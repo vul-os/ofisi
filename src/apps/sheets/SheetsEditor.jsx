@@ -4,7 +4,7 @@ import { Workbook } from '@fortune-sheet/react'
 import '@fortune-sheet/react/dist/index.css'
 import {
   ArrowLeft, Save, Loader2, Download, Upload, AlertCircle, MessageSquare,
-  Check, Circle, ChevronDown, BarChart2, Filter, Table2, Tag, Sliders, Keyboard,
+  Check, Circle, ChevronDown, BarChart2, Filter, Table2, Tag, Sliders, Keyboard, Search,
 } from 'lucide-react'
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
@@ -17,6 +17,7 @@ import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { SheetsCursorLayer } from '../../components/RemoteCursors.jsx'
 import { Button, IconButton, Tooltip, Topbar } from '../../components/ui'
 import { useSheetKeyboardShortcuts, KeyboardShortcutsHelp, useShortcutsHelp } from './KeyboardShortcuts.jsx'
+import SheetsFindReplace from './SheetsFindReplace.jsx'
 
 // Side panels — lazily loaded so they don't bloat the initial bundle.
 const PivotPanel              = lazy(() => import('./PivotPanel.jsx'))
@@ -46,6 +47,7 @@ export default function SheetsEditor() {
   const [showCondFormat,    setShowCondFormat]    = useState(false)
   const [showNamedRanges,   setShowNamedRanges]   = useState(false)
   const [showChartWizard,   setShowChartWizard]   = useState(false)
+  const [showFindReplace,   setShowFindReplace]   = useState(false)
 
   const saveTimer   = useRef(null)
   const retryTimer  = useRef(null)
@@ -65,6 +67,24 @@ export default function SheetsEditor() {
     onChange:    setData,
     onShowHelp:  openHelp,
   })
+
+  // Ctrl+F / Ctrl+H: open find/replace overlay for sheets
+  useEffect(() => {
+    const onKey = (e) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault()
+        setShowFindReplace((v) => !v)
+      }
+      if (e.key === 'h' || e.key === 'H') {
+        e.preventDefault()
+        setShowFindReplace(true)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   // ── CRDT collaboration (OFFICE-23) ──────────────────────────────────────────
   useEffect(() => {
@@ -354,6 +374,11 @@ export default function SheetsEditor() {
         actions={
           <>
             {/* Toolbar shortcut buttons */}
+            <Tooltip label="Find / Replace (Ctrl+F)">
+              <IconButton size="sm" active={showFindReplace} onClick={() => setShowFindReplace((v) => !v)}>
+                <Search size={14} />
+              </IconButton>
+            </Tooltip>
             <Tooltip label="Pivot table (Insert → Pivot table)">
               <IconButton size="sm" active={showPivot} onClick={togglePanel(setShowPivot)}>
                 <Table2 size={14} />
@@ -512,6 +537,13 @@ export default function SheetsEditor() {
             onChange={handleChange}
           />
           <SheetsCursorLayer remoteCursors={remoteCursors} getCellRect={getCellRect} />
+          {showFindReplace && (
+            <SheetsFindReplace
+              data={data}
+              onChange={(newData) => handleChange(newData)}
+              onClose={() => setShowFindReplace(false)}
+            />
+          )}
         </div>
 
         {/* Side panels — one open at a time */}

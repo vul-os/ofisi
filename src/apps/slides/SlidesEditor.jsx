@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
+import Link from '@tiptap/extension-link'
 import TextAlign from '@tiptap/extension-text-align'
 import Underline from '@tiptap/extension-underline'
 import TextStyle from '@tiptap/extension-text-style'
@@ -11,11 +12,11 @@ import Placeholder from '@tiptap/extension-placeholder'
 import {
   ArrowLeft, Save, Loader2, Play, Plus, Trash2,
   ChevronUp, ChevronDown, Download, EyeOff, MessageSquare,
-  Bold, Italic, Underline as UnderlineIcon,
+  Bold, Italic, Underline as UnderlineIcon, Strikethrough, Link as LinkIcon,
   AlignLeft, AlignCenter, AlignRight, List, Image as ImageIcon,
   Check, Circle, AlertCircle, StickyNote, Palette, Layout,
-  Copy, FileText, GripVertical, Monitor, Zap,
-  ChevronDown as ChevronDownIcon,
+  Copy, FileText, GripVertical, Monitor, Zap, Undo, Redo,
+  ChevronDown as ChevronDownIcon, Type as TypeIcon,
 } from 'lucide-react'
 import DOMPurify from 'dompurify'
 import { useFilesStore } from '../../store/filesStore'
@@ -59,6 +60,16 @@ function newSlide(master = 'content') {
     animations: [],
   }
 }
+
+// ── Slide toolbar constants ──────────────────────────────────────────────────
+const SLIDE_FONT_SIZES = [14, 18, 24, 32, 40, 56, 72]
+
+const SLIDE_HEADINGS = [
+  { label: 'Normal', value: 0 },
+  { label: 'H1',     value: 1 },
+  { label: 'H2',     value: 2 },
+  { label: 'H3',     value: 3 },
+]
 
 // ── Sidebar tabs ────────────────────────────────────────────────────────────
 const SIDEBAR_TABS = [
@@ -118,6 +129,7 @@ export default function SlidesEditor() {
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Image.configure({ allowBase64: true }),
+      Link.configure({ openOnClick: false }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Underline,
       TextStyle,
@@ -884,6 +896,93 @@ export default function SlidesEditor() {
                 role="toolbar"
                 aria-label="Slide formatting"
               >
+                {/* Undo / Redo */}
+                <Tooltip label="Undo (⌘Z)">
+                  <IconButton size="sm"
+                    onClick={() => editor.chain().focus().undo().run()}
+                    disabled={!editor.can().undo()}
+                    aria-label="Undo">
+                    <Undo size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Redo (⌘⇧Z)">
+                  <IconButton size="sm"
+                    onClick={() => editor.chain().focus().redo().run()}
+                    disabled={!editor.can().redo()}
+                    aria-label="Redo">
+                    <Redo size={14} />
+                  </IconButton>
+                </Tooltip>
+                <span className="toolbar-divider" />
+
+                {/* Heading style selector */}
+                <div className="relative group">
+                  <button
+                    type="button"
+                    aria-haspopup="menu"
+                    className="toolbar-btn flex items-center gap-1 px-2 min-w-[56px] text-xs"
+                    aria-label="Heading style"
+                  >
+                    <TypeIcon size={12} aria-hidden="true" />
+                    {SLIDE_HEADINGS.find((h) =>
+                      h.value === 0 ? !editor.isActive('heading') : editor.isActive('heading', { level: h.value })
+                    )?.label || 'Normal'}
+                    <ChevronDownIcon size={10} className="opacity-60" aria-hidden="true" />
+                  </button>
+                  <div
+                    role="menu"
+                    className="absolute left-0 top-full mt-0.5 w-28 py-1 bg-paper border border-line rounded-md shadow-e2 z-30 hidden group-hover:block animate-scale-in"
+                  >
+                    {SLIDE_HEADINGS.map(({ label, value }) => (
+                      <button
+                        key={value}
+                        role="menuitem"
+                        onClick={() => {
+                          if (value === 0) editor.chain().focus().setParagraph().run()
+                          else editor.chain().focus().toggleHeading({ level: value }).run()
+                        }}
+                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent-tint text-ink-muted"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Font size */}
+                <div className="relative group">
+                  <button
+                    type="button"
+                    aria-haspopup="menu"
+                    className="toolbar-btn flex items-center gap-1 px-1 w-12 text-xs"
+                    aria-label="Font size"
+                  >
+                    <span className="flex-1 text-center tabular-nums">
+                      {(() => {
+                        const fs = editor.getAttributes('textStyle').fontSize
+                        return fs ? parseInt(fs) : '—'
+                      })()}
+                    </span>
+                    <ChevronDownIcon size={10} aria-hidden="true" />
+                  </button>
+                  <div
+                    role="menu"
+                    className="absolute left-0 top-full mt-0.5 w-24 py-1 bg-paper border border-line rounded-md shadow-e2 z-30 hidden group-hover:block animate-scale-in"
+                  >
+                    {SLIDE_FONT_SIZES.map((sz) => (
+                      <button
+                        key={sz}
+                        role="menuitem"
+                        onClick={() => editor.chain().focus().setMark('textStyle', { fontSize: `${sz}pt` }).run()}
+                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent-tint text-ink-muted"
+                      >
+                        {sz}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <span className="toolbar-divider" />
                 <Tooltip label="Bold (⌘B)">
                   <IconButton size="sm" active={editor.isActive('bold')}
                     onClick={() => editor.chain().focus().toggleBold().run()} aria-label="Bold">
@@ -900,6 +999,25 @@ export default function SlidesEditor() {
                   <IconButton size="sm" active={editor.isActive('underline')}
                     onClick={() => editor.chain().focus().toggleUnderline().run()} aria-label="Underline">
                     <UnderlineIcon size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Strikethrough">
+                  <IconButton size="sm" active={editor.isActive('strike')}
+                    onClick={() => editor.chain().focus().toggleStrike().run()} aria-label="Strikethrough">
+                    <Strikethrough size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Insert link (⌘K)">
+                  <IconButton size="sm" active={editor.isActive('link')}
+                    onClick={() => {
+                      const prev = editor.getAttributes('link').href || ''
+                      const url = window.prompt('URL:', prev)
+                      if (url === null) return
+                      if (!url) editor.chain().focus().unsetLink().run()
+                      else editor.chain().focus().setLink({ href: url, target: '_blank' }).run()
+                    }}
+                    aria-label="Insert link">
+                    <LinkIcon size={14} />
                   </IconButton>
                 </Tooltip>
                 <span className="toolbar-divider" />
