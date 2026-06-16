@@ -1,0 +1,195 @@
+#!/usr/bin/env node
+/**
+ * Vulos Office — Playwright screenshotter
+ *
+ * Captures every major app surface at 1440×900 into docs/screenshots/.
+ *
+ * Usage:
+ *   npm run screenshots
+ *   BASE_URL=https://office.example.com npm run screenshots
+ *
+ * Prerequisites:
+ *   npm install
+ *   npx playwright install chromium
+ *
+ * The dev server must be running (npm run dev:web) unless BASE_URL points
+ * at a live instance.
+ */
+
+import { chromium } from 'playwright'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const ROOT = path.resolve(__dirname, '..')
+const OUT = path.join(ROOT, 'docs', 'screenshots')
+const BASE_URL = process.env.BASE_URL ?? 'http://localhost:5173'
+
+// Routes to capture.
+// name        → output filename (without .png)
+// path        → URL path relative to BASE_URL
+// waitFor     → optional CSS selector to wait for before capturing
+// description → logged to console
+const ROUTES = [
+  {
+    name: 'hero',
+    path: '/',
+    description: 'Home (hero shot)',
+  },
+  {
+    name: 'home',
+    path: '/',
+    description: 'Home / file list',
+  },
+  {
+    name: 'docs-editor',
+    path: '/docs/demo',
+    description: 'Documents editor',
+    waitFor: '.ProseMirror, [data-testid="docs-editor"], .tiptap',
+  },
+  {
+    name: 'sheets-editor',
+    path: '/sheets/demo',
+    description: 'Spreadsheets editor',
+    waitFor: '.fortune-sheet-container, [data-testid="sheets-editor"], canvas',
+  },
+  {
+    name: 'slides-editor',
+    path: '/slides/demo',
+    description: 'Presentations editor',
+    waitFor: '.reveal, [data-testid="slides-editor"]',
+  },
+  {
+    name: 'pdf-editor',
+    path: '/pdf/demo',
+    description: 'PDF viewer / annotator',
+    waitFor: '[data-testid="pdf-editor"], .pdf-viewer, canvas',
+  },
+  {
+    name: 'spaces',
+    path: '/spaces',
+    description: 'Vulos Spaces (channels)',
+    waitFor: '[data-testid="spaces-app"], .spaces-sidebar, [class*="spaces"]',
+  },
+  {
+    name: 'calendar',
+    path: '/calendar',
+    description: 'Calendar',
+    waitFor: '[data-testid="calendar-app"], .calendar-grid, [class*="calendar"]',
+  },
+  {
+    name: 'contacts',
+    path: '/contacts',
+    description: 'Contacts',
+    waitFor: '[data-testid="contacts-app"], [class*="contacts"]',
+  },
+  {
+    name: 'meetings',
+    path: '/meetings',
+    description: 'Meetings list',
+    waitFor: '[data-testid="meetings"], [class*="meeting"]',
+  },
+]
+
+async function capture(page, route) {
+  const url = `${BASE_URL}${route.path}`
+  console.log(`  → ${route.description} (${url})`)
+
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15_000 })
+
+    // Try to wait for a specific element, fall back to networkidle
+    if (route.waitFor) {
+      try {
+        await page.waitForSelector(route.waitFor, { timeout: 8_000 })
+      } catch {
+        // Element not found — still capture what's visible
+        await page.waitForTimeout(2_000)
+      }
+    } else {
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 8_000 })
+      } catch {
+        await page.waitForTimeout(2_000)
+      }
+    }
+
+    // Brief pause for any CSS transitions / layout shifts
+    await page.waitForTimeout(500)
+
+    const outPath = path.join(OUT, `${route.name}.png`)
+    await page.screenshot({ path: outPath, fullPage: false })
+    console.log(`     saved ${path.relative(ROOT, outPath)}`)
+    return { name: route.name, status: 'ok', path: outPath }
+  } catch (err) {
+    console.warn(`     FAILED: ${err.message}`)
+    return { name: route.name, status: 'failed', error: err.message }
+  }
+}
+
+async function main() {
+  mkdirSync(OUT, { recursive: true })
+
+  console.log(`\nVulos Office screenshotter`)
+  console.log(`  base URL : ${BASE_URL}`)
+  console.log(`  output   : ${path.relative(ROOT, OUT)}/`)
+  console.log(`  viewport : 1440×900\n`)
+
+  const browser = await chromium.launch({ headless: true })
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    colorScheme: 'dark',
+    locale: 'en-US',
+  })
+  const page = await context.newPage()
+
+  // Silence console noise from the app
+  page.on('console', () => {})
+  page.on('pageerror', () => {})
+
+  const results = []
+  for (const route of ROUTES) {
+    const result = await capture(page, route)
+    results.push(result)
+  }
+
+  await browser.close()
+
+  // Summary
+  const ok = results.filter(r => r.status === 'ok')
+  const failed = results.filter(r => r.status === 'failed')
+
+  console.log(`\nDone — ${ok.length} captured, ${failed.length} failed`)
+  if (failed.length > 0) {
+    console.log('\nFailed routes (need live backend or data):')
+    for (const r of failed) {
+      console.log(`  ${r.name}: ${r.error}`)
+    }
+  }
+
+  // Write a README into the screenshots dir
+  const notes = [
+    '# docs/screenshots',
+    '',
+    'Generated by `npm run screenshots` (scripts/screenshots.mjs).',
+    '',
+    '| File | Surface | Status |',
+    '|------|---------|--------|',
+    ...results.map(r =>
+      `| ${r.name}.png | ${ROUTES.find(rt => rt.name === r.name)?.description ?? r.name} | ${r.status === 'ok' ? 'captured' : 'needs live instance'} |`
+    ),
+    '',
+    'To regenerate: `npm run screenshots`',
+    'To capture against a live instance: `BASE_URL=https://... npm run screenshots`',
+  ].join('\n')
+  writeFileSync(path.join(OUT, 'README.md'), notes + '\n')
+  console.log(`  wrote docs/screenshots/README.md\n`)
+
+  if (failed.length > 0) process.exit(1)
+}
+
+main().catch(err => {
+  console.error('Fatal:', err)
+  process.exit(1)
+})

@@ -17,7 +17,8 @@
     "build:go": "go build -o vulos-office .",
     "start": "go run .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "main": "./dist-lib/index.cjs",
   "module": "./dist-lib/index.js",
@@ -139,6 +140,7 @@
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "vite": "^6.3.5",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.7",
+    "playwright": "^1.49.1"
   }
 }
