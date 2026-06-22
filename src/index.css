@@ -17,8 +17,8 @@
   * { box-sizing: border-box; }
 
   html {
-    /* Smoother kerning + ligatures (the system grotesque actually has them) */
-    font-feature-settings: "cv11", "ss01", "ss03", "rlig", "calt";
+    /* Inter ligatures + contextual alternates */
+    font-feature-settings: "cv11", "ss01", "calt";
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -224,14 +224,24 @@
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--oat-200);
+  background: var(--line-strong);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover { background: var(--oat-300); background-clip: padding-box; border: 2px solid transparent; }
-:root[data-theme="dark"] ::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
+::-webkit-scrollbar-thumb:hover { background: var(--line-emphasis); background-clip: padding-box; border: 2px solid transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+/* ============================================================================
+ * Mono micro-label — section eyebrows, nav meta, kbd. The IDE trait.
+ * ========================================================================== */
+.mono-label {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wider);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  color: var(--ink-faint);
 }
 
 /* ============================================================================
@@ -301,31 +311,62 @@
 .paper-grain > * { position: relative; z-index: 1; }
 
 /* ============================================================================
- * Fortune Sheet (Sheets editor) — quiet design-token retint.
- * We don't touch the library's grid/measurement internals; we only pull a
- * couple of customisable colours (selection highlight, header tint, sheet
- * tab bar) through the accent + warm-neutral tokens so the workbook stops
- * reading as "default blue UI" and starts reading as Vulos paper.
+ * Fortune Sheet (Sheets editor) — frame the grid as a light "paper" canvas
+ * inside the dark chrome, then dark-theme everything CSS can reach: the
+ * row/column headers, the formula/name bar, the sheet-tab strip and context
+ * menus. The cell area itself is a <canvas> the library paints white — we keep
+ * it light on purpose (a sheet of paper on the desk) but surround it with the
+ * near-black IDE chrome so it reads intentional, not broken.
  * ========================================================================== */
-.sheets-themed .luckysheet-cs-selection-area,
-.sheets-themed .luckysheet-cs-selection-copy {
-  /* The drag-select overlay — accent at low alpha. */
-  background: var(--accent-tint-2) !important;
-  border-color: var(--accent) !important;
-}
-.sheets-themed .luckysheet-cs-selection-fill {
-  background: var(--accent) !important;
-}
-.sheets-themed .luckysheet-row-count-show,
-.sheets-themed .luckysheet-column-header,
-.sheets-themed .luckysheet-bottom-controll-row,
-.sheets-themed .luckysheet-sheet-area {
+
+/* Sheet-tab strip + bottom controls — dark chrome */
+.sheets-themed .fortune-sheettab-container,
+.sheets-themed .fortune-sheettab-container-c,
+.sheets-themed .luckysheet-sheet-area,
+.sheets-themed .luckysheet-bottom-controll-row {
   background: var(--bg-elev-2) !important;
   color: var(--ink-muted) !important;
   border-color: var(--line) !important;
 }
+.sheets-themed .fortune-sheettab-button,
+.sheets-themed .fortune-sheettab-button svg { color: var(--ink-faint) !important; }
+.sheets-themed .fortune-sheettab-button:hover { background: var(--bg-hover) !important; color: var(--ink) !important; }
+
+/* Active sheet tab — teal underline accent */
+.sheets-themed .fortune-sheettab-active,
 .sheets-themed .luckysheet-sheets-item.luckysheet-sheets-item-active {
   background: var(--paper) !important;
   color: var(--ink) !important;
   border-top: 2px solid var(--accent) !important;
 }
+
+/* Formula / name box bar */
+.sheets-themed .fortune-fx-input-container,
+.sheets-themed .fortune-name-box-container,
+.sheets-themed .fortune-name-box {
+  background: var(--bg-elev-2) !important;
+  color: var(--ink-muted) !important;
+  border-color: var(--line) !important;
+}
+.sheets-themed .fortune-fx-icon { color: var(--ink-faint) !important; }
+
+/* Selection overlays — accent */
+.sheets-themed .fortune-cell-selected-move,
+.sheets-themed .fortune-cell-selected-extend,
+.sheets-themed .luckysheet-cs-selection-area {
+  border-color: var(--accent) !important;
+}
+.sheets-themed .luckysheet-cs-selection-fill { background: var(--accent) !important; }
+
+/* Context menus / dialogs — dark surfaces */
+.sheets-themed .fortune-context-menu,
+.sheets-themed .fortune-dialog,
+.sheets-themed .fortune-modal-container {
+  background: var(--bg-elevated) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line-strong) !important;
+}
+.sheets-themed .fortune-context-menu-divider { background: var(--line) !important; }
+
+/* Hairline frame around the whole grid so the light canvas reads as paper */
+.sheets-themed .fortune-container { border: none !important; }
