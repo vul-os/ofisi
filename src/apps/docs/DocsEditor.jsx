@@ -726,6 +726,8 @@ export default function DocsEditor() {
           <>
             {statusInfo && (
               <span
+                role="status"
+                aria-live="polite"
                 className={[
                   'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
                   statusInfo.tone === 'success' ? 'text-success' :
@@ -738,6 +740,7 @@ export default function DocsEditor() {
                   <StatusIcon
                     size={11}
                     className={statusInfo.spin ? 'animate-spin' : ''}
+                    aria-hidden
                   />
                 )}
                 {statusInfo.text}
