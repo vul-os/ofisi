@@ -20,6 +20,10 @@ Docs · Sheets · Slides · Calendar · Contacts · Spaces · Meet · Signing
 
 </div>
 
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="Vulos Office" width="900" />
+</p>
+
 ---
 
 ## What is this?
@@ -31,6 +35,23 @@ It is **independently self-hostable by default**: with zero configuration it run
 It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers who proved productivity software could be free, open, and community-driven — and carries that torch into the browser with a fast React frontend and a lightweight Go backend.
 
 > *"Vula" — open the door. Vulos Office is that door.*
+
+---
+
+## Screenshots
+
+|  |  |
+| :---: | :---: |
+| **Docs** — rich text, tables, comments | **Sheets** — formulas, charts, pivots |
+| <img src="docs/screenshots/docs-editor.png" alt="Docs" /> | <img src="docs/screenshots/sheets-editor.png" alt="Sheets" /> |
+| **Slides** — themes, transitions, present | **Calendar** — events, recurrence, `.ics` |
+| <img src="docs/screenshots/slides-editor.png" alt="Slides" /> | <img src="docs/screenshots/calendar.png" alt="Calendar" /> |
+| **Contacts** — vCard, duplicate detection | **Spaces** — channels, DMs, threads |
+| <img src="docs/screenshots/contacts.png" alt="Contacts" /> | <img src="docs/screenshots/spaces.png" alt="Spaces" /> |
+| **Meet** — voice / video from a Space | **Signing** — annotate & sign PDFs |
+| <img src="docs/screenshots/meetings.png" alt="Meet" /> | <img src="docs/screenshots/pdf-editor.png" alt="Signing" /> |
+
+> Regenerate anytime with `npm run screenshots` (Playwright; see `scripts/screenshots.mjs`).
 
 ---
 
