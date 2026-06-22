@@ -112,7 +112,17 @@ func (h *FileHandler) Create(c *gin.Context) {
 		return
 	}
 	// Record the creating identity as owner so the file is private by default.
-	h.authz.recordOwner(c, file.ID)
+	// In multi-tenant mode an unowned file is NOT globally readable, so a failed
+	// SetOwner must FAIL the create (rather than silently leave an unowned file):
+	// otherwise the document is either inaccessible to its creator or — under the
+	// old fail-open path — readable by everyone. Roll back the persisted row.
+	if err := h.authz.recordOwner(c, file.ID); err != nil {
+		_ = h.store.DeleteFile(file.ID)
+		res.Release()
+		log.Printf("[files] recordOwner failed for file=%s: %v (rolled back create)", file.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record file ownership"})
+		return
+	}
 
 	// Async write-through to org bucket when content is present.
 	if contentBytes != nil {

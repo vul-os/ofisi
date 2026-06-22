@@ -11,6 +11,7 @@ package handlers
 // file the caller cannot see actually exists.
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -23,8 +24,18 @@ import (
 )
 
 // FileAuthz wraps a fileacl.Store and provides gin-aware access enforcement.
+//
+// authEnabled mirrors cfg.Auth.Enabled. It changes the fail-safe posture:
+//
+//   - auth DISABLED (OSS single-user / local mode): a degraded/nil store or an
+//     unowned/legacy file fails OPEN so the operator is never locked out of
+//     pre-existing documents.
+//   - auth ENABLED (multi-tenant): NO fail-open. A nil/degraded store denies,
+//     and an unowned file is NOT globally readable (it is denied for non-owners)
+//     so a missing owner record can never leak another tenant's document.
 type FileAuthz struct {
-	acl fileacl.Store
+	acl         fileacl.Store
+	authEnabled bool
 }
 
 // fileACLDBPath resolves the ACL SQLite DSN from env, defaulting to a durable
@@ -63,16 +74,25 @@ func SharedFileAuthz() *FileAuthz {
 // (sqlite/local backend) the separate sqlite ACL store is used. Call ONCE from
 // main() before constructing the file handlers; it pins the sync.Once so later
 // SharedFileAuthz() calls return the same authorizer.
-func InitFileAuthz(store storage.Storage) *FileAuthz {
+//
+// authEnabled MUST reflect cfg.Auth.Enabled. When auth is enabled the ACL store
+// is load-bearing for multi-tenant isolation, so a failure to open it is FATAL
+// (we refuse to boot in a degraded, fail-open posture). When auth is disabled
+// (OSS single-user) a degraded in-memory NullStore is acceptable.
+func InitFileAuthz(store storage.Storage, authEnabled bool) *FileAuthz {
 	fileAuthzOnce.Do(func() {
 		if p, ok := store.(storage.ACLProvider); ok {
-			defaultFileAuthz = &FileAuthz{acl: p.ACLStore()}
+			defaultFileAuthz = &FileAuthz{acl: p.ACLStore(), authEnabled: authEnabled}
 			return
 		}
 		if st, err := fileacl.NewSQLiteStore(fileACLDBPath()); err == nil {
-			defaultFileAuthz = &FileAuthz{acl: st}
+			defaultFileAuthz = &FileAuthz{acl: st, authEnabled: authEnabled}
+		} else if authEnabled {
+			// Multi-tenant mode: never run with a degraded, fail-open ACL store.
+			log.Fatalf("file ACL store open failed (%s) with auth enabled: %v "+
+				"(refusing to boot without per-file isolation)", fileACLDBPath(), err)
 		} else {
-			defaultFileAuthz = &FileAuthz{acl: fileacl.NewNullStore()}
+			defaultFileAuthz = &FileAuthz{acl: fileacl.NewNullStore(), authEnabled: false}
 		}
 	})
 	return defaultFileAuthz
@@ -83,21 +103,41 @@ func NewFileAuthz(acl fileacl.Store) *FileAuthz {
 	return &FileAuthz{acl: acl}
 }
 
+// NewFileAuthzWithAuth builds a FileAuthz over a caller-supplied store with an
+// explicit auth posture (tests that exercise the multi-tenant fail-closed path).
+func NewFileAuthzWithAuth(acl fileacl.Store, authEnabled bool) *FileAuthz {
+	return &FileAuthz{acl: acl, authEnabled: authEnabled}
+}
+
 // Store exposes the underlying ACL store for owner-recording on file create
 // and share management.
 func (a *FileAuthz) Store() fileacl.Store { return a.acl }
 
+// multiTenant reports whether auth is enabled (nil-safe). In multi-tenant mode
+// the ACL store is load-bearing and there is NO fail-open.
+func (a *FileAuthz) multiTenant() bool { return a != nil && a.authEnabled }
+
 // canAccess reports whether the caller may touch fileID. Admins always pass.
 func (a *FileAuthz) canAccess(c *gin.Context, fileID string) bool {
 	if a == nil || a.acl == nil {
-		return true // no authorizer wired (degraded) — fail-open to avoid lockout
+		// No authorizer wired (degraded). When auth is enabled this MUST fail
+		// closed: a degraded ACL store can never grant cross-tenant access. When
+		// auth is disabled (single-user) fail open so the operator isn't locked out.
+		return !a.multiTenant()
 	}
 	if c.GetBool(middleware.CtxIsAdmin) {
 		return true
 	}
-	allowed, _, err := a.acl.CanAccess(fileID, requesterID(c))
+	allowed, recorded, err := a.acl.CanAccess(fileID, requesterID(c))
 	if err != nil {
 		// On a storage error, fail closed for safety.
+		return false
+	}
+	// When auth is enabled, an UNOWNED/legacy file (no recorded owner) must NOT
+	// be globally readable — that would leak any file whose owner record is
+	// missing. Deny non-owners in multi-tenant mode; the fail-safe "unowned ⇒
+	// allow" is only for single-user/local (auth-disabled) mode.
+	if a.authEnabled && !recorded {
 		return false
 	}
 	return allowed
@@ -114,14 +154,19 @@ func (a *FileAuthz) require(c *gin.Context, fileID string) bool {
 }
 
 // recordOwner stamps the creating identity as the owner of a new file. Called
-// from FileHandler.Create. Errors are swallowed (logged-equivalent) so a
-// transient ACL-store failure never blocks document creation, but the common
-// path records ownership so the document is private by default.
-func (a *FileAuthz) recordOwner(c *gin.Context, fileID string) {
+// from FileHandler.Create. It returns an error so the caller can fail the create
+// when ownership could not be recorded: in multi-tenant mode an unowned file is
+// NOT globally readable, so a swallowed SetOwner error would otherwise leave the
+// new document INACCESSIBLE to its creator (and a regression of the old fail-open
+// behaviour would leave it accessible to everyone). Either way the create must
+// not silently succeed with no owner.
+//
+// In single-user / auth-disabled mode a nil store is fine (no isolation needed).
+func (a *FileAuthz) recordOwner(c *gin.Context, fileID string) error {
 	if a == nil || a.acl == nil {
-		return
+		return nil
 	}
-	_ = a.acl.SetOwner(fileID, requesterID(c))
+	return a.acl.SetOwner(fileID, requesterID(c))
 }
 
 // canAccessEnvelopeACL reports whether the caller may touch an envelope. The
@@ -133,7 +178,8 @@ func (a *FileAuthz) recordOwner(c *gin.Context, fileID string) {
 // envelope CRUD, send, seal, and orchestration handlers.
 func (a *FileAuthz) canAccessEnvelopeACL(c *gin.Context, sourceFileID, envelopeID string) bool {
 	if a == nil || a.acl == nil {
-		return true // no authorizer wired (degraded) — fail-open to avoid lockout
+		// Degraded: fail open only in single-user mode; fail closed under auth.
+		return !a.multiTenant()
 	}
 	if sourceFileID != "" && a.canAccess(c, sourceFileID) {
 		return true
