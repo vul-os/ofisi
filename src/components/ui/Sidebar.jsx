@@ -130,7 +130,7 @@ Sidebar.Item = function SidebarItem({
 
   if (to) {
     return (
-      <NavLink to={to} end={end} title={title} className={({ isActive }) => cn(isActive)}>
+      <NavLink to={to} end={end} title={title} onClick={onClick} className={({ isActive }) => cn(isActive)}>
         {({ isActive }) => renderInner(isActive)}
       </NavLink>
     )
