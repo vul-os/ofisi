@@ -176,16 +176,19 @@
  * Mirrors cloud's light mode: clean white/grey, same teal accent.
  * ────────────────────────────────────────────────────────────────────── */
 :root[data-theme="light"] {
-  --oat-50:  #1a1a1a;
-  --oat-100: #333333;
-  --oat-200: #e0e0e0;
-  --oat-300: #cccccc;
-  --oat-400: #888888;
-  --oat-500: #666666;
-  --oat-600: #555555;
-  --oat-700: #333333;
-  --oat-800: #eeeeee;
-  --oat-900: #1a1a1a;
+  /* ── Light neutral ramp — monotonic light→dark (50 = lightest surface,
+   *    900 = deepest ink). Mirrors cloud's light mode; replaces the old
+   *    inverted/garbage ramp that caused dark patches on light. ───────────── */
+  --oat-50:  #fbfbfa;   /* lightest surface */
+  --oat-100: #f4f4f3;   /* subtle surface */
+  --oat-200: #eaeaea;   /* hairline dividers / default border */
+  --oat-300: #dcdcdc;   /* stronger borders */
+  --oat-400: #b8b8b8;   /* muted icons, placeholders */
+  --oat-500: #8a8a8a;   /* secondary / faint text */
+  --oat-600: #6b6b6b;   /* tertiary text */
+  --oat-700: #4a4a4a;   /* primary-muted text */
+  --oat-800: #2c2c2c;   /* near-ink */
+  --oat-900: #1a1a1a;   /* ink — primary text on light */
 
   --bg-base:            #ffffff;
   --bg-surface:         #f7f7f7;
