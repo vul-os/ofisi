@@ -254,6 +254,40 @@ async function main() {
     results.push(result)
   }
 
+  // ── LIGHT-mode spot captures (temporary; for design review) ───────────────
+  // A second context that forces the app's light theme via localStorage before
+  // any page script runs, so we can eyeball light mode for `home`/`docs-editor`.
+  if (process.env.CAPTURE_LIGHT === '1') {
+    const lightCtx = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      colorScheme: 'light',
+      locale: 'en-US',
+    })
+    await lightCtx.addInitScript(() => {
+      try { localStorage.setItem('vulos.theme', 'light') } catch {}
+    })
+    const lightPage = await lightCtx.newPage()
+    const lightRoutes = ROUTES.filter(r => ['home', 'docs-editor'].includes(r.name))
+    for (const route of lightRoutes) {
+      const url = `${SCREENSHOT_BASE}${route.path}`
+      console.log(`  → [light] ${route.description}`)
+      try {
+        await lightPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 })
+        if (route.waitFor) {
+          try { await lightPage.waitForSelector(route.waitFor, { timeout: 10_000 }) }
+          catch { await lightPage.waitForTimeout(3_000) }
+        }
+        await lightPage.waitForTimeout(900)
+        const outPath = path.join(OUT, `${route.name}-light.png`)
+        await lightPage.screenshot({ path: outPath, fullPage: false })
+        console.log(`     saved ${path.relative(ROOT, outPath)}`)
+      } catch (err) {
+        console.warn(`     [light] FAILED: ${err.message}`)
+      }
+    }
+    await lightCtx.close()
+  }
+
   await browser.close()
   stopLocalServer()
 

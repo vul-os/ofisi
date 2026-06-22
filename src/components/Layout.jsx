@@ -27,12 +27,12 @@ import { useNavigate } from 'react-router-dom'
 import {
   Home as HomeIcon, FileText, Table2, Presentation, FileSearch, MessageSquare,
   LogOut, ChevronLeft, ChevronRight, Settings as SettingsIcon, Plus,
-  Sun, Moon, Monitor, CalendarDays, BookUser, Menu, X,
+  CalendarDays, BookUser, Menu, X,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useFilesStore } from '../store/filesStore'
 import NewFileModal from './NewFileModal'
-import { Sidebar, IconButton, Tooltip, useTheme } from './ui'
+import { Sidebar, IconButton, Tooltip, ThemeSwitch } from './ui'
 
 // Icons stay neutral (ink-faint) at rest so the rail reads calm; they brighten
 // to teal only when their app is active — the cloud "restrained accent" trait.
@@ -45,22 +45,6 @@ const NAV_APPS = [
   { label: 'Calendar', icon: CalendarDays,  route: '/calendar', beta: true },
   { label: 'Contacts', icon: BookUser,      route: '/contacts', beta: true },
 ]
-
-function ThemeCycler() {
-  const { theme, cycle } = useTheme()
-  const Icon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor
-  const label =
-    theme === 'light' ? 'Theme: light (click for dark)' :
-    theme === 'dark'  ? 'Theme: dark (click for system)' :
-                        'Theme: system (click for light)'
-  return (
-    <Tooltip label={label} side="right">
-      <IconButton size="sm" onClick={cycle}>
-        <Icon size={14} />
-      </IconButton>
-    </Tooltip>
-  )
-}
 
 /**
  * SidebarContent — the rail body, shared between the persistent (≥lg) column
@@ -168,18 +152,33 @@ function Shell({ children }) {
       <div className="hidden lg:flex">
         <Sidebar collapsed={collapsed}>
           <SidebarContent collapsed={collapsed} onNewFile={openNew} />
-          {/* Theme cycler + collapse toggle share the bottom row */}
-          <div className="flex items-center gap-1 px-3 pb-2 -mt-1">
-            <ThemeCycler />
-            <Tooltip
-              label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              side="right"
-            >
-              <IconButton size="sm" onClick={() => setCollapsed(!collapsed)}>
-                {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-              </IconButton>
-            </Tooltip>
-          </div>
+          {/* Appearance control + collapse toggle. Expanded → labelled
+              segmented theme switch over its own row, collapse toggle below;
+              collapsed → both shrink to single icon buttons side by side. */}
+          {collapsed ? (
+            <div className="flex flex-col items-center gap-1 px-2 pb-2 -mt-1">
+              <ThemeSwitch collapsed />
+              <Tooltip label="Expand sidebar" side="right">
+                <IconButton size="sm" onClick={() => setCollapsed(false)}>
+                  <ChevronRight size={14} />
+                </IconButton>
+              </Tooltip>
+            </div>
+          ) : (
+            <div className="px-3 pb-2.5 pt-1 space-y-2">
+              <ThemeSwitch />
+              <Tooltip label="Collapse sidebar" side="right" className="w-full">
+                <button
+                  type="button"
+                  onClick={() => setCollapsed(true)}
+                  className="flex items-center gap-1.5 w-full h-7 px-2 rounded-md text-ink-faint hover:text-ink hover:bg-bg-hover transition-colors duration-fast ease-out text-[11px] font-medium tracking-tightish"
+                >
+                  <ChevronLeft size={14} className="flex-shrink-0" />
+                  <span>Collapse</span>
+                </button>
+              </Tooltip>
+            </div>
+          )}
         </Sidebar>
       </div>
 
@@ -194,8 +193,8 @@ function Shell({ children }) {
           <div className="absolute left-0 top-0 bottom-0 animate-slide-in-right">
             <Sidebar collapsed={false} className="h-full shadow-e3">
               <SidebarContent collapsed={false} onNavigate={closeMobile} onNewFile={openNew} />
-              <div className="flex items-center gap-1 px-3 pb-2 -mt-1">
-                <ThemeCycler />
+              <div className="px-3 pb-3 pt-1">
+                <ThemeSwitch />
               </div>
             </Sidebar>
           </div>
