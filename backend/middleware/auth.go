@@ -82,6 +82,9 @@ func extractToken(c *gin.Context) string {
 	if cookie, err := c.Cookie("session"); err == nil {
 		return cookie
 	}
-	// Check query param
-	return c.Query("token")
+	// NOTE: the ?token= query-param path was intentionally REMOVED. JWTs in the
+	// URL leak into server/proxy access logs, browser history, and Referer
+	// headers, so the session token is accepted only via the Authorization
+	// header or the HttpOnly session cookie.
+	return ""
 }

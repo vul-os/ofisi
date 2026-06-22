@@ -166,8 +166,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			authOK = true
 		}
 	} else {
-		// Shared-password fallback (legacy single-user mode).
-		authOK = req.Password == h.cfg.Auth.Password
+		// Shared-password fallback (legacy single-user mode). Reject an empty
+		// supplied OR configured password outright (an empty configured password
+		// must never authenticate anyone), and compare in constant time to avoid
+		// leaking the password length/prefix via timing.
+		if req.Password != "" && h.cfg.Auth.Password != "" &&
+			subtle.ConstantTimeCompare([]byte(req.Password), []byte(h.cfg.Auth.Password)) == 1 {
+			authOK = true
+		}
 		if subject == "" {
 			subject = "self"
 		}
