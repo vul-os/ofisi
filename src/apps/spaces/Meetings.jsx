@@ -15,7 +15,7 @@ import {
   Calendar, Clock, Copy, Plus, Trash2, Video, Users, Check,
   Lock, ShieldCheck, Circle,
 } from 'lucide-react'
-import { Button, Card, IconButton, Input, Modal, Topbar } from '../../components/ui'
+import { Button, Card, IconButton, Input, Modal, Topbar, LoadingState } from '../../components/ui'
 
 const API = '/api/meetings'
 
@@ -135,9 +135,7 @@ export default function Meetings() {
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
         {loading && (
-          <div className="flex items-center justify-center h-32 text-ink-faint text-sm font-serif italic">
-            Loading…
-          </div>
+          <LoadingState label="Loading meetings…" className="h-32" />
         )}
         {error && !loading && (
           <p className="text-danger text-sm bg-danger-bg border border-line rounded-md px-3 py-2">

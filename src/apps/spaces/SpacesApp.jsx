@@ -19,7 +19,7 @@ import ChannelView from './ChannelView.jsx'
 import { api } from '../../lib/api.js'
 import { STATUS_ONLINE } from '@vulos/relay-client/presence'
 import { PresenceDot, StatusPicker } from '../../components/PresenceBar.jsx'
-import { Button, IconButton, Input, Modal, Sidebar } from '../../components/ui'
+import { Button, IconButton, Input, Modal, Sidebar, LoadingState } from '../../components/ui'
 
 // ---------------------------------------------------------------------------
 // useRestPresence — OFFICE-62 REST/poll presence (replaces fabric stub)
@@ -581,7 +581,7 @@ export default function SpacesApp() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-bg">
-        <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+        <LoadingState label="Loading Spaces…" />
       </div>
     )
   }

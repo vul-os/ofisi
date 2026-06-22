@@ -5,7 +5,7 @@ import {
   Download, ShieldCheck,
 } from 'lucide-react'
 import { api } from '../lib/api.js'
-import { Button, Card, IconButton, Tooltip } from './ui'
+import { Button, Card, IconButton, Tooltip, LoadingState } from './ui'
 
 // OFFICE-45: Envelope Dashboard — per-envelope progress panel.
 // Lists all signing envelopes with signer-level status, sequential/parallel
@@ -245,7 +245,7 @@ function EnvelopeRow({ envelope, onRemind, onCancel, onRefresh }) {
       {expanded && (
         <div className="border-t border-line px-4 py-3 bg-bg-elev2 animate-fade-in">
           {loading && (
-            <p className="text-2xs text-ink-faint py-1 font-serif italic">Loading…</p>
+            <LoadingState size="sm" label="Loading signers…" className="py-2" />
           )}
           {error && (
             <p className="text-2xs text-danger py-1">{error}</p>
@@ -395,9 +395,7 @@ export default function EnvelopeDashboard() {
       </header>
 
       {loading && (
-        <div className="flex justify-center py-12">
-          <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-        </div>
+        <LoadingState label="Loading envelopes…" className="py-12" />
       )}
 
       {error && (

@@ -23,7 +23,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { X, MessageSquare, CheckCircle, RotateCcw, Trash2, Send, ChevronDown, ChevronUp } from 'lucide-react'
 import { api } from '../lib/api'
 import { getCommentStore } from '../lib/crdt/comments'
-import { IconButton, Tabs } from './ui'
+import { IconButton, Tabs, LoadingState } from './ui'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -479,7 +479,7 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
       {/* Comment list — only the comments scroll */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {loading && (
-          <p className="text-xs text-ink-faint text-center py-4">Loading…</p>
+          <LoadingState size="sm" label="Loading comments…" className="py-6" />
         )}
         {!loading && filtered.length === 0 && (
           <p className="text-xs text-ink-faint text-center py-8 font-serif italic">

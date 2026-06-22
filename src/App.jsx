@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from 're
 import { useAuthStore } from './store/authStore'
 import LoginScreen from './components/LoginScreen'
 import Layout from './components/Layout'
+import { LoadingState } from './components/ui'
 import Home from './components/Home'
 import AppHome from './components/AppHome'
 import DocsEditor from './apps/docs/DocsEditor'
@@ -47,7 +48,7 @@ function MeetJoin() {
   )
   return (
     <div className="h-screen flex items-center justify-center bg-bg">
-      <div className="w-7 h-7 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      <LoadingState label="Joining meeting…" />
     </div>
   )
 }
@@ -96,7 +97,7 @@ export default function App() {
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-bg">
-        <div className="w-7 h-7 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+        <LoadingState label="Loading Vulos Office…" />
       </div>
     )
   }
