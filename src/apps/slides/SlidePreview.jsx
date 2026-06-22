@@ -90,9 +90,8 @@ export default function SlidePreview({ data, onClose }) {
               {slide.title && <h2>{slide.title}</h2>}
               {/*
                 IMPORTANT — slide.content is user-authored HTML.  It MUST go
-                through the sanitize() wrapper above (DOMPurify with the
-                shared PURIFY_CONFIG) before being passed to
-                dangerouslySetInnerHTML.  Do not bypass this.
+                through the shared sanitize() wrapper (src/lib/sanitize.js)
+                before being passed to dangerouslySetInnerHTML.  Do not bypass.
               */}
               <div dangerouslySetInnerHTML={{ __html: sanitize(slide.content) }} />
               {slide.notes && <aside className="notes">{slide.notes}</aside>}
