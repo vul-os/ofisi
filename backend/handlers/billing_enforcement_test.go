@@ -12,10 +12,8 @@ package handlers
 // Standalone (unlimited) stays a no-op throughout.
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,7 +25,6 @@ import (
 	"vulos-office/backend/fileacl"
 	"vulos-office/backend/invites"
 	"vulos-office/backend/middleware"
-	"vulos-office/backend/models"
 	"vulos-office/backend/seam"
 	"vulos-office/backend/userauth"
 
@@ -79,112 +76,6 @@ func standaloneBilling(t *testing.T) {
 	t.Cleanup(func() {
 		billing.Configure(seam.NewStandaloneProvider(func() ([]byte, error) { return nil, nil }, false))
 	})
-}
-
-// ============================================================================
-// Recordings upload — auth + gate + meter; account from identity, not ClientIP
-// ============================================================================
-
-// recStorage embeds memStorage and implements the recording surface so the
-// upload handler can persist without panicking.
-type recStorage struct {
-	*memStorage
-	mu   sync.Mutex
-	recs map[string]*models.MeetingRecording
-}
-
-func newRecStorage() *recStorage {
-	return &recStorage{memStorage: newMemStorage(), recs: map[string]*models.MeetingRecording{}}
-}
-func (r *recStorage) CreateRecording(rec *models.MeetingRecording) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.recs[rec.ID] = rec
-	return nil
-}
-
-// recordingUploadRouter mounts the upload handler with an injected verified
-// identity (mirrors the protected route group).
-func recordingUploadRouter(h *RecordingHandler, user string) *gin.Engine {
-	r := gin.New()
-	r.Use(func(c *gin.Context) {
-		c.Set(middleware.CtxAuthenticated, true)
-		c.Set(middleware.CtxUserID, user)
-		c.Next()
-	})
-	r.POST("/meet/:roomId/recordings", h.Upload)
-	return r
-}
-
-func recordingRequest(t *testing.T, payload []byte) *http.Request {
-	t.Helper()
-	var body bytes.Buffer
-	mw := multipart.NewWriter(&body)
-	part, err := mw.CreateFormFile("recording", "clip.webm")
-	if err != nil {
-		t.Fatalf("create part: %v", err)
-	}
-	_, _ = part.Write(payload)
-	mw.Close()
-	req := httptest.NewRequest(http.MethodPost, "/meet/room123/recordings", &body)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	return req
-}
-
-// Standalone: upload succeeds and meters the bytes against the verified account.
-func TestRecordingUpload_Standalone_MetersIdentityNotClientIP(t *testing.T) {
-	// Standalone uses NoopUsage; to assert metering we instead use an unlimited
-	// fixed entitlement with a capture usage (unlimited cap == standalone no-op
-	// for the gate, but metering still fires on commit).
-	usage := configureBilling(t, seam.Entitlement{}) // all caps unlimited
-	h := NewRecordingHandler(newRecStorage())
-	r := recordingUploadRouter(h, "alice@vulos.to")
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, recordingRequest(t, []byte("webm-bytes-here")))
-	if w.Code != http.StatusCreated {
-		t.Fatalf("standalone recording upload should be 201, got %d (%s)", w.Code, w.Body.String())
-	}
-
-	evs := usage.all()
-	if len(evs) != 1 || evs[0].Kind != seam.KindStorage {
-		t.Fatalf("expected one storage meter event, got %+v", evs)
-	}
-	if evs[0].AccountID != "alice@vulos.to" {
-		t.Fatalf("metering must be attributed to the verified identity, got %q", evs[0].AccountID)
-	}
-	if evs[0].Value != int64(len("webm-bytes-here")) {
-		t.Fatalf("metered byte count wrong: got %d", evs[0].Value)
-	}
-}
-
-// Over-quota: the storage gate rejects the upload with 402 and meters nothing.
-func TestRecordingUpload_OverQuota_402(t *testing.T) {
-	usage := configureBilling(t, seam.Entitlement{MaxStorageBytes: 4})
-	h := NewRecordingHandler(newRecStorage())
-	r := recordingUploadRouter(h, "alice@vulos.to")
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, recordingRequest(t, []byte("way more than four bytes")))
-	if w.Code != http.StatusPaymentRequired {
-		t.Fatalf("over-quota recording upload should be 402, got %d (%s)", w.Code, w.Body.String())
-	}
-	if len(usage.all()) != 0 {
-		t.Fatalf("a rejected upload must meter nothing, got %+v", usage.all())
-	}
-}
-
-// Suspended: office gate blocks with 403 before any bytes are read/written.
-func TestRecordingUpload_Suspended_403(t *testing.T) {
-	configureBilling(t, seam.Entitlement{Suspended: true})
-	h := NewRecordingHandler(newRecStorage())
-	r := recordingUploadRouter(h, "alice@vulos.to")
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, recordingRequest(t, []byte("x")))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("suspended recording upload should be 403, got %d (%s)", w.Code, w.Body.String())
-	}
 }
 
 // ============================================================================

@@ -14,16 +14,18 @@ import SigningSetup from './apps/pdf/SigningSetup'
 import Settings from './components/Settings'
 import SignView from './apps/pdf/SignView'
 import EnvelopeDashboard from './components/EnvelopeDashboard'
-import SpacesApp from './apps/spaces/SpacesApp'
-import Meetings from './apps/spaces/Meetings'
-import Room from './apps/spaces/Room'
 import Verify from './components/Verify'
 import CalendarApp from './apps/calendar/CalendarApp'
 import ContactsApp from './apps/contacts/ContactsApp'
 
+// Chat + huddles ("Spaces"/Talk) is now the standalone Vulos Talk product.
+// seam-C handoff: chat/meeting deep-links redirect to the Talk app instead of
+// being served in-process. See backend/seam for the integration contract.
+const TALK_URL = import.meta.env.VITE_TALK_URL || 'https://talk.vulos.org'
+
 // Public routes that bypass Vulos auth entirely.
 // External signers and external verifiers have no Vulos account.
-const PUBLIC_PREFIXES = ['/sign/', '/room/', '/verify']
+const PUBLIC_PREFIXES = ['/sign/', '/verify']
 
 function isPublicRoute(pathname) {
   return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))
@@ -54,12 +56,18 @@ export default function App() {
     }
   }, []) // eslint-disable-line
 
+  // seam-C handoff: chat/huddle deep-links live in the Talk product now.
+  // Redirect the browser there (carrying the sub-path) rather than 404-ing.
+  if (/^\/(spaces|meetings|room)(\/|$)/.test(location.pathname)) {
+    window.location.href = TALK_URL + location.pathname + location.search
+    return null
+  }
+
   // Render public routes immediately — no auth check, no Layout shell.
   if (isPublicRoute(location.pathname)) {
     return (
       <Routes>
         <Route path="/sign/:token" element={<SignView />} />
-        <Route path="/room/:sessionId" element={<Room />} />
         <Route path="/verify" element={<Verify />} />
       </Routes>
     )
@@ -91,10 +99,6 @@ export default function App() {
         <Route path="/pdf-editor" element={<PDFEditor />} />
         <Route path="/signing-setup" element={<SigningSetup />} />
         <Route path="/envelopes" element={<EnvelopeDashboard />} />
-        <Route path="/spaces" element={<SpacesApp />} />
-        <Route path="/spaces/:channelId" element={<SpacesApp />} />
-        <Route path="/meetings" element={<Meetings />} />
-        <Route path="/room/:sessionId" element={<Room />} />
         <Route path="/pdf/:id" element={<PDFEditor />} />
         <Route path="/calendar" element={<CalendarApp />} />
         <Route path="/contacts" element={<ContactsApp />} />

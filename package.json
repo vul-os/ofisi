@@ -10,9 +10,8 @@
     "build:frontend": "vite build",
     "build:lib": "vite build --config vite.config.lib.js",
     "build:office": "vite build --config vite.config.office.js",
-    "build:talk": "vite build --config vite.config.talk.js",
     "build:calendar": "vite build --config vite.config.calendar.js",
-    "build:all": "npm run build:frontend && npm run build:lib && npm run build:office && npm run build:talk && npm run build:calendar",
+    "build:all": "npm run build:frontend && npm run build:lib && npm run build:office && npm run build:calendar",
     "build:go": "go build -o vulos-office .",
     "start": "go run .",
     "preview": "vite preview",
@@ -52,12 +51,6 @@
       "require": "./dist-lib/pdf.cjs",
       "default": "./dist-lib/pdf.js"
     },
-    "./spaces": {
-      "source": "./src/apps/spaces/lib.jsx",
-      "import": "./dist-lib/spaces.js",
-      "require": "./dist-lib/spaces.cjs",
-      "default": "./dist-lib/spaces.js"
-    },
     "./calendar": {
       "source": "./src/apps/calendar/lib.jsx",
       "import": "./dist-lib/calendar.js",
@@ -80,7 +73,6 @@
     "src/apps/sheets/",
     "src/apps/slides/",
     "src/apps/pdf/",
-    "src/apps/spaces/",
     "src/apps/calendar/",
     "src/apps/contacts/",
     "README.md",

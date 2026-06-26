@@ -17,7 +17,6 @@ import (
 	"vulos-office/backend/middleware"
 	"vulos-office/backend/obs"
 	"vulos-office/backend/seam"
-	"vulos-office/backend/services/meeting"
 	"vulos-office/backend/storage"
 	"vulos-office/backend/userauth"
 
@@ -93,15 +92,6 @@ func main() {
 		log.Fatalf("Contact store init failed (%s): %v", contactDSN, err)
 	}
 	log.Printf("Contact store → %s", contactDSN)
-
-	lobbyDSN := os.Getenv("VULOS_LOBBY_DB")
-	if lobbyDSN == "" {
-		lobbyDSN = cfg.Server.DataDir + "/lobby.db"
-	}
-	if err := meeting.InitDefault(lobbyDSN); err != nil {
-		log.Fatalf("Lobby store init failed (%s): %v", lobbyDSN, err)
-	}
-	log.Printf("Lobby store → %s", lobbyDSN)
 
 	// ── Org-bucket object store ───────────────────────────────────────────────
 	// ResolveOrgBucket reads VULOS_ORG_ID (cloud-injected org identifier) and
@@ -234,10 +224,9 @@ func main() {
 	protected.GET("/local-files", localFilesHandler.Scan)
 	protected.GET("/local-files/serve", localFilesHandler.Serve)
 
-	// OFFICE-63: short-lived TURN/ICE credentials for Vulos Spaces WebRTC calls.
-	// Available authenticated (so creds aren't issued anonymously when auth is on).
-	turnHandler := handlers.NewTURNHandler()
-	protected.GET("/turn/credentials", turnHandler.Credentials)
+	// Team chat + huddles ("Spaces") is now the standalone Vulos Talk product:
+	// its meeting/lobby/TURN/recording + spaces/presence API moved to vulos-talk.
+	// Office hands those routes off via seam-C (the SPA redirects to talk.vulos.org).
 
 	// OFFICE-41: envelope CRUD (field-placement setup).
 	envelopeHandler := handlers.NewEnvelopeHandler(store)
@@ -283,43 +272,6 @@ func main() {
 	slidesExportHandler := handlers.NewSlidesExportHandler(store)
 	protected.GET("/slides/:id/export", slidesExportHandler.Export)
 
-	// OFFICE-65 + OFFICE-MEET: unified meeting rooms with lobby, signed tokens,
-	// organizer-only controls. The MeetingHandler is the single source of truth;
-	// MeetJoinHandler reads meeting metadata (LobbyRequired, OrganizerID) from
-	// the same durable Storage instead of an in-memory map.
-	meetingHandler := handlers.NewMeetingHandler(store)
-	protected.POST("/meetings", meetingHandler.Create)
-	protected.GET("/meetings", meetingHandler.List)
-	protected.GET("/meetings/:id", meetingHandler.Get)
-	protected.PUT("/meetings/:id", meetingHandler.Update)
-	protected.DELETE("/meetings/:id", meetingHandler.Delete)
-	// Join is public — external invitees follow a bare link with no Vulos account.
-	api.GET("/meetings/:id/join", meetingHandler.Join)
-
-	meetJoinHandler := handlers.NewMeetJoinHandler(store)
-	// Token issuance: semi-public (anon token if no auth; signed-in token if auth present).
-	api.POST("/meet/:roomId/token", meetJoinHandler.IssueToken)
-	// Lobby endpoints: token required in header.
-	api.POST("/meet/:roomId/lobby/enter", meetJoinHandler.LobbyEnter)
-	protected.GET("/meet/:roomId/lobby", meetJoinHandler.LobbyList)
-	protected.POST("/meet/:roomId/admit", meetJoinHandler.Admit)
-	protected.POST("/meet/:roomId/admit-all", meetJoinHandler.AdmitAll)
-	protected.POST("/meet/:roomId/deny", meetJoinHandler.Deny)
-
-	// Recording UPLOAD is an authenticated, gated, metered storage write — it
-	// MUST be on the protected group so the account is derived from the verified
-	// identity (not ClientIP) and the storage gate/meter run on a real account.
-	// Listing/download/delete are ALL authenticated and membership-checked so a
-	// stranger cannot enumerate or download recordings by guessing a roomId.
-	recordingHandler := handlers.NewRecordingHandler(store)
-	protected.POST("/meet/:roomId/recordings", recordingHandler.Upload)
-	// List + Download read meeting recordings: they MUST be authenticated and
-	// membership-checked (organizer / invitee / uploader / admin), not public —
-	// otherwise anyone who guesses a roomId can enumerate and download recordings.
-	protected.GET("/meet/:roomId/recordings", recordingHandler.List)
-	protected.GET("/meet/:roomId/recordings/:rid", recordingHandler.Download)
-	protected.DELETE("/meet/:roomId/recordings/:rid", recordingHandler.Delete)
-
 	// Sheets XLSX import/export endpoints.
 	sheetsHandler := handlers.NewSheetsHandler(store)
 	protected.POST("/sheets/:id/import", sheetsHandler.Import)
@@ -363,44 +315,9 @@ func main() {
 	handlers.StartReminderWorker(nil)
 	handlers.StartSubscriptionRefresher()
 
-	// OFFICE-62: REST/poll presence for Vulos Spaces (heartbeat + roster).
-	presenceHandler := handlers.NewPresenceHandler()
-	protected.POST("/spaces/presence/heartbeat", presenceHandler.Heartbeat)
-	protected.GET("/spaces/presence/roster", presenceHandler.Roster)
-
-	// OFFICE-60/61: Vulos Spaces — channels, DMs, threads, messages.
-	// OFFICE-SPACES-1/4/5/6: reactions, status, search, pins (additive via SpacesHandlerExt).
-	spacesHandler := handlers.NewSpacesHandlerExt()
-	protected.GET("/spaces/channels", spacesHandler.ListChannels)
-	protected.POST("/spaces/channels", spacesHandler.CreateChannel)
-	protected.POST("/spaces/channels/:channelId/join", spacesHandler.JoinChannel)
-	protected.GET("/spaces/channels/:channelId/members", spacesHandler.ListMembers)
-	protected.POST("/spaces/channels/:channelId/members", spacesHandler.InviteMember)
-	protected.PUT("/spaces/channels/:channelId/members/me/name", spacesHandler.SetMyDisplayName)
-	protected.GET("/spaces/channels/:channelId/messages", spacesHandler.ListMessages)
-	protected.POST("/spaces/channels/:channelId/messages", spacesHandler.SendMessage)
-	protected.PUT("/spaces/channels/:channelId/messages/:msgId", spacesHandler.EditMessage)
-	protected.DELETE("/spaces/channels/:channelId/messages/:msgId", spacesHandler.DeleteMessage)
-	protected.POST("/spaces/channels/:channelId/read", spacesHandler.MarkRead)
-	protected.GET("/spaces/channels/:channelId/read", spacesHandler.GetReadState)
-	protected.GET("/spaces/channels/:channelId/ops", spacesHandler.ExportOps)
-	protected.POST("/spaces/ops", spacesHandler.MergeOps)
-	// Reactions (OFFICE-SPACES-1)
-	protected.GET("/spaces/channels/:channelId/reactions", spacesHandler.ListReactions)
-	protected.POST("/spaces/messages/:msgId/react", spacesHandler.React)
-	protected.DELETE("/spaces/messages/:msgId/react", spacesHandler.Unreact)
-	// Pins (OFFICE-SPACES-6)
-	protected.GET("/spaces/channels/:channelId/pins", spacesHandler.ListPins)
-	protected.POST("/spaces/channels/:channelId/pins", spacesHandler.PinMessage)
-	protected.DELETE("/spaces/channels/:channelId/pins/:msgId", spacesHandler.UnpinMessage)
-	// User status (OFFICE-SPACES-4)
-	protected.PUT("/spaces/users/me/status", spacesHandler.SetStatus)
-	protected.GET("/spaces/users/:userId/status", spacesHandler.GetStatus)
-	// Search (OFFICE-SPACES-5) — FTS5-backed when the Persister supports it.
-	protected.GET("/spaces/channels/:channelId/search", spacesHandler.SearchMessages)
-	// Threading: thread view + thread-scoped reply.
-	protected.GET("/spaces/channels/:channelId/threads/:parentId", spacesHandler.ListThread)
-	protected.POST("/spaces/channels/:channelId/threads/:parentId/reply", spacesHandler.ReplyThread)
+	// NOTE: Vulos Spaces (presence + channels/DMs/threads/messages) moved to the
+	// standalone Vulos Talk product (vulos-talk). The /spaces/* and /meet/* APIs
+	// are served there; Office redirects those deep-links via seam-C.
 
 	// Serve embedded frontend (SPA fallback to index.html)
 	staticFS, err := fs.Sub(distFS, "dist")

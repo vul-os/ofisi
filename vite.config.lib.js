@@ -19,7 +19,6 @@ const entries = {
   sheets:   resolve(dir, 'src/apps/sheets/lib.jsx'),
   slides:   resolve(dir, 'src/apps/slides/lib.jsx'),
   pdf:      resolve(dir, 'src/apps/pdf/lib.jsx'),
-  spaces:   resolve(dir, 'src/apps/spaces/lib.jsx'),
   calendar: resolve(dir, 'src/apps/calendar/lib.jsx'),
   contacts: resolve(dir, 'src/apps/contacts/lib.jsx'),
 }

@@ -36,12 +36,16 @@ import { Sidebar, IconButton, Tooltip, ThemeSwitch } from './ui'
 
 // Icons stay neutral (ink-faint) at rest so the rail reads calm; they brighten
 // to teal only when their app is active — the cloud "restrained accent" trait.
+// seam-C handoff: team chat + huddles is the standalone Vulos Talk product now.
+// The "Talk" rail item launches it (external) instead of routing in-process.
+const TALK_URL = import.meta.env.VITE_TALK_URL || 'https://talk.vulos.org'
+
 const NAV_APPS = [
   { label: 'Docs',     icon: FileText,      route: '/docs'     },
   { label: 'Sheets',   icon: Table2,        route: '/sheets'   },
   { label: 'Slides',   icon: Presentation,  route: '/slides'   },
   { label: 'PDF',      icon: FileSearch,    route: '/pdf'      },
-  { label: 'Spaces',   icon: MessageSquare, route: '/spaces'   },
+  { label: 'Talk',     icon: MessageSquare, external: TALK_URL },
   { label: 'Calendar', icon: CalendarDays,  route: '/calendar', beta: true },
   { label: 'Contacts', icon: BookUser,      route: '/contacts', beta: true },
 ]
@@ -87,13 +91,15 @@ function SidebarContent({ collapsed, onNavigate, onNewFile }) {
       </Sidebar.Section>
 
       <Sidebar.Section label="Apps">
-        {NAV_APPS.map(({ label, icon, route, beta }) => (
+        {NAV_APPS.map(({ label, icon, route, external, beta }) => (
           <Sidebar.Item
-            key={route}
-            to={route}
+            key={route ?? external}
+            to={external ? undefined : route}
             icon={icon}
-            title={beta ? `${label} (beta)` : label}
-            onClick={onNavigate}
+            title={external ? `${label} (opens in a new tab)` : beta ? `${label} (beta)` : label}
+            onClick={external
+              ? () => { window.open(external, '_blank', 'noopener'); onNavigate?.() }
+              : onNavigate}
           >
             {label}
             {beta && !collapsed && (
