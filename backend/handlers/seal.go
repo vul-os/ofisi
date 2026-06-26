@@ -63,25 +63,25 @@ func NewSealHandlerWithAuthz(store storage.Storage, uploadsDir string, authz *Fi
 
 // ManifestSigner is one row in the completion manifest.
 type ManifestSigner struct {
-	SignerID   string    `json:"signer_id"`
-	Name       string    `json:"name"`
-	Email      string    `json:"email"`
-	Identity   string    `json:"identity"`
-	IP         string    `json:"ip"`
-	SignedAt   time.Time `json:"signed_at"`
-	DocHashBefore string `json:"doc_hash_before"`
-	DocHashAfter  string `json:"doc_hash_after"`
-	Token         string `json:"token"` // Ed25519 token from OFFICE-44 (may be empty)
+	SignerID      string    `json:"signer_id"`
+	Name          string    `json:"name"`
+	Email         string    `json:"email"`
+	Identity      string    `json:"identity"`
+	IP            string    `json:"ip"`
+	SignedAt      time.Time `json:"signed_at"`
+	DocHashBefore string    `json:"doc_hash_before"`
+	DocHashAfter  string    `json:"doc_hash_after"`
+	Token         string    `json:"token"` // Ed25519 token from OFFICE-44 (may be empty)
 }
 
 // AuditManifest is the full machine-readable record attached to the sealed PDF.
 type AuditManifest struct {
-	EnvelopeID   string           `json:"envelope_id"`
-	Title        string           `json:"title"`
-	SourceFileID string           `json:"source_file_id"`
-	SealedAt     time.Time        `json:"sealed_at"`
-	FinalHash    string           `json:"final_doc_hash"` // SHA-256 of the sealed PDF
-	Signers      []ManifestSigner `json:"signers"`
+	EnvelopeID   string               `json:"envelope_id"`
+	Title        string               `json:"title"`
+	SourceFileID string               `json:"source_file_id"`
+	SealedAt     time.Time            `json:"sealed_at"`
+	FinalHash    string               `json:"final_doc_hash"` // SHA-256 of the sealed PDF
+	Signers      []ManifestSigner     `json:"signers"`
 	AuditEvents  []*models.AuditEvent `json:"audit_events"`
 }
 
@@ -168,7 +168,7 @@ func (h *SealHandler) Download(c *gin.Context) {
 	res.Commit(c.Request.Context())
 
 	// Best-effort push to org bucket — SQLite/local is still the primary source.
-	if err := SharedBucketStore().PutObject(requesterID(c), "seal/"+envelopeID+".pdf", sealedBytes, "application/pdf"); err != nil {
+	if err := SharedBucketStore().PutObject(c, requesterID(c), "seal/"+envelopeID+".pdf", sealedBytes, "application/pdf"); err != nil {
 		log.Printf("[seal] bucket sync envelope=%s: %v (ignoring)", envelopeID, err)
 	}
 
@@ -238,11 +238,13 @@ func (h *SealHandler) Manifest(c *gin.Context) {
 // buildSealedPDF assembles the final PDF bytes.
 //
 // Hash design (avoids the chicken-and-egg problem):
-//   FinalDocHash = SHA-256(sourcePDF + certificate-page)   — computed BEFORE the
-//   manifest is embedded.  The manifest JSON records this hash, and when the
-//   manifest is later attached the full PDF bytes change, but the hash field does
-//   not.  Verification re-extracts the manifest, reads FinalDocHash, and then
-//   re-hashes the pre-manifest portion of the PDF to confirm they match.
+//
+//	FinalDocHash = SHA-256(sourcePDF + certificate-page)   — computed BEFORE the
+//	manifest is embedded.  The manifest JSON records this hash, and when the
+//	manifest is later attached the full PDF bytes change, but the hash field does
+//	not.  Verification re-extracts the manifest, reads FinalDocHash, and then
+//	re-hashes the pre-manifest portion of the PDF to confirm they match.
+//
 // ------------------------------------------------------------
 func (h *SealHandler) buildSealedPDF(env *models.Envelope) ([]byte, *AuditManifest, error) {
 	// 1. Load source PDF bytes.

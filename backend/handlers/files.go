@@ -126,7 +126,7 @@ func (h *FileHandler) Create(c *gin.Context) {
 
 	// Async write-through to org bucket when content is present.
 	if contentBytes != nil {
-		if err := SharedBucketStore().PutObject(account, "file/"+file.ID, contentBytes, "application/json"); err != nil {
+		if err := SharedBucketStore().PutObject(c, account, "file/"+file.ID, contentBytes, "application/json"); err != nil {
 			log.Printf("[files] bucket sync create file=%s: %v (SQLite is primary — continuing)", file.ID, err)
 		}
 	}
@@ -192,7 +192,7 @@ func (h *FileHandler) Update(c *gin.Context) {
 
 	// Sync updated content blob to bucket (SQLite is still the primary source).
 	if contentBytes != nil {
-		if err := SharedBucketStore().PutObject(account, "file/"+id, contentBytes, "application/json"); err != nil {
+		if err := SharedBucketStore().PutObject(c, account, "file/"+id, contentBytes, "application/json"); err != nil {
 			log.Printf("[files] bucket sync update file=%s: %v (SQLite is primary — continuing)", id, err)
 		}
 	}
@@ -221,7 +221,7 @@ func (h *FileHandler) Delete(c *gin.Context) {
 
 	// Best-effort removal from the org bucket (ignore error — bucket object
 	// may not exist if S3 was not configured when the file was created).
-	if err := SharedBucketStore().DeleteObject(requesterID(c), "file/"+id); err != nil {
+	if err := SharedBucketStore().DeleteObject(c, requesterID(c), "file/"+id); err != nil {
 		log.Printf("[files] bucket sync delete file=%s: %v (ignoring)", id, err)
 	}
 

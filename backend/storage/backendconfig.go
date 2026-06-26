@@ -121,7 +121,11 @@ type OfficeS3Client struct {
 	prefix          string
 	accessKeyID     string
 	secretAccessKey string
-	httpClient      *http.Client
+	// sessionToken is the optional STS/temporary-credential token. When non-empty
+	// it is sent as the X-Amz-Security-Token header and folded into the SigV4
+	// signed-headers set. Empty for long-lived (Tigris/MinIO) credentials.
+	sessionToken string
+	httpClient   *http.Client
 }
 
 // NewOfficeS3Client constructs an S3 client from an OfficeBackendConfig.
@@ -263,6 +267,12 @@ func (c *OfficeS3Client) signV4(req *http.Request, body []byte, t time.Time) {
 	req.Header.Set("Host", req.URL.Host)
 
 	signed := []string{"host", "x-amz-content-sha256", "x-amz-date"}
+	if c.sessionToken != "" {
+		// Temporary credentials: the security token MUST be part of the signed
+		// header set for the signature to validate against S3/STS.
+		req.Header.Set("X-Amz-Security-Token", c.sessionToken)
+		signed = append(signed, "x-amz-security-token")
+	}
 	sort.Strings(signed)
 	var canonHeaders strings.Builder
 	for _, h := range signed {
@@ -274,6 +284,8 @@ func (c *OfficeS3Client) signV4(req *http.Request, body []byte, t time.Time) {
 			v = payloadHash
 		case "x-amz-date":
 			v = amzDate
+		case "x-amz-security-token":
+			v = c.sessionToken
 		}
 		canonHeaders.WriteString(h + ":" + v + "\n")
 	}

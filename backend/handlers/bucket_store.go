@@ -1,44 +1,90 @@
 package handlers
 
-// bucket_store.go — FIX-OFFICE-STORE-WIRE-01: thin wrapper around the org-bucket
-// S3 client so file-CRUD and seal handlers can push blobs without importing the
-// storage package's internal client directly.
+// bucket_store.go — UNIFIED-STORAGE-01: per-request blob storage seam.
 //
-// All methods nil-check OrgBucketClient() on every call — when no S3 backend is
-// configured (OSS mode / no TIGRIS_*/VULOS_MINIO_* env vars) they return gracefully
-// so callers can skip the S3 path without extra guard code.
+// Office writes file/seal blobs through this thin wrapper. The underlying S3
+// client is now derived FROM THE REQUEST:
+//
+//   - When the OS gateway injects X-Vulos-Storage-* headers, every blob is
+//     written to that per-user bucket/endpoint/credentials, namespaced under
+//     "<X-Vulos-Storage-Prefix>/office/...". Injection is per-request/per-user,
+//     so the client is resolved per call (cached by credential fingerprint in
+//     the storage package) — never assumed process-wide.
+//
+//   - When the headers are absent (Office running standalone, not behind the
+//     gateway), it falls back EXACTLY to today's behavior: the process-wide
+//     OrgBucketClient() (env TIGRIS_*/VULOS_MINIO_*) or a silent no-op when no
+//     S3 backend is configured.
+//
+// In both modes the object key is storage.OrgScopedKey(accountID, name), so the
+// per-account scoping that fileacl relies on is preserved — under the injected
+// prefix in seam mode, and under the org prefix (if any) otherwise.
 
 import (
 	"io"
 	"log"
 
 	"vulos-office/backend/storage"
+
+	"github.com/gin-gonic/gin"
 )
 
-// BucketStore is a thin convenience wrapper around the process-wide org-bucket
-// S3 client. Create instances via SharedBucketStore().
+// BucketStore is a thin convenience wrapper around the office object store.
+// Create instances via SharedBucketStore().
 type BucketStore struct{}
 
 // sharedBucketStore is the process-wide singleton (always non-nil).
 var sharedBucketStore = &BucketStore{}
 
 // SharedBucketStore returns the process-wide BucketStore singleton.
-// The BucketStore itself is always non-nil; the underlying S3 client may be nil
-// when no S3 backend is configured, in which case every method is a no-op.
+// The BucketStore itself is always non-nil; the resolved S3 client may be nil
+// for a given request when no backend applies, in which case every method is a
+// no-op.
 func SharedBucketStore() *BucketStore {
 	return sharedBucketStore
 }
 
-// PutObject uploads data to the org-scoped key "<accountID>/<name>".
-// When the S3 client is not configured (nil), it logs once and returns nil
-// so callers can ignore the error and treat SQLite as the sole source.
-// The contentType argument is informational — the underlying OfficeS3Client
-// does not forward Content-Type headers in this iteration, but the parameter
-// is kept for future use and API compatibility.
-func (b *BucketStore) PutObject(accountID, name string, data []byte, _ string) error {
-	client := storage.OrgBucketClient()
+// seamConfigFromContext reads the per-request storage seam injected by the OS
+// gateway. All values are empty when running standalone (headers absent).
+func seamConfigFromContext(c *gin.Context) storage.SeamStorageConfig {
+	if c == nil {
+		return storage.SeamStorageConfig{}
+	}
+	return storage.SeamStorageConfig{
+		Endpoint:     c.GetHeader("X-Vulos-Storage-Endpoint"),
+		Bucket:       c.GetHeader("X-Vulos-Storage-Bucket"),
+		Prefix:       c.GetHeader("X-Vulos-Storage-Prefix"),
+		Region:       c.GetHeader("X-Vulos-Storage-Region"),
+		AccessKey:    c.GetHeader("X-Vulos-Storage-Access-Key"),
+		SecretKey:    c.GetHeader("X-Vulos-Storage-Secret-Key"),
+		SessionToken: c.GetHeader("X-Vulos-Storage-Session-Token"),
+	}
+}
+
+// clientFor resolves the S3 client to use for this request: the gateway-injected
+// per-user client when the seam headers are present, otherwise the process-wide
+// OrgBucketClient(). May return (nil, nil) when neither is configured.
+func (b *BucketStore) clientFor(c *gin.Context) (*storage.OfficeS3Client, error) {
+	cfg := seamConfigFromContext(c)
+	if cfg.Present() {
+		return storage.SeamS3Client(cfg)
+	}
+	return storage.OrgBucketClient(), nil
+}
+
+// PutObject uploads data for the current request's caller under the key
+// "<accountID>/<name>" (further namespaced by the resolved client's prefix).
+// When no S3 client applies (standalone, no backend) it is a silent no-op so
+// callers can treat SQLite/local as the sole source. The contentType argument
+// is informational and currently unused.
+func (b *BucketStore) PutObject(c *gin.Context, accountID, name string, data []byte, _ string) error {
+	client, err := b.clientFor(c)
+	if err != nil {
+		log.Printf("[bucket_store] resolve client: %v", err)
+		return err
+	}
 	if client == nil {
-		return nil // S3 not configured — silent no-op
+		return nil // no backend — silent no-op
 	}
 	key := storage.OrgScopedKey(accountID, name)
 	if err := client.Put(key, data); err != nil {
@@ -48,13 +94,16 @@ func (b *BucketStore) PutObject(accountID, name string, data []byte, _ string) e
 	return nil
 }
 
-// GetObject downloads the object at the org-scoped key "<accountID>/<name>".
-// Returns (nil, nil) when the S3 client is not configured so callers can skip
-// the S3 path cleanly.
-func (b *BucketStore) GetObject(accountID, name string) ([]byte, error) {
-	client := storage.OrgBucketClient()
+// GetObject downloads the object for the current request's caller at the key
+// "<accountID>/<name>". Returns (nil, nil) when no S3 client applies so callers
+// can skip the object-store path cleanly.
+func (b *BucketStore) GetObject(c *gin.Context, accountID, name string) ([]byte, error) {
+	client, err := b.clientFor(c)
+	if err != nil {
+		return nil, err
+	}
 	if client == nil {
-		return nil, nil // S3 not configured — signal "no object, not an error"
+		return nil, nil // no backend — signal "no object, not an error"
 	}
 	key := storage.OrgScopedKey(accountID, name)
 	rc, err := client.Get(key)
@@ -70,12 +119,15 @@ func (b *BucketStore) GetObject(accountID, name string) ([]byte, error) {
 	return data, nil
 }
 
-// DeleteObject removes the object at the org-scoped key "<accountID>/<name>".
-// Silent no-op when S3 is not configured.
-func (b *BucketStore) DeleteObject(accountID, name string) error {
-	client := storage.OrgBucketClient()
+// DeleteObject removes the object for the current request's caller at the key
+// "<accountID>/<name>". Silent no-op when no S3 client applies.
+func (b *BucketStore) DeleteObject(c *gin.Context, accountID, name string) error {
+	client, err := b.clientFor(c)
+	if err != nil {
+		return err
+	}
 	if client == nil {
-		return nil // S3 not configured — no-op
+		return nil // no backend — no-op
 	}
 	key := storage.OrgScopedKey(accountID, name)
 	if err := client.Delete(key); err != nil {
