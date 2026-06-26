@@ -1,18 +1,23 @@
 # Vulos Office — Roadmap
 
-Vulos Office is the productivity surface of the Vulos project — a self-hosted,
-open-source (MIT) suite for Documents, Sheets, Slides, and PDF that runs as a
-single Go binary with a React frontend. Today it is a fast, private, local-first
-editor. This roadmap charts its growth into a **networked** office: the same
-documents, edited together in real time by people on different Vulos instances;
-PDFs signed with cryptographic audit trails; and a Slack-and-Meet–equivalent
-team workspace — all riding the **Vulos peer fabric** that already connects and
-routes instances across the network, with relay/TURN fallback.
+Vulos Office is the **documents** surface of the Vulos project — a self-hosted,
+open-source (MIT) suite for Documents, Sheets, Slides, PDF/Signing, Calendar, and
+Contacts that runs as a single Go binary with a React frontend. Today it is a
+fast, private, local-first editor. This roadmap charts its growth into a
+**networked** office: the same documents, edited together in real time by people
+on different Vulos instances, and PDFs signed with cryptographic audit trails —
+all riding the **Vulos peer fabric** that already connects and routes instances
+across the network, with relay/TURN fallback.
 
-The throughline: Vulos Office never invents its own network. Collaboration,
-chat, and calling reuse the **same fabric the Vulos OS uses for device routing**
-— P2P first (cr-sqlite/CRDT sync to buckets, WebRTC for media), relay/TURN when
-direct connectivity fails. *Vulos — open.*
+> **Product scope.** Vulos Office is documents-only. Team chat + Spaces ship as the
+> separate **vulos-talk** product and video calling as **vulos-meet**; the **Vulos
+> Workspace** shell combines Office, Talk, and Meet into one suite. Chat/calling
+> roadmap items previously tracked here now live in those repos.
+
+The throughline: Vulos Office never invents its own network. Real-time document
+collaboration reuses the **same fabric the Vulos OS uses for device routing** —
+P2P first (cr-sqlite/CRDT sync to buckets), relay/TURN when direct connectivity
+fails. *Vulos — open.*
 
 > **Stack invariants (FROZEN):** Go backend; React 18 / Vite / Tailwind frontend,
 > **JSX only — never `.tsx`**; MIT license. Collaboration transport is the Vulos
@@ -192,66 +197,21 @@ identity ties to the **Vulos account**.
 
 ---
 
-## 4. Vulos Spaces — Team Chat, Calling, and Meetings
+## 4. Chat, Calling & Meetings — moved to vulos-talk / vulos-meet
 
-The largest new pillar: a **Slack + Google-Meet equivalent** built directly on
-the peer fabric. Team channels, DMs, and threads for async work; presence and
-status; and real-time **voice + video calling, screen-share, and scheduled
-meetings / meeting rooms** for synchronous work. Messaging syncs as CRDTs over
-the same bucket transport as the rest of Vulos; calling uses **WebRTC P2P with
-the Vulos relay/TURN as fallback** — the same fabric the OS uses for device
-routing. Vulos Spaces is how a team that already runs Vulos OS + Office stops
-paying for Slack and Zoom.
+Team chat + Spaces (channels, DMs, threads, reactions, pins, presence) and
+real-time voice/video calling + meetings were originally planned as an Office
+pillar. They have since been **extracted into their own products**:
 
-### Goals
+- **vulos-talk** — team chat + Spaces (the Slack equivalent).
+- **vulos-meet** — voice/video calling, screen-share, and meeting rooms (the
+  Google-Meet equivalent).
 
-- A complete team-communication surface — channels, DMs, threads, presence — that
-  is self-hosted and federates over the Vulos fabric between instances.
-- First-class real-time media: 1:1 and group voice/video, screen-share, and
-  scheduled meeting rooms, all P2P-first with relay/TURN fallback.
-- One identity and one fabric across Office + Spaces: the people you edit docs
-  with are the people you call, keyed to Vulos account.
-- No new central server: messages converge via CRDT/bucket sync, media via
-  WebRTC + Vulos relay — reusing Sections 2 and the OS RELAY layer.
-
-### Concrete features
-
-- **Channels:** public/private team channels; membership; per-channel history;
-  CRDT-synced messages so channels converge across instances offline-tolerant.
-- **Direct messages & group DMs:** 1:1 and small-group conversations.
-- **Threads:** threaded replies on any message; unread/mention tracking.
-- **Presence & status:** online/away/in-a-call indicators and custom status,
-  reusing the presence primitive from Section 2.
-- **Voice & video calling:** 1:1 and group calls over **WebRTC P2P**, with the
-  **Vulos relay/TURN** as fallback for NAT-blocked peers (TURN creds minted by
-  the cloud signaling layer — see RELAY).
-- **Screen-share:** share a window/screen into a call.
-- **Scheduled meetings / meeting rooms:** named, persistent or scheduled rooms
-  (the Google-Meet equivalent); join link; lobby; per-room presence; calendar-
-  style scheduling.
-- **Meeting recording:** client-side MediaRecorder captures the local stream,
-  uploads as WebM to the org bucket (or local fallback when no bucket configured);
-  consent banner shown before recording starts; organiser can list and download
-  past recordings; `recording_enabled` flag settable per meeting.
-- **In-call essentials:** mute/camera controls, active-speaker, participant
-  roster, basic in-call chat tied to the channel/thread.
-- **Fabric/relay integration:** signaling (offer/answer/ICE) and TURN credential
-  minting reuse the OS [RELAY](../vulos-cloud/roadmap/RELAY.md) signaling service;
-  P2P preferred, relay fallback, never a third-party media SFU in the OSS core.
-
-### Explicit non-goals
-
-- **No third-party media stack (Zoom/Twilio/Agora).** WebRTC + Vulos relay/TURN
-  only; an optional self-hostable SFU for large rooms is a later consideration,
-  not v1.
-- **No giant-webinar scale** (thousands of viewers) in v1 — target team-sized
-  calls and rooms; mesh/relay first, SFU later if needed.
-- **No separate identity system.** Spaces identity is the Vulos account,
-  shared with Office collaboration.
-- **No bespoke signaling server.** Reuse the OS fabric's signaling + relay; do
-  not build a parallel one for Office/Spaces.
-- **No telephony/PSTN dial-in** in the OSS core.
-```
+Both ride the same Vulos peer fabric (CRDT/bucket sync for messages, WebRTC +
+relay/TURN for media) and share the one Vulos account identity with Office. The
+**Vulos Workspace** shell combines Office, Talk, and Meet into a single suite;
+Office's sidebar links out to Talk/Meet but never embeds them. See the
+`vulos-talk` and `vulos-meet` repos for their roadmaps and threat models.
 
 ---
 
@@ -259,7 +219,7 @@ paying for Slack and Zoom.
 
 ### Storage-backend choice
 
-Vulos Office stores documents, sheets, slides, and spaces messages in the same S3-compatible
+Vulos Office stores documents, sheets, and slides in the same S3-compatible
 object store as OS sync and mail. The same two-backend choice applies:
 
 - **Tigris (default):** Per-org bucket prefix on Vulos Tigris; managed, durable, replicated.
@@ -289,13 +249,13 @@ using the same identity service as mail.
 ## Bundling decision
 
 **Office is bundled from Starter and up.** There is no standalone Office tier. The Vulos Mail
-tier (R19/user) is mail-only; from Starter (R39/user) and up, Office, Spaces, and Calendar are
-included in the tier price with no separate line item.
+tier (R19/user) is mail-only; from Starter (R39/user) and up, the full Vulos Workspace —
+Office (documents), Talk, and Meet — is included in the tier price with no separate line item.
 
 This is a deliberate product decision: Google Workspace refugees should not have to choose
 between mail and office — they are bundled together from the first paid tier above Vulos Mail.
-The messaging on the pricing page reflects this: "Office, Spaces, Calendar are included from
-Starter and up."
+The messaging on the pricing page reflects this: "Office, Talk, Meet, and Calendar are included
+from Starter and up."
 
 Cross-repo: see `vulos-cloud/ROADMAP.md` billing model section and `src/pages/Pricing.jsx` for
 the pricing copy that reflects this bundling.
@@ -305,9 +265,9 @@ the pricing copy that reflects this bundling.
 ## BYO Mail support (in progress — parallel implementation)
 
 Vulos Office is not directly involved in the BYO Mail delivery flow (that is `vulos-mail` and
-`vulos-cloud`). However, Office and Spaces are bundled features available to all BYO and hosted
-Mail customers at Starter and above. The Vulos OS install wizard installs vulos-office alongside
-vulos-mail when the user selects a Starter+ tier.
+`vulos-cloud`). However, Office (alongside the Talk and Meet products) is a bundled feature
+available to all BYO and hosted Mail customers at Starter and above. The Vulos OS install wizard
+installs vulos-office alongside vulos-mail when the user selects a Starter+ tier.
 
 Cross-repo: see `vulos-cloud/ROADMAP.md §BYO Mail support`.
 
@@ -316,19 +276,18 @@ Cross-repo: see `vulos-cloud/ROADMAP.md §BYO Mail support`.
 ## Future work
 
 ### Multi-target builds: web subdomain + OS-embed library for all apps
-Build each app surface (docs, sheets, slides, spaces, calendar, meet) as two targets:
-(1) a standalone web build served from a subdomain (`office.vulos.org`, `calendar.vulos.org`,
-`meet.vulos.org`), and (2) an embeddable library (`lib.jsx` export) consumed by the Vulos OS
-shell as a native app wrapper. Vite multi-entry config wires both outputs from the same source
-tree. The subdomain builds integrate with the `vulos-cloud` multi-target routing pipeline.
-Do not touch `src/apps/*/lib.jsx`, `vite.config.*`, or `package.json` — those are owned by
-the subdomain agent while it is active.
+Build each Office app surface (docs, sheets, slides, pdf, calendar, contacts) as two targets:
+(1) a standalone web build served from a subdomain (`office.vulos.org`,
+`calendar.vulos.org`), and (2) an embeddable library (`lib.jsx` export) consumed by the
+Vulos OS shell as a native app wrapper. Vite multi-entry config wires both outputs from the
+same source tree. The subdomain builds integrate with the `vulos-cloud` multi-target routing
+pipeline. Do not touch `src/apps/*/lib.jsx`, `vite.config.*`, or `package.json` — those are
+owned by the subdomain agent while it is active.
 
 ### Deep-link routing per app ✓ (done — Wave E)
-`src/App.jsx` handles `/meet/:meetId` (resolves to `/room/:sessionId`), `/pdf/:id`, and
-`/room/:sessionId` as public routes. The `web+vulosoffice://` protocol handler is registered
-on mount; `?goto=<path>` is parsed and navigated. Coordinate with the multi-target build
-work above for OS launcher integration.
+`src/App.jsx` handles per-document deep links (e.g. `/pdf/:id`) as public routes. The
+`web+vulosoffice://` protocol handler is registered on mount; `?goto=<path>` is parsed and
+navigated. Coordinate with the multi-target build work above for OS launcher integration.
 
 ---
 
@@ -336,27 +295,24 @@ work above for OS launcher integration.
 
 ### What is live today
 
-- **Spaces** channels, DMs, threads, reactions, pins, search, and threading are
-  REST + durable SQLite backed (no LiveKit dependency; P2P mesh via `@vulos/relay-client`
-  for voice/video).
-- **Meetings** are collapsed to a single system: lobby + meeting join + TURN credential
-  minting via the Vulos relay circuit, P2P WebRTC mesh for ≤6 participants.
-- **Meeting recording**: MediaRecorder captures the local stream, uploads as WebM to
-  `/api/meet/:roomId/recordings`; falls back to `data/recordings/` when no S3 bucket
-  is configured; organisers can list and download past recordings from the call UI.
+- **Docs / Sheets / Slides / PDF** editing and signing are the core product, with
+  comments, suggestions (track-changes), and version history.
 - **Calendar** and **Contacts** are durable, account-scoped, SQLite-backed.
 - **Org-bucket wiring** (`OfficeBackendConfig`) is fully wired (`FIX-OFFICE-STORE-WIRE-01`):
-  file CRUD, recording upload/download, and sealed PDFs read/write to the S3-compatible
-  bucket (Tigris or MinIO) when `VULOS_ORG_ID` is set; falls back to local storage otherwise.
+  file CRUD and sealed PDFs read/write to the S3-compatible bucket (Tigris or MinIO)
+  when `VULOS_ORG_ID` is set; falls back to local storage otherwise.
 - **PPTX import**: JSZip + OOXML XML parsing extracts slide text from `ppt/slides/*.xml`;
   builds a slides-editor-compatible content model for both drag-and-drop and backend-served files.
-- **Deep-link routing**: `/meet/:meetId` route resolves meeting ID → session → `/room/:sessionId`;
-  `web+vulosoffice://` protocol handler registered on mount; `?goto=` param parsed and navigated.
-- **Presence**: REST/poll presence (OFFICE-62) — heartbeat + roster, 15 s interval.
-- **Security**: .ics SSRF guard, meeting-list scoping, per-file ACLs.
-- **CRDT**: client-side CRDT modules (`src/lib/crdt/`) and the Spaces message store
-  (`backend/spaces/store.go`) are live. Live P2P document sync over the peer fabric
-  is **dormant** — the Go CRDT engine was removed; the live path is REST + persistence.
+- **Deep-link routing**: per-document deep links + the `web+vulosoffice://` protocol
+  handler registered on mount; `?goto=` param parsed and navigated.
+- **Security**: .ics SSRF guard, per-file ACLs, append-only signing audit trail.
+- **CRDT**: client-side CRDT modules (`src/lib/crdt/`) are live. Live P2P document sync
+  over the peer fabric is **dormant** — the Go CRDT engine was removed; the live path is
+  REST + persistence.
+
+> Chat/Spaces and calling/meetings (and their presence, recording, and relay/TURN
+> machinery) were extracted to **vulos-talk** and **vulos-meet**; their "what's live"
+> status lives in those repos.
 
 ### Near-term items
 
@@ -366,6 +322,3 @@ work above for OS launcher integration.
 - **Multi-target builds** (`vite.config.*`): build each app as both a standalone web
   bundle (subdomain serving) and an embeddable `lib.jsx` export (OS shell). Currently
   owned by the subdomain agent — do not edit these files in parallel.
-- **Large-room calling** (`MEET-LARGE-ROOM-01`): P2P mesh degrades past ~6
-  participants. A self-hostable SFU (via vulos-relay) is the path for Pro-tier
-  large rooms. Timeline TBD pending relay SFU readiness.

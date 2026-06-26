@@ -3,11 +3,14 @@
 ## Scope
 
 ### In scope
-- CRDT fabric and conflict-resolution logic
+- CRDT fabric and conflict-resolution logic (document collaboration)
 - PDF auto-sign pipeline
-- Spaces (real-time collaboration) signaling and data channels
 - Backend API authentication and session handling
 - File upload / blob storage access controls
+
+> Vulos Office is documents-only. Chat/Spaces (vulos-talk) and video/meetings
+> (vulos-meet) are separate products — report issues in their signaling / data
+> channels to those repos.
 
 ### Out of scope
 - Third-party Go and npm dependencies — report to upstream maintainers
@@ -23,7 +26,7 @@ PGP key: _placeholder — key will be published at https://vulos.org/.well-known
 **GitHub Security Advisories:** Use the "Report a vulnerability" button in the Security tab of this repository. Preferred channel.
 
 Please include:
-- Affected component (CRDT, signing, Spaces, auth, storage)
+- Affected component (CRDT, signing, auth, storage)
 - Steps to reproduce
 - Potential impact
 - Any suggested mitigations

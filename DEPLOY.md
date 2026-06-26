@@ -1,7 +1,12 @@
 # Vulos Office — Static Deploy Guide
 
-Vulos Office bundles four separate SPAs (office, meet, talk, calendar), each
+Vulos Office bundles two separate SPAs (office, calendar), each
 built with Vite and uploaded to Tigris object storage for CDN delivery.
+
+> Vulos Office is the **documents-only** product (Docs, Sheets, Slides, PDF/Signing,
+> Calendar, Contacts). Chat/Spaces ships as the separate **vulos-talk** product
+> (`talk.vulos.org`) and video ships as **vulos-meet** (`meet.vulos.org`); both are
+> deployed from their own repos and combined by the Vulos Workspace shell.
 
 ## Prerequisites
 
@@ -27,8 +32,6 @@ Deploy all targets:
 Deploy a single target:
 ```sh
 ./scripts/deploy-static.sh office
-./scripts/deploy-static.sh meet
-./scripts/deploy-static.sh talk
 ./scripts/deploy-static.sh calendar
 ```
 
@@ -45,8 +48,6 @@ Each deploy uploads to `<target>/<sha>/` in the bucket, served via Tigris static
 | Target | CDN domain | Bucket path |
 |---|---|---|
 | office | office.vulos.org | `office/<sha>/` |
-| meet   | meet.vulos.org   | `meet/<sha>/` |
-| talk   | talk.vulos.org   | `talk/<sha>/` |
 | calendar | calendar.vulos.org | `calendar/<sha>/` |
 
 Static files are served from `cdn.vulos.org` (Tigris, configured in your

@@ -113,20 +113,20 @@ func TestLocalEntitlements_UnlimitedByDefault(t *testing.T) {
 	if got.Tier != "self-hosted" {
 		t.Fatalf("expected self-hosted tier, got %q", got.Tier)
 	}
-	if !ent.Allowed(context.Background(), "anyone", "recordings") {
+	if !ent.Allowed(context.Background(), "anyone", "signing") {
 		t.Fatal("expected all features allowed by default")
 	}
 }
 
 func TestLocalEntitlements_ExplicitFeatureDisable(t *testing.T) {
 	ent := NewLocalEntitlements(Entitlement{
-		Features: map[string]bool{"recordings": false},
+		Features: map[string]bool{"signing": false},
 	})
-	if ent.Allowed(context.Background(), "x", "recordings") {
-		t.Fatal("expected recordings disabled")
+	if ent.Allowed(context.Background(), "x", "signing") {
+		t.Fatal("expected signing disabled")
 	}
 	// Absent key still defaults to allowed (generous-by-default).
-	if !ent.Allowed(context.Background(), "x", "signing") {
+	if !ent.Allowed(context.Background(), "x", "office") {
 		t.Fatal("expected absent feature to default allowed")
 	}
 }

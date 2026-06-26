@@ -6,6 +6,38 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased] — 2026-06-26
+
+### Changed — Office is now documents-only
+
+Vulos Office is now scoped to **documents only** (Docs, Sheets, Slides, PDF/Signing,
+Calendar, Contacts). Real-time chat + Spaces and video calling/meetings have been
+split into their own products, combined with Office by the **Vulos Workspace** shell:
+
+- **Vulos Meet → `vulos-meet`**: the standalone video product. Office's meeting/lobby/
+  TURN/recording surface and the `/meet/*` routes were removed from this repo.
+- **Vulos Talk → `vulos-talk`**: team chat + Spaces (channels, DMs, threads, reactions,
+  pins, presence). The `/spaces/*` routes, message CRDT store, and chat UI were removed.
+
+### Removed (dead code left by the Meet/Talk extraction)
+
+- **Backend models**: deleted `models.Meeting` / `models.MeetingRecording` (meetings.go)
+  and the Spaces chat models (spaces.go) — all unreferenced after the extraction.
+- **Storage interface**: dropped the `Meeting`/`Recording` CRUD methods from the
+  `Storage` interface and their `LocalStorage`/`PostgresStorage` implementations,
+  the `recordings` data dir, and the meetings/recordings Postgres schema migrations.
+- **Frontend**: removed the dead `api.spaces*` client methods (calling now-absent
+  `/spaces/*` endpoints), the Spaces-only `sanitizeChatMarkdown` helper, and the
+  unused Meet `speaker-glow` Tailwind animation.
+- **Docs/scripts**: pruned meet/talk/spaces references from README, DEPLOY, ROADMAP,
+  THREAT-MODEL, the design system, and the deploy/seed/screenshot scripts; deleted the
+  Meet recording design note and the Spaces/Meetings demo seeding + screenshots.
+
+Office's sidebar keeps an **external** launcher link to Talk (`talk.vulos.org`) — a
+cross-product link, not an in-process surface.
+
+---
+
 ## [Unreleased] — 2026-06-16
 
 ### Added (Google-parity Wave H — Sheets/Slides/Docs polish)

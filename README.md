@@ -6,7 +6,7 @@
 
 **A sovereign, self-hostable office suite — your documents, your server, your rules.**
 
-Docs · Sheets · Slides · Calendar · Contacts · Spaces · Meet · Signing
+Docs · Sheets · Slides · PDF Signing · Calendar · Contacts
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.0-informational)](CHANGELOG.md)
@@ -28,7 +28,9 @@ Docs · Sheets · Slides · Calendar · Contacts · Spaces · Meet · Signing
 
 ## What is this?
 
-Vulos Office is a complete, open-source office suite that ships as a **single Go binary** with the entire frontend embedded — no cloud account, no telemetry, no lock-in. It brings document editing, spreadsheets, presentations, a calendar, contacts, team chat, meetings, and cryptographic document signing together in one clean, modern web interface.
+Vulos Office is the **documents** product of the Vulos suite, shipped as a **single Go binary** with the entire frontend embedded — no cloud account, no telemetry, no lock-in. It brings document editing, spreadsheets, presentations, a calendar, contacts, and cryptographic document signing together in one clean, modern web interface.
+
+> **Where's chat / video?** Vulos Office is documents-only by design. Team chat and Spaces ship as the separate **[vulos-talk](https://talk.vulos.org)** product, and video calling as **[vulos-meet](https://meet.vulos.org)**. The **Vulos Workspace** shell combines Office, Talk, and Meet into one suite — Office's sidebar links out to Talk, but never embeds it.
 
 It is **independently self-hostable by default**: with zero configuration it runs as a single-user, local-storage app on your own machine. Everything that *could* tie it to an external service lives behind a small, clean **seam** — so you can run it fully standalone, or opt into the [vulos-cloud](#optional-the-vulos-cloud-seam) control plane for multi-tenant identity, entitlements, and usage. The core never imports cloud code; remove the adapter and the standalone build still compiles.
 
@@ -46,10 +48,8 @@ It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers wh
 | <img src="docs/screenshots/docs-editor.png" alt="Docs" /> | <img src="docs/screenshots/sheets-editor.png" alt="Sheets" /> |
 | **Slides** — themes, transitions, present | **Calendar** — events, recurrence, `.ics` |
 | <img src="docs/screenshots/slides-editor.png" alt="Slides" /> | <img src="docs/screenshots/calendar.png" alt="Calendar" /> |
-| **Contacts** — vCard, duplicate detection | **Spaces** — channels, DMs, threads |
-| <img src="docs/screenshots/contacts.png" alt="Contacts" /> | <img src="docs/screenshots/spaces.png" alt="Spaces" /> |
-| **Meet** — voice / video from a Space | **Signing** — annotate & sign PDFs |
-| <img src="docs/screenshots/meetings.png" alt="Meet" /> | <img src="docs/screenshots/pdf-editor.png" alt="Signing" /> |
+| **Contacts** — vCard, duplicate detection | **Signing** — annotate & sign PDFs |
+| <img src="docs/screenshots/contacts.png" alt="Contacts" /> | <img src="docs/screenshots/pdf-editor.png" alt="Signing" /> |
 
 > Regenerate anytime with `npm run screenshots` (Playwright; see `scripts/screenshots.mjs`).
 
@@ -64,8 +64,6 @@ It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers wh
 | **Slides** | Presentation editor powered by Reveal.js — theme, transition, and present from the browser |
 | **Calendar** | Events, recurrence (iCalendar / rrule), reminders, `.ics` import / export |
 | **Contacts** | Contact management with vCard import / export and duplicate detection |
-| **Spaces** | Team channels, DMs, threads, reactions, pins, search, and presence |
-| **Meet** | Voice / video meetings launched straight from a Space |
 | **Signing** | View, annotate, and sign PDFs; multi-party signing envelopes with a cryptographic audit trail |
 | **Import / Export** | `.docx`, `.xlsx`, `.csv`, `.pptx`, `.pdf`, Markdown, and from URL |
 | **Storage** | Local files + SQLite by default; optional PostgreSQL for multi-user |
@@ -91,14 +89,14 @@ import { ContactsApp }  from '@vulos/office-client/contacts'
 ```
 ┌────────────────────────────────────────────────────────┐
 │  React + Vite + Tailwind frontend  (JSX only)          │
-│  Docs · Sheets · Slides · Calendar · Contacts ·        │
-│  Spaces · Meet · Signing                                │
+│  Docs · Sheets · Slides · PDF Signing ·                │
+│  Calendar · Contacts                                    │
 └────────────────────────────────────────────────────────┘
                  │  embedded into the binary
                  ▼
 ┌────────────────────────────────────────────────────────┐
 │  Go backend (Gin)                                       │
-│  handlers · userauth · spaces · signing · storage · obs │
+│  handlers · userauth · signing · storage · obs          │
 │                                                         │
 │  backend/seam  ── Identity · Entitlements · Usage ──┐   │
 │   standalone defaults (local, unlimited, no-op)     │   │
@@ -191,7 +189,7 @@ storage:
 | `VULOS_OFFICE_JWT_SECRET` | HS256 secret for session JWTs — **required when auth is enabled** |
 | `VULOS_OFFICE_DEV` | `1` uses a labelled insecure dev secret — local development only |
 | `VULOS_OFFICE_CORS_ORIGINS` | Comma-separated allowed CORS origins |
-| `VULOS_USERAUTH_DB` / `VULOS_CALSTORE_DB` / `VULOS_CONTACTSTORE_DB` / `VULOS_LOBBY_DB` | Override individual SQLite store paths |
+| `VULOS_USERAUTH_DB` / `VULOS_CALSTORE_DB` / `VULOS_CONTACTSTORE_DB` | Override individual SQLite store paths |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Enable OpenTelemetry trace export |
 | `VULOS_CP_BASE_URL` | **Opt-in** vulos-cloud control plane URL (enables the cloud seam) |
 | `VULOS_CP_TOKEN` | Outbound service token for the control plane |
@@ -215,7 +213,7 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete reference.
 npm run dev:web        # Vite (:5173) + Go API (:8080)
 npm test               # frontend tests (Vitest)
 npm run build          # frontend dist/ + Go binary
-npm run build:all      # all sub-targets (office / talk / calendar / meet) + library
+npm run build:all      # all sub-targets (office / calendar) + library
 npm run build:lib      # @vulos/office-client library only
 
 # Backend

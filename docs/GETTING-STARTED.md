@@ -121,9 +121,8 @@ For the full environment variable and observability reference see [CONFIGURATION
 
 1. Open the app. Without auth the home screen loads immediately.
 2. Click **New** to create a document, sheet, or presentation.
-3. Open **Spaces** (left sidebar) for team chat and meetings.
-4. Open **Calendar** for events and scheduling.
-5. Open **Contacts** for your address book.
+3. Open **Calendar** for events and scheduling.
+4. Open **Contacts** for your address book.
 
 ---
 

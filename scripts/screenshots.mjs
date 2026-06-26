@@ -8,7 +8,7 @@
  *   1. Writes static seed files to /tmp/vulos-demo-data
  *   2. Builds the Go binary (which embeds the compiled frontend via //go:embed)
  *   3. Starts it on port 8083 pointed at the demo data dir
- *   4. Calls the seed REST API for Spaces / Calendar / Contacts / Meetings
+ *   4. Calls the seed REST API for Calendar / Contacts
  *   5. Captures all screenshots
  *   6. Stops the server
  *
@@ -73,12 +73,6 @@ const ROUTES = [
     waitFor: '[data-testid="pdf-editor"], .pdf-viewer, canvas',
   },
   {
-    name: 'spaces',
-    path: '/spaces',
-    description: 'Vulos Spaces (channels + messages)',
-    waitFor: '[data-testid="spaces-app"], .spaces-sidebar, [class*="spaces"]',
-  },
-  {
     name: 'calendar',
     path: '/calendar',
     description: 'Calendar — weekly view with events',
@@ -89,12 +83,6 @@ const ROUTES = [
     path: '/contacts',
     description: 'Contacts — populated list',
     waitFor: '[data-testid="contacts-app"], [class*="contacts"]',
-  },
-  {
-    name: 'meetings',
-    path: '/meetings',
-    description: 'Meetings — scheduled list',
-    waitFor: '[data-testid="meetings"], [class*="meeting"]',
   },
 ]
 
@@ -158,7 +146,6 @@ async function startLocalServer() {
       VULOS_CALSTORE_DB:     `${DEMO_DATA_DIR}/cal.db`,
       VULOS_CONTACTSTORE_DB: `${DEMO_DATA_DIR}/contacts.db`,
       VULOS_LOBBY_DB:        `${DEMO_DATA_DIR}/lobby.db`,
-      VULOS_SPACES_DB:       `${DEMO_DATA_DIR}/spaces.db`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -170,7 +157,7 @@ async function startLocalServer() {
   await waitForHTTP(`${LOCAL_BASE}/version`)
   console.log(`  server ready at ${LOCAL_BASE}`)
 
-  // 7. Seed Spaces / Calendar / Contacts / Meetings via API
+  // 7. Seed Calendar / Contacts via API
   await seedViaAPI(LOCAL_BASE)
 
   // Brief pause for SQLite writes to flush
@@ -321,10 +308,8 @@ async function main() {
     '- **Docs** `demo`: "Q2 2026 Product Update" — prose, table, bullet lists',
     '- **Sheets** `demo-sheet`: "Revenue Tracker H1 2026" — 6 months, SUM + margin formulas, 2 sheets',
     '- **Slides** `demo-slides`: "Vulos Office Product Overview" — 5 slides, Reveal.js obsidian theme',
-    '- **Spaces**: #general, #engineering, #design channels with realistic messages',
     '- **Calendar**: 6 events this week (standup, all-hands, design sync, sprint planning, 1:1, arch review)',
     '- **Contacts**: 6 contacts with emails, phones, and notes',
-    '- **Meetings**: 4 scheduled meetings (Q2 all-hands, arch review, design sync, investor call)',
   ].join('\n')
 
   writeFileSync(path.join(OUT, 'README.md'), notes + '\n')

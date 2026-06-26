@@ -2,8 +2,8 @@
 
 This document describes the design language for **Vulos Office** and should be
 treated as the source of truth when extending the UI to new surfaces (Sheets,
-Slides, Spaces, Status, Verify, Meetings, and any sibling apps under the Vulos
-umbrella).
+Slides, PDF Signing, Calendar, Contacts, Verify, and any sibling apps under the
+Vulos umbrella).
 
 The system is **token-first**: every colour, font, spacing, radius, shadow,
 and motion value lives in [`tokens.css`](./tokens.css) as a CSS custom property,
@@ -49,7 +49,7 @@ We are explicitly **avoiding**:
 | `success`    | `#4f7a4d` (sage)       | same                  | "Saved", resolved comments, accepted suggestion   |
 | `warning`    | `#c08436` (honey)      | same                  | "Restore draft" banners, soft validations         |
 | `danger`     | `#b8453a` (persimmon)  | same                  | Save errors, destructive actions                  |
-| `info`       | `#4a6b8a` (dusty navy) | same                  | The ONLY blue we use, for "Spaces" category icon  |
+| `info`       | `#4a6b8a` (dusty navy) | same                  | The ONLY blue we use — neutral info states / badges |
 
 ### 2.2 The accent rule
 
@@ -278,13 +278,6 @@ The cycler IconButton lives in the sidebar footer.
 | `apps/sheets/SheetsEditor.jsx` | Design-system `Topbar` + meta-line save status + quiet Export dropdown; Fortune Sheet kept intact, selection / header / tab chrome retinted via `.sheets-themed` rules through tokens (accent + warm neutrals). |
 | `apps/slides/SlidesEditor.jsx` | Design-system `Topbar` + meta-line save status; thumbnail rail rebuilt against `bg-clay` + 2-px accent rail for active slide; quiet token-driven mini toolbar (uses `IconButton` + `Tooltip`); paper-grain slide canvas; speaker notes use the warm `warning-bg` strip. DOMPurify `sanitize()` retained on every `slide.content` rendering path. |
 | `apps/slides/SlidePreview.jsx` | Light-touch retint — reveal.js owns the deck rendering; only the close affordance is design-system (focus ring + token colours). `sanitize()` + DOMPurify wrapper preserved. |
-| `apps/spaces/SpacesApp.jsx` | Design-system `Sidebar` for channel/DM/thread tree, `Input` search, `Modal`-based Create Channel / New DM flows; presence footer + StatusPicker on tokens. |
-| `apps/spaces/ChannelView.jsx` | `Topbar` with roster pills + `PresenceDot`s, paper compose lane with single primary Send, slide-in right-rail thread context panel (mirrors `CommentsPanel`). |
-| `apps/spaces/MessageList.jsx` | Serif italic small-caps date separators, comfortable density, accent-tint own-message rail, edit/delete menu via `Card`-like popover; warm-signal status indicators. |
-| `apps/spaces/CallView.jsx` | Warm-ink call surface, quiet 2-px accent outline on active speaker, accent-tint P2P / warning Relay transport pill, IconButton dock cluster, 55%-height screen-share preserved; WebRTC + signaling untouched. |
-| `apps/spaces/Room.jsx` | Lobby `Card` with serif headline, warmly-framed camera preview, invitee tint-pill roster, single accent Join button. |
-| `apps/spaces/Meetings.jsx` | `Topbar` dashboard, meeting `Card`s with warm-signal status pills, `Modal` create flow, `Tooltip`-driven "Link copied" confirmation; `credentials: 'include'` preserved on every fetch. |
-| `apps/spaces/InCallChat.jsx` | Themed against the call surface (warm-ink bg, accent own-bubble, slide-in animation). |
 | `components/PresenceBar.jsx` | Warm-signal `PresenceDot` palette (sage / honey / persimmon / accent), serif-italic small-caps tooltip name labels, token-driven `StatusPicker`. |
 | `components/RemoteCursors.jsx` | Caret + cell-selection name labels rendered in serif italic with the warm tracking; aligned with the PresenceBar tooltip treatment. |
 | `apps/pdf/PDFEditor.jsx` | Design-system `Topbar` with quiet meta-line, distinguished primary "Prepare to Sign" `Button`, warm-paper canvas + `paper-grain`, page thumbnails sidebar with 2-px accent rail on the selected slot, signature modal ported to design-system `Tabs` + `IconButton`, single-accent annotation overlays (no rainbow). |

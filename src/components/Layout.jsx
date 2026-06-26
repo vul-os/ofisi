@@ -7,7 +7,7 @@
  *   - Sidebar uses an accent-rail to mark the active app instead of filling
  *     the row, so the rail "gets out of the way" of the work surface.
  *   - App icons keep one warm tint each (so users can find Sheets / Slides /
- *     Spaces at a glance) but those tints sit at low saturation and only show
+ *     PDF at a glance) but those tints sit at low saturation and only show
  *     on the icon itself, never on a row background.
  *   - The bottom-right "theme cycler" gives users explicit control over the
  *     warm-dark mode — calmer than slamming the inversion on every load.

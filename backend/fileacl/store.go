@@ -9,9 +9,8 @@
 // is the owner OR appears in the shared-with set. Admins bypass the check at
 // the handler layer.
 //
-// Persistence is pure-Go modernc SQLite (no CGO), mirroring the Spaces
-// SQLitePersister. A NullStore (in-memory) is provided for tests and for the
-// degraded path when the DB cannot be opened.
+// Persistence is pure-Go modernc SQLite (no CGO). A NullStore (in-memory) is
+// provided for tests and for the degraded path when the DB cannot be opened.
 //
 // Fail-safe defaults
 // ------------------
@@ -85,7 +84,7 @@ func NewSQLiteStore(dsn string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("fileacl: open db: %w", err)
 	}
 	// modernc/sqlite is safe with a single connection; serialize to avoid
-	// "database is locked" under concurrent writers (matches Spaces persister).
+	// "database is locked" under concurrent writers.
 	db.SetMaxOpenConns(1)
 	s := &SQLiteStore{db: db}
 	if err := s.init(); err != nil {

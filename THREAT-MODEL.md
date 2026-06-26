@@ -1,6 +1,11 @@
 # Threat Model — Vulos Office
 
-STRIDE pass. Last updated: 2026-05-23.
+STRIDE pass. Last updated: 2026-06-26.
+
+> **Scope:** Vulos Office is the **documents-only** product (Docs, Sheets, Slides,
+> PDF/Signing, Calendar, Contacts). Real-time chat/Spaces moved to the separate
+> **vulos-talk** product and video to **vulos-meet** — their WebRTC/signaling threat
+> surface is modelled in those repos, not here.
 
 ---
 
@@ -11,18 +16,17 @@ STRIDE pass. Last updated: 2026-05-23.
         |
         v (HTTPS, authenticated session)
 [Backend API (Go handlers)]
-        |             |              |
-        v             v              v
-[CRDT fabric]  [PDF signing]   [Spaces (collab)]
-        |                           |
-        v                           v
-[Storage (SQLite + blob)]    [WebRTC signaling / data channels]
+        |             |
+        v             v
+[CRDT fabric]  [PDF signing]
+        |
+        v
+[Storage (SQLite + blob)]
 ```
 
 Trust boundaries:
 - **Browser ↔ Backend API**: authenticated session. Browser input is untrusted.
 - **Backend API ↔ Storage**: server-internal; storage is private to the backend process.
-- **Spaces signaling**: broker mediates peer connections; payload content in data channels is end-to-end between peers.
 - **PDF signing**: signing key is held server-side; signing operation is privileged.
 
 ---
@@ -79,36 +83,8 @@ Trust boundaries:
 
 ---
 
-## Component 3: Spaces (Real-time Collaboration)
-
-### Trust boundaries
-- Signaling server brokers WebRTC session establishment; does not inspect media/data content.
-- Data channels between peers are end-to-end; signaling server sees only SDP offers/answers and ICE candidates.
-- Room membership enforced by the signaling server based on session authentication.
-
-### Top 3 STRIDE threats
-
-| # | Category | Threat |
-|---|----------|--------|
-| 1 | **Spoofing** | Attacker guesses or enumerates a room ID and joins a collaboration session without invitation. |
-| 2 | **Denial of Service** | Attacker floods the signaling server with SDP offers, exhausting connection state for legitimate sessions. |
-| 3 | **Information Disclosure** | ICE candidates leak the server's internal IP or reveal network topology to a remote peer. |
-
-### Mitigations in code
-- Room IDs are 128-bit random tokens; not sequential or guessable.
-- Room membership is checked against the authenticated user's document access list before join is permitted.
-- ICE candidate filtering strips RFC1918 / loopback candidates from responses to external peers by default.
-- Signaling connection rate-limiting per authenticated user.
-
-### Residual risks
-- WebRTC data-channel content between peers is opaque to the server; malicious peers can exfiltrate document data through the data channel to a third party.
-- ICE relay (TURN) server, if deployed, must be secured separately; its configuration is outside this codebase.
-
----
-
 ## Overall Residual Risks
 
 1. PDF re-serialisation provides best-effort normalisation; novel PDF attack vectors may survive.
 2. CRDT tombstone data retention until GC creates a window where deleted content is recoverable.
-3. WebRTC peer-to-peer data channels are opaque; data exfiltration between consenting (but malicious) peers cannot be prevented by the server.
-4. Signing key rotation is manual; long-lived keys increase blast radius of a key compromise.
+3. Signing key rotation is manual; long-lived keys increase blast radius of a key compromise.

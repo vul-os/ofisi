@@ -18,7 +18,6 @@ dist/*
 dist-ssr
 dist-lib/
 dist-office/
-dist-talk/
 dist-calendar/
 *.local
 

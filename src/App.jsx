@@ -22,6 +22,7 @@ import ContactsApp from './apps/contacts/ContactsApp'
 // seam-C handoff: chat/meeting deep-links redirect to the Talk app instead of
 // being served in-process. See backend/seam for the integration contract.
 const TALK_URL = import.meta.env.VITE_TALK_URL || 'https://talk.vulos.org'
+const MEET_URL = import.meta.env.VITE_MEET_URL || 'https://meet.vulos.org'
 
 // Public routes that bypass Vulos auth entirely.
 // External signers and external verifiers have no Vulos account.
@@ -56,10 +57,15 @@ export default function App() {
     }
   }, []) // eslint-disable-line
 
-  // seam-C handoff: chat/huddle deep-links live in the Talk product now.
-  // Redirect the browser there (carrying the sub-path) rather than 404-ing.
-  if (/^\/(spaces|meetings|room)(\/|$)/.test(location.pathname)) {
+  // seam-C handoff: chat/Spaces deep-links live in the Talk product, and
+  // meeting/call deep-links in the Meet product. Redirect the browser there
+  // (carrying the sub-path) rather than 404-ing on a route Office no longer owns.
+  if (/^\/spaces(\/|$)/.test(location.pathname)) {
     window.location.href = TALK_URL + location.pathname + location.search
+    return null
+  }
+  if (/^\/(meetings|room)(\/|$)/.test(location.pathname)) {
+    window.location.href = MEET_URL + location.pathname + location.search
     return null
   }
 

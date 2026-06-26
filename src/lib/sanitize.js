@@ -57,17 +57,6 @@ export function stripHtml(html) {
 // renders the exact tags it produces. Centralised here so all DOMPurify policy
 // lives in one audited file.
 
-// Chat markdown (Spaces RichMessage): inline formatting + safe links + code.
-export const CHAT_MARKDOWN_CONFIG = {
-  ALLOWED_TAGS: ['strong', 'em', 'code', 'pre', 'a', 'ul', 'ol', 'li', 'blockquote', 'br', 'span'],
-  ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'data-lang'],
-}
-
-/** Sanitise rendered chat markdown (Spaces message bodies). */
-export function sanitizeChatMarkdown(html) {
-  return DOMPurify.sanitize(html ?? '', CHAT_MARKDOWN_CONFIG)
-}
-
 // Search-result highlighting: only the <mark> wrapper survives.
 export const SEARCH_HIGHLIGHT_CONFIG = {
   ALLOWED_TAGS: ['mark'],

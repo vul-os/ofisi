@@ -5,10 +5,9 @@ package handlers
 // P0 hole where Get/Update/Delete ignored the authenticated identity and List
 // returned all files globally.
 //
-// It mirrors the Spaces authz pattern (requireChannelAccess / requireMessageAuthor
-// in spaces.go): the verified identity comes from requesterID(c) (JWT sub), and a
-// denied request returns 404 — NOT 403 — so the response never leaks whether a
-// file the caller cannot see actually exists.
+// The verified identity comes from requesterID(c) (JWT sub), and a denied request
+// returns 404 — NOT 403 — so the response never leaks whether a file the caller
+// cannot see actually exists.
 
 import (
 	"log"
@@ -39,7 +38,7 @@ type FileAuthz struct {
 }
 
 // fileACLDBPath resolves the ACL SQLite DSN from env, defaulting to a durable
-// file alongside the Spaces DB.
+// file under the data dir.
 func fileACLDBPath() string {
 	if v := os.Getenv("VULOS_FILEACL_DB"); v != "" {
 		return v
@@ -54,8 +53,7 @@ var (
 
 // SharedFileAuthz returns a process-wide FileAuthz backed by durable SQLite.
 // If the DB cannot be opened it falls back to an in-memory NullStore so the app
-// still boots (degraded: ACLs do not persist) rather than crashing — matching
-// the Spaces handler's NullPersister fallback.
+// still boots (degraded: ACLs do not persist) rather than crashing.
 func SharedFileAuthz() *FileAuthz {
 	fileAuthzOnce.Do(func() {
 		if st, err := fileacl.NewSQLiteStore(fileACLDBPath()); err == nil {

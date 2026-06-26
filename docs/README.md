@@ -18,7 +18,6 @@
 ## Quick links
 
 - Backend entry point: `main.go` (Gin HTTP server)
-- Spaces CRDT store: `backend/spaces/store.go`
 - File/version API: `backend/handlers/`
 - PDF signing: `backend/signing/`
 - Observability: `backend/obs/` + `GET /metrics`

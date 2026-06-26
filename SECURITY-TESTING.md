@@ -1,7 +1,11 @@
-# Security Testing — Vulos Office + Spaces
+# Security Testing — Vulos Office
 
 This document describes the **pentest / adversarial test suite** for the
-`vulos-office` backend (Go) and the Spaces message render path (JSX/vitest).
+`vulos-office` backend (Go) and the document/slide HTML render path (JSX/vitest).
+
+> Vulos Office is the documents-only product. The chat/Spaces and meetings/calling
+> pentest suites moved to the **vulos-talk** and **vulos-meet** repos along with
+> those surfaces; this document covers only Office's own attack surface.
 
 The suites are written attacker-first: every test **attempts a concrete attack
 and asserts it is blocked**. A green run means the corresponding defense holds.
@@ -22,11 +26,11 @@ CGO_ENABLED=0 go test ./backend/... -run 'Pentest' -v
 CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...
 ```
 
-Frontend (Spaces XSS render path) pentest:
+Frontend (HTML render / sanitiser) pentest:
 
 ```bash
 cd vulos-office
-npx vitest run src/apps/spaces/pentest-xss.test.jsx
+npx vitest run src/apps/slides/sanitize.test.js
 # or the full vitest suite:
 npm test
 ```
@@ -36,17 +40,18 @@ npm test
 | File | Layer | Attack classes |
 |------|-------|----------------|
 | `backend/middleware/pentest_token_test.go` | Auth middleware | 1 (auth/token), 2 (identity at middleware) |
-| `backend/handlers/pentest_files_test.go` | File handlers | 2 (identity spoof), 3 (file IDOR), 8 (CSRF/ambient authority) |
-| `backend/handlers/pentest_spaces_test.go` | Spaces handlers | 4 (Spaces authz), 5 (MergeOps forgery) |
-| `backend/handlers/pentest_meet_test.go` | Meeting handlers | 4 (organizer-only endpoints) |
-| `backend/handlers/pentest_creds_test.go` | Auth/creds | 7 (per-user credentials) |
+| `backend/handlers/pentest_files_test.go` | File handlers | 2 (identity spoof), 3 (file IDOR), 6 (CSRF/ambient authority) |
+| `backend/handlers/pentest_authorid_test.go` | Comment/author binding | 2 (author-id forgery) |
+| `backend/handlers/pentest_envelopes_test.go` | Signing envelopes | 3 (envelope/signer authz) |
+| `backend/handlers/pentest_calendar_contacts_test.go` | Calendar / Contacts | 3 (scope), .ics SSRF |
+| `backend/handlers/pentest_localfiles_test.go` | Local-file serve | 3 (path traversal) |
+| `backend/handlers/pentest_creds_test.go` | Auth/creds | 5 (per-user credentials) |
 | `backend/handlers/pentest_helpers_test.go` / `pentest_storage_test.go` | test harness | (support) |
-| `src/apps/spaces/pentest-xss.test.jsx` | JSX render path | 6 (XSS) |
+| `src/apps/slides/sanitize.test.js` | JSX render path | 4 (XSS) |
 
 These build on (and do not replace) the pre-existing focused tests:
 `backend/middleware/auth_test.go`, `backend/handlers/files_authz_test.go`,
-`backend/handlers/spaces_authz_test.go`, `backend/handlers/auth_creds_test.go`,
-and `src/apps/slides/sanitize.test.js`.
+`backend/handlers/auth_creds_test.go`, and `src/apps/slides/sanitize.test.js`.
 
 ## Threat coverage (attack classes)
 
@@ -63,17 +68,18 @@ and `src/apps/slides/sanitize.test.js`.
   is configured; with **no secret and dev mode off** the verifier **fails closed
   (503)** — it never silently accepts the dev key.
 
-### 2. Identity spoofing (`pentest_token_test.go`, `pentest_files_test.go`)
+### 2. Identity spoofing (`pentest_token_test.go`, `pentest_files_test.go`, `pentest_authorid_test.go`)
 - A forged `X-Account-ID` header does **not** change the acting identity for a
   non-admin; identity is taken only from the verified JWT `sub`.
 - Admin impersonation via `X-Account-ID` is gated on the **verified admin
   scope** (`vulos:admin` audience), not on header presence.
+- A forged author id on a comment/reply is rejected — authorship is bound to the
+  verified identity, not the request body.
 
-### 3. File IDOR / ACL (`pentest_files_test.go`)
-The recently-added per-file ACL (`backend/fileacl`) is enforced by **every**
-file-scoped handler, all sharing the process-wide `SharedFileAuthz`. The
-pentests prove a non-owner cannot pivot from a denied `GET /files/:id` to an
-open sibling endpoint:
+### 3. File IDOR / ACL (`pentest_files_test.go`, `pentest_envelopes_test.go`, `pentest_calendar_contacts_test.go`, `pentest_localfiles_test.go`)
+The per-file ACL (`backend/fileacl`) is enforced by **every** file-scoped
+handler, all sharing the process-wide `SharedFileAuthz`. The pentests prove a
+non-owner cannot pivot from a denied `GET /files/:id` to an open sibling endpoint:
 - Non-owner Get/Update/Delete/**export**/**comment**/**version** → **404**
   (no existence leak — denial mimics "not found").
 - `List` returns only the caller's accessible files (no cross-tenant leak).
@@ -81,39 +87,19 @@ open sibling endpoint:
   a non-shared **third party is still denied**.
 - A non-owner **cannot self-share** the victim's file to gain access.
 - Admins bypass the ACL (by design).
+- Signing-envelope and signer endpoints are scoped to the document owner / the
+  scoped signer token; calendar and contacts surfaces are account-scoped; the
+  local-file serve path rejects `..` traversal and the `.ics` import path blocks
+  SSRF to internal addresses.
 
-### 4. Spaces authz (`pentest_spaces_test.go`, `pentest_meet_test.go`)
-- A non-member is denied **every** private/DM channel surface: read, send, edit,
-  delete, export-ops, react, list-reactions, pin, list-pins, **search**, list-members.
-- Private channels are **hidden** from `ListChannels` for non-members.
-- A non-member **cannot self-join** a private channel to bootstrap access.
-- **Organizer-only** meeting endpoints (lobby list / admit / admit-all / deny /
-  delete) reject non-organizers, and a forged `X-Account-ID` does not promote a
-  caller to organizer.
+### 4. XSS (`src/apps/slides/sanitize.test.js`)
+Exercises the document/slide HTML render pipeline (DOMPurify `sanitize()` →
+`dangerouslySetInnerHTML`) with hostile content (`<script>`, `<img onerror>`,
+`<svg onload>`, `<iframe>`, `javascript:` / `vbscript:` URLs, autofocus/ontoggle
+handlers). Assertions are **DOM-level**: no executable element survives and no
+element carries an `on*` handler or a `javascript:`/`vbscript:` URL attribute.
 
-### 5. MergeOps forgery (`pentest_spaces_test.go`, plus `spaces_authz_test.go`)
-- An op whose `AuthorID` is **forged** as another user is rejected (403).
-- A peer **cannot tombstone** a message authored by someone else, even with a
-  self-authored op envelope.
-- A non-member **cannot inject ops** into a private channel via the CRDT merge
-  path, even when the op is honestly self-authored.
-
-### 6. XSS (`src/apps/spaces/pentest-xss.test.jsx`)
-Exercises the **real** Spaces render pipeline
-(`RichMessage` → `renderMarkdown()` → DOMPurify → `dangerouslySetInnerHTML`)
-with hostile message bodies (`<script>`, `<img onerror>`, `<svg onload>`,
-`<iframe>`, `javascript:` / `vbscript:` URLs, autofocus/ontoggle handlers,
-markdown links with script-scheme targets). Assertions are **DOM-level**: no
-executable element survives and no element carries an `on*` handler or a
-`javascript:`/`vbscript:` URL attribute. A standalone DOMPurify-config test for
-the slides/docs path lives in `src/apps/slides/sanitize.test.js`.
-
-> Note: an inert `javascript:` substring rendered as **text** (e.g. an
-> unconverted markdown link `[x](javascript:...)`, which the renderer leaves as
-> plain text rather than an anchor) is harmless and intentionally not flagged —
-> the tests assert on the live DOM, not on raw substrings.
-
-### 7. Per-user credentials (`pentest_creds_test.go`, plus `auth_creds_test.go`)
+### 5. Per-user credentials (`pentest_creds_test.go`, plus `auth_creds_test.go`)
 - Once a user is registered, the legacy **shared password** can no longer
   authenticate that account (self-asserted-identity hole stays closed).
 - Wrong password → rejected.
@@ -124,7 +110,7 @@ the slides/docs path lives in `src/apps/slides/sanitize.test.js`.
 - Registration validation: duplicate registration is rejected (no account
   takeover); passwords shorter than 8 chars are rejected.
 
-### 8. CSRF / method (`pentest_files_test.go`)
+### 6. CSRF / method (`pentest_files_test.go`)
 The office API is **bearer/JWT-driven**: every handler trusts only the
 context identity derived from the verified token (`Authorization: Bearer` or an
 explicit token). A cross-site request cannot attach the `Authorization` header,
@@ -138,11 +124,5 @@ no verified token (and only a forged `X-Account-ID`) is attributed to the local
 ## Findings
 
 No live vulnerabilities were found while writing this suite — all attacks are
-blocked. One initial false alarm in the XSS suite was investigated and confirmed
-**not** a vulnerability: `renderMarkdown` only converts `http(s)://` markdown
-links to anchors, so a `[x](javascript:...)` payload is left as inert escaped
-**text**, never an executable `href`. The assertion was tightened to a DOM-level
-check accordingly.
-
-If you add a new file-scoped, channel-scoped, or organizer-scoped endpoint,
+blocked. If you add a new file-scoped, signer-scoped, or admin-scoped endpoint,
 extend the relevant pentest suite with a negative test before shipping.

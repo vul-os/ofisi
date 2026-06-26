@@ -17,19 +17,15 @@ import (
 )
 
 // memStorage is a minimal in-memory Storage implementation for handler tests.
-// It implements File CRUD and Meeting CRUD; the remaining interface methods
-// panic to surface any unintended use.
+// It implements File CRUD; the remaining interface methods panic to surface any
+// unintended use.
 type memStorage struct {
-	files      map[string]*models.File
-	meetings   map[string]*models.Meeting
-	recordings map[string]*models.MeetingRecording
+	files map[string]*models.File
 }
 
 func newMemStorage() *memStorage {
 	return &memStorage{
-		files:      make(map[string]*models.File),
-		meetings:   make(map[string]*models.Meeting),
-		recordings: make(map[string]*models.MeetingRecording),
+		files: make(map[string]*models.File),
 	}
 }
 
@@ -90,67 +86,12 @@ func (m *memStorage) DeleteComment(string, string) error                     { p
 func (m *memStorage) CreateReply(*models.CommentReply) error                 { panic("unused") }
 func (m *memStorage) GetReply(string, string) (*models.CommentReply, error)  { panic("unused") }
 func (m *memStorage) ListReplies(string) ([]*models.CommentReply, error)     { panic("unused") }
-func (m *memStorage) UpdateReply(*models.CommentReply) error                 { panic("unused") }
-func (m *memStorage) CreateMeeting(mt *models.Meeting) error {
-	m.meetings[mt.ID] = mt
-	return nil
-}
-func (m *memStorage) GetMeeting(id string) (*models.Meeting, error) {
-	mt, ok := m.meetings[id]
-	if !ok {
-		return nil, errFile("meeting not found")
-	}
-	return mt, nil
-}
-func (m *memStorage) ListMeetings() ([]*models.Meeting, error) {
-	out := make([]*models.Meeting, 0, len(m.meetings))
-	for _, mt := range m.meetings {
-		out = append(out, mt)
-	}
-	return out, nil
-}
-func (m *memStorage) UpdateMeeting(mt *models.Meeting) error {
-	if _, ok := m.meetings[mt.ID]; !ok {
-		return errFile("meeting not found")
-	}
-	m.meetings[mt.ID] = mt
-	return nil
-}
-func (m *memStorage) DeleteMeeting(id string) error {
-	if _, ok := m.meetings[id]; !ok {
-		return errFile("meeting not found")
-	}
-	delete(m.meetings, id)
-	return nil
-}
+func (m *memStorage) UpdateReply(*models.CommentReply) error                   { panic("unused") }
 func (m *memStorage) CreateSuggestion(*models.Suggestion) error                { panic("unused") }
 func (m *memStorage) GetSuggestion(string, string) (*models.Suggestion, error) { panic("unused") }
 func (m *memStorage) ListSuggestions(string) ([]*models.Suggestion, error)     { panic("unused") }
 func (m *memStorage) UpdateSuggestion(*models.Suggestion) error                { panic("unused") }
 func (m *memStorage) DeleteSuggestion(string, string) error                    { panic("unused") }
-func (m *memStorage) CreateRecording(r *models.MeetingRecording) error {
-	m.recordings[r.ID] = r
-	return nil
-}
-func (m *memStorage) ListRecordings(roomID string) ([]*models.MeetingRecording, error) {
-	var out []*models.MeetingRecording
-	for _, r := range m.recordings {
-		if r.RoomID == roomID {
-			out = append(out, r)
-		}
-	}
-	return out, nil
-}
-func (m *memStorage) GetRecording(id string) (*models.MeetingRecording, error) {
-	if r, ok := m.recordings[id]; ok {
-		return r, nil
-	}
-	return nil, errFile("recording not found")
-}
-func (m *memStorage) DeleteRecording(id string) error {
-	delete(m.recordings, id)
-	return nil
-}
 
 var _ storage.Storage = (*memStorage)(nil)
 

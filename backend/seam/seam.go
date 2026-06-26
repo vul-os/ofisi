@@ -85,8 +85,8 @@ type Entitlement struct {
 	// reached. The standalone default is always false.
 	Suspended bool
 
-	// Features is a set of optional feature flags ("office", "recordings",
-	// "signing", ...). A nil/empty map in the standalone default means "all
+	// Features is a set of optional feature flags ("office", "signing",
+	// ...). A nil/empty map in the standalone default means "all
 	// features enabled" (see Entitlements.Allowed). An explicit false disables
 	// the named feature (e.g. features["office"] == false gates office access).
 	Features map[string]bool

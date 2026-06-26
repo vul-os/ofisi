@@ -58,9 +58,9 @@ Look for `good first issue` or `help wanted` labels. UI polish, accessibility, a
 
 ### Yes
 - Bug fixes and security improvements
-- CRDT correctness and convergence improvements
+- CRDT correctness and convergence improvements (document collaboration)
 - PDF signing robustness (edge-case documents)
-- Spaces (collaboration) reliability and latency improvements
+- Calendar / Contacts reliability and interop (`.ics` / vCard)
 - Accessibility improvements
 - Tests and documentation
 
