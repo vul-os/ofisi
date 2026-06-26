@@ -16,7 +16,8 @@
     "start": "go run .",
     "preview": "vite preview",
     "test": "vitest run",
-    "screenshots": "node scripts/screenshots.mjs"
+    "screenshots": "node scripts/screenshots.mjs",
+    "demo-screenshots": "node scripts/screenshots.mjs"
   },
   "main": "./dist-lib/index.cjs",
   "module": "./dist-lib/index.js",

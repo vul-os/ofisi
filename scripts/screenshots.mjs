@@ -145,7 +145,6 @@ async function startLocalServer() {
       ...process.env,
       VULOS_CALSTORE_DB:     `${DEMO_DATA_DIR}/cal.db`,
       VULOS_CONTACTSTORE_DB: `${DEMO_DATA_DIR}/contacts.db`,
-      VULOS_LOBBY_DB:        `${DEMO_DATA_DIR}/lobby.db`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
