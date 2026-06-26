@@ -1,0 +1,17 @@
+{
+  "id": "vulos-office",
+  "name": "Vulos Office",
+  "icon": "📄",
+  "description": "Documents, spreadsheets, slides, and calendar with server-side persistence",
+  "version": "1.0.0",
+  "command": "bin/server",
+  "port": 8080,
+  "type": "web",
+  "category": "productivity",
+  "keywords": ["office", "documents", "docs", "sheets", "slides", "calendar"],
+  "auto_start": false,
+  "singleton": true,
+  "permissions": ["network", "storage"],
+  "author": "Vulos",
+  "license": "MIT"
+}
