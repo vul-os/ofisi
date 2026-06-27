@@ -15,8 +15,8 @@ import (
 // the client-supplied X-Account-ID header.
 const (
 	CtxAuthenticated = "authenticated"
-	CtxUserID        = "userID"   // verified account id from the JWT subject
-	CtxIsAdmin       = "isAdmin"  // true if the JWT carries the admin scope
+	CtxUserID        = "userID"  // verified account id from the JWT subject
+	CtxIsAdmin       = "isAdmin" // true if the JWT carries the admin scope
 )
 
 // Auth validates the session JWT, and on success sets the verified identity
@@ -71,6 +71,61 @@ func Auth(cfg *config.Config) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// SessionIdentity verifies Office's session on a RAW *http.Request (not a gin
+// context) and returns the account subject and admin flag. It is the bridge the
+// shared Apps & Bots platform uses for its management API: that handler set is a
+// plain net/http handler, and this lets it reuse Office's existing session auth
+// (Authorization: Bearer <jwt> or the HttpOnly "session" cookie).
+//
+// When auth is DISABLED (single-user / OSS self-host) there is no token; the
+// local operator is the sole user and is treated as an authenticated admin so
+// the apps place is manageable. When auth is ENABLED an invalid/absent/expired
+// session returns ok=false (the platform then responds 401).
+func SessionIdentity(cfg *config.Config, r *http.Request) (subject string, isAdmin bool, ok bool) {
+	if !cfg.Auth.Enabled {
+		return "self", true, true
+	}
+	token := tokenFromRequest(r)
+	if token == "" {
+		return "", false, false
+	}
+	secret, err := JWTSecret()
+	if err != nil {
+		return "", false, false
+	}
+	claims := &jwt.RegisteredClaims{}
+	parsed, perr := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
+		// Pin HMAC to reject alg-confusion attacks (mirrors Auth()).
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrTokenSignatureInvalid
+		}
+		return secret, nil
+	})
+	if perr != nil || !parsed.Valid {
+		return "", false, false
+	}
+	for _, aud := range claims.Audience {
+		if aud == "vulos:admin" {
+			isAdmin = true
+			break
+		}
+	}
+	return claims.Subject, isAdmin, true
+}
+
+// tokenFromRequest extracts the session token from a raw *http.Request, using
+// the same precedence as extractToken (Authorization bearer, then the session
+// cookie). The ?token= query path is intentionally NOT honored.
+func tokenFromRequest(r *http.Request) string {
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		return strings.TrimPrefix(auth, "Bearer ")
+	}
+	if c, err := r.Cookie("session"); err == nil {
+		return c.Value
+	}
+	return ""
 }
 
 func extractToken(c *gin.Context) string {

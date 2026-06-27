@@ -167,6 +167,36 @@ func (a *FileAuthz) recordOwner(c *gin.Context, fileID string) error {
 	return a.acl.SetOwner(fileID, requesterID(c))
 }
 
+// CanAccessAs reports whether accountID may access fileID, WITHOUT a gin
+// context. It mirrors canAccess for non-HTTP callers that act on behalf of a
+// specific account and are never admins — notably the Apps & Bots platform
+// adapter, where an installed app acts as its installing owner. The same
+// fail-safe posture applies: in multi-tenant mode an unowned/legacy file is NOT
+// readable by a non-owner, and a degraded store denies.
+func (a *FileAuthz) CanAccessAs(fileID, accountID string) bool {
+	if a == nil || a.acl == nil {
+		return !a.multiTenant()
+	}
+	allowed, recorded, err := a.acl.CanAccess(fileID, accountID)
+	if err != nil {
+		return false
+	}
+	if a.authEnabled && !recorded {
+		return false
+	}
+	return allowed
+}
+
+// RecordOwnerAs stamps accountID as the owner of fileID, WITHOUT a gin context.
+// Used when the Apps & Bots adapter creates a document on behalf of an app's
+// installing owner so the new file is private to that account by default.
+func (a *FileAuthz) RecordOwnerAs(fileID, accountID string) error {
+	if a == nil || a.acl == nil {
+		return nil
+	}
+	return a.acl.SetOwner(fileID, accountID)
+}
+
 // canAccessEnvelopeACL reports whether the caller may touch an envelope. The
 // e-signature subsystem ties an envelope to the per-file ACL: access is granted
 // when the caller can access the envelope's SourceFileID (the document being
