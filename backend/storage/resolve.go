@@ -187,6 +187,58 @@ func OrgBucketClient() *OfficeS3Client {
 	return orgBucketClient
 }
 
+// ObjectStoreInfo is an honest, secret-free description of the configured blob
+// object store, for the standalone Settings → Storage surface. It never exposes
+// credentials — only the backend family, endpoint host, bucket, and whether a
+// live client is engaged.
+type ObjectStoreInfo struct {
+	// Kind is "minio", "tigris", or "none" (no object store — local disk only).
+	Kind string `json:"kind"`
+	// Endpoint is the S3 endpoint URL (host only — no creds). Empty for "none".
+	Endpoint string `json:"endpoint,omitempty"`
+	// Bucket is the configured bucket name, when one is set.
+	Bucket string `json:"bucket,omitempty"`
+	// OrgID is the multi-tenant key prefix (VULOS_ORG_ID); empty in single-tenant.
+	OrgID string `json:"org_id,omitempty"`
+	// Active reports whether a live object-store client is engaged (credentials
+	// present). When false, file blobs are served from the local/postgres store.
+	Active bool `json:"active"`
+}
+
+// DescribeObjectStore reports the configured blob object store WITHOUT building
+// a client or reading credential files (so it is safe to call from a request
+// handler). It mirrors the selection rules in ResolveOfficeBackend.
+func DescribeObjectStore() ObjectStoreInfo {
+	info := ObjectStoreInfo{Kind: "none"}
+	info.OrgID = strings.TrimSpace(os.Getenv(EnvOrgID))
+
+	mode := strings.TrimSpace(os.Getenv(EnvStorageMode))
+	minioEndpoint := strings.TrimSpace(os.Getenv(EnvMinIOEndpoint))
+	minioBucket := strings.TrimSpace(os.Getenv(EnvMinIOBucket))
+	anyMinIO := minioEndpoint != "" ||
+		strings.TrimSpace(os.Getenv(EnvMinIORegion)) != "" ||
+		minioBucket != "" ||
+		strings.TrimSpace(os.Getenv(EnvMinIOCredsRef)) != ""
+
+	if mode == modeLocalMinioSync || anyMinIO {
+		info.Kind = "minio"
+		info.Endpoint = minioEndpoint
+		info.Bucket = minioBucket
+		info.Active = minioEndpoint != "" && minioBucket != ""
+		return info
+	}
+
+	// Tigris (managed) is engaged only when credentials are present in env.
+	if os.Getenv("TIGRIS_ACCESS_KEY_ID") != "" && os.Getenv("TIGRIS_SECRET_ACCESS_KEY") != "" {
+		t := OfficeTigrisDefaults()
+		info.Kind = "tigris"
+		info.Endpoint = t.Endpoint
+		info.Active = true
+		return info
+	}
+	return info
+}
+
 // OrgScopedKey returns the full object key for a given (accountID, name) pair,
 // scoped by the org prefix so objects from different orgs/accounts never collide.
 //

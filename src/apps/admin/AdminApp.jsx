@@ -88,7 +88,7 @@ function TabButton({ active, onClick, children }) {
   )
 }
 
-function InvitesPanel({ onError }) {
+export function InvitesPanel({ onError }) {
   const [invites, setInvites] = useState([])
   const [note, setNote] = useState('')
   const [maxUses, setMaxUses] = useState(1)
@@ -240,7 +240,7 @@ function InvitesPanel({ onError }) {
   )
 }
 
-function AuditPanel({ onError }) {
+export function AuditPanel({ onError }) {
   const [entries, setEntries] = useState([])
 
   const refresh = useCallback(async () => {

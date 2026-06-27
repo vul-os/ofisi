@@ -88,9 +88,11 @@ func main() {
 	// only engaged when VULOS_CP_BASE_URL is set — the core never imports the
 	// cloud adapter, so removing it cannot break the standalone build.
 	provider := seam.NewStandaloneProvider(middleware.JWTSecret, cfg.Auth.Enabled)
+	integrationMode := "standalone"
 	if cloud.Enabled() {
 		ccfg := cloud.FromEnv()
 		provider = cloud.NewProvider(ccfg, provider.Identity)
+		integrationMode = "cloud"
 		log.Printf("[seam] integration mode: cloud (control plane %s)", ccfg.BaseURL)
 	} else {
 		log.Printf("[seam] integration mode: standalone (no control plane)")
@@ -150,6 +152,12 @@ func main() {
 	if cfg.Auth.Enabled {
 		protected.Use(middleware.Auth(cfg))
 	}
+
+	// Standalone system surface: honest runtime facts for the self-hosted
+	// Settings/Admin UI, plus authenticated self-service password change.
+	systemHandler := handlers.NewSystemHandler(cfg, Version, integrationMode)
+	protected.GET("/system/info", systemHandler.Info)
+	protected.POST("/auth/password", systemHandler.ChangePassword)
 
 	// Pin the file-ACL authorizer to the active storage backend BEFORE any file
 	// handler is constructed. Under Postgres this co-locates ACL ownership in the

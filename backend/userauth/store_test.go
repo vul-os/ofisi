@@ -112,3 +112,45 @@ func TestMigrateSharedPassword(t *testing.T) {
 		t.Fatalf("empty admin: got %v (want ErrEmptyInput)", err)
 	}
 }
+
+// TestUpdatePassword proves self-service password rotation works against both
+// store backends: the new password authenticates, the old one no longer does,
+// and unknown accounts / empty input are rejected.
+func TestUpdatePassword(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		make func(t *testing.T) userauth.Store
+	}{
+		{"null", func(t *testing.T) userauth.Store { return userauth.NewNullStore() }},
+		{"sqlite", func(t *testing.T) userauth.Store {
+			s, err := userauth.NewSQLiteStore(t.TempDir() + "/creds.db")
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			t.Cleanup(func() { s.Close() })
+			return s
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := tc.make(t)
+			if err := s.Register("alice@vulos.org", "old-password-1"); err != nil {
+				t.Fatalf("register: %v", err)
+			}
+			if err := s.UpdatePassword("alice@vulos.org", "new-password-2"); err != nil {
+				t.Fatalf("update: %v", err)
+			}
+			if _, err := s.Verify("alice@vulos.org", "new-password-2"); err != nil {
+				t.Fatalf("new password should authenticate: %v", err)
+			}
+			if _, err := s.Verify("alice@vulos.org", "old-password-1"); err == nil {
+				t.Fatalf("old password must no longer authenticate")
+			}
+			if err := s.UpdatePassword("ghost@vulos.org", "whatever-99"); err != userauth.ErrUserNotFound {
+				t.Fatalf("unknown account: got %v (want ErrUserNotFound)", err)
+			}
+			if err := s.UpdatePassword("alice@vulos.org", ""); err != userauth.ErrEmptyInput {
+				t.Fatalf("empty password: got %v (want ErrEmptyInput)", err)
+			}
+		})
+	}
+}

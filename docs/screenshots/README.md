@@ -11,6 +11,7 @@ Populated with realistic demo data from `scripts/seed-demo.mjs`.
 | sheets-editor.png | Spreadsheets editor — Revenue Tracker | populated |
 | slides-editor.png | Presentations editor — Product Overview | populated |
 | pdf-editor.png | PDF viewer / annotator | populated |
+| settings.png | Settings — standalone account / storage / admin | populated |
 
 To regenerate: `npm run screenshots`
 Against a live instance: `BASE_URL=https://... npm run screenshots`

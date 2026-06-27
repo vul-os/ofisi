@@ -28,9 +28,10 @@ import (
 
 // Errors returned by the store.
 var (
-	ErrUserExists      = errors.New("userauth: account already registered")
+	ErrUserExists        = errors.New("userauth: account already registered")
 	ErrInvalidCredential = errors.New("userauth: invalid credentials")
-	ErrEmptyInput      = errors.New("userauth: account id and password required")
+	ErrEmptyInput        = errors.New("userauth: account id and password required")
+	ErrUserNotFound      = errors.New("userauth: account not found")
 )
 
 // Store is the per-user credential interface.
@@ -58,6 +59,11 @@ type Store interface {
 	// least one account already exists (the caller must then use the gated
 	// Register path), or ErrUserExists if the id is somehow already taken.
 	RegisterFirst(accountID, password string) error
+	// UpdatePassword replaces the stored password hash for an existing account.
+	// Returns ErrUserNotFound if the account is not registered. Used by the
+	// authenticated self-service "change password" flow (the caller verifies the
+	// current password first). The new password is re-hashed with bcrypt.
+	UpdatePassword(accountID, newPassword string) error
 	Close() error
 }
 
@@ -253,6 +259,26 @@ func (s *SQLiteStore) RegisterFirst(accountID, password string) error {
 	return tx.Commit()
 }
 
+// UpdatePassword replaces the bcrypt hash for an existing account.
+func (s *SQLiteStore) UpdatePassword(accountID, newPassword string) error {
+	id := normalize(accountID)
+	if id == "" || newPassword == "" {
+		return ErrEmptyInput
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("userauth: hash: %w", err)
+	}
+	res, err := s.db.Exec(`UPDATE users SET password_hash = ? WHERE account_id = ?`, string(hash), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // NullStore — in-memory backend for tests / degraded mode
 // ---------------------------------------------------------------------------
@@ -329,6 +355,25 @@ func (n *NullStore) CountUsers() (int64, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return int64(len(n.users)), nil
+}
+
+// UpdatePassword replaces the in-memory hash for an existing account.
+func (n *NullStore) UpdatePassword(accountID, newPassword string) error {
+	id := normalize(accountID)
+	if id == "" || newPassword == "" {
+		return ErrEmptyInput
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if _, ok := n.users[id]; !ok {
+		return ErrUserNotFound
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	n.users[id] = string(hash)
+	return nil
 }
 
 func (n *NullStore) Close() error { return nil }

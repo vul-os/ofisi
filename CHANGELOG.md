@@ -8,6 +8,32 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased] — 2026-06-27
 
+### Added — Standalone, server-honest Settings + admin surface
+
+A self-hoster running Vulos Office standalone now gets a Settings surface that
+reports what the instance is **actually** doing, instead of hardcoded placeholders.
+
+- **New endpoint** `GET /api/system/info` — honest runtime facts: build version,
+  storage backend (`local`/`postgres`) + data/uploads directories, object-store
+  status (MinIO/S3/Tigris, endpoint + bucket, never credentials), auth mode
+  (`disabled`/`shared`/`per-user`) + registered-user count, standalone-vs-cloud
+  integration mode, and the caller's account id + admin status. All derived from
+  live config and stores (`backend/handlers/system.go`,
+  `storage.DescribeObjectStore`).
+- **Working password change** `POST /api/auth/password` — authenticated
+  self-service rotation against the per-user credential store (re-verifies the
+  current password first; `userauth.Store.UpdatePassword` added to both the
+  SQLite and in-memory backends). Replaces the previous Settings call to a route
+  that did not exist. Shared-password and auth-disabled modes return honest
+  guidance pointing at `config.yaml` rather than silently failing.
+- **Settings overhaul** (`src/components/Settings.jsx`): Account / Appearance /
+  Security / Storage tabs reading `/api/system/info`, plus an **Admin** tab
+  (invite tokens + audit log, reusing the existing admin panels) shown only to
+  admins — folding the previously unrouted admin console into the single-user
+  self-hoster's Settings.
+- **Screenshots**: added a `settings` capture to `npm run screenshots` and the
+  README gallery (`scripts/screenshots.mjs`, `docs/screenshots/settings.png`).
+
 ### Changed — Calendar + Contacts moved to Vulos Mail/PIM
 
 Vulos Office is now **documents-only** (Docs, Sheets, Slides, PDF/Signing). Calendar

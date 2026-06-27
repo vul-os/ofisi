@@ -50,6 +50,16 @@ export const api = {
   logout: () =>
     request('/auth/logout', { method: 'POST' }),
 
+  // Standalone system surface: honest runtime facts (version, storage backend,
+  // auth mode, user count, integration mode, caller identity + admin status).
+  systemInfo: () => request('/system/info'),
+  // Authenticated self-service password change (per-user credential store).
+  changePassword: (currentPassword, newPassword) =>
+    request('/auth/password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+
   listFiles: () => request('/files'),
   getFile: (id) => request(`/files/${id}`),
   createFile: (name, type, content) =>

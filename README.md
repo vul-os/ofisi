@@ -88,6 +88,8 @@ import { PDFApp }      from '@vulos/office-client/pdf'
 | <img src="docs/screenshots/docs-editor.png" alt="Docs" /> | <img src="docs/screenshots/sheets-editor.png" alt="Sheets" /> |
 | **Slides** — themes, transitions, present | **Signing** — annotate & sign PDFs |
 | <img src="docs/screenshots/slides-editor.png" alt="Slides" /> | <img src="docs/screenshots/pdf-editor.png" alt="Signing" /> |
+| **Home** — workspace & recent files | **Settings** — account, storage & admin |
+| <img src="docs/screenshots/home.png" alt="Home" /> | <img src="docs/screenshots/settings.png" alt="Settings" /> |
 
 > Regenerate anytime with `npm run screenshots` — it boots the app with seeded demo data (no real backend or credentials needed) and captures every screen. See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 

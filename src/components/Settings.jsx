@@ -1,21 +1,45 @@
-import { useState } from 'react'
+/**
+ * Settings — the standalone self-hoster's control surface.
+ *
+ * Everything here is server-honest: it reads live facts from GET /api/system/info
+ * (version, storage backend + data dir, auth mode, registered-user count,
+ * standalone-vs-cloud integration mode, and the caller's admin status) rather
+ * than hardcoding values. Sections:
+ *
+ *   Account      identity nameplate (editable display name), account id, mode,
+ *                version, sign-out.
+ *   Appearance   theme (light/dark/auto) + editor preferences.
+ *   Security     auth mode (honest), self-service password change when per-user
+ *                credentials exist; clear guidance otherwise.
+ *   Storage      real backend (local/postgres), data + uploads dirs, object
+ *                store (MinIO/S3/Tigris) status, and how to configure each.
+ *   Admin        (admin only) invite tokens + audit log — the single-user
+ *                self-hoster IS the admin, so this is folded into Settings.
+ */
+
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft, Save, Shield, Database, HardDrive,
-  Eye, EyeOff, CheckCircle2, AlertCircle, Loader2,
-  Sun, Moon, Monitor,
+  ArrowLeft, Save, Shield, Eye, EyeOff, CheckCircle2, AlertCircle, Loader2,
+  Sun, Moon, Monitor, HardDrive, Server, Cloud, KeyRound,
+  Database, Lock, LogOut, Folder, Boxes,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
-import { Button, IconButton, Input, Card, Tabs, Tooltip } from './ui'
+import { api } from '../lib/api'
+import { Button, IconButton, Input, Card, Tabs, Tooltip, useToast } from './ui'
 import { useTheme } from './ui/useTheme'
+import { InvitesPanel, AuditPanel } from '../apps/admin/AdminApp.jsx'
 
 // ─── Row ─────────────────────────────────────────────────────────────────────
-function Row({ label, hint, children }) {
+function Row({ label, hint, children, stacked }) {
   return (
-    <div className="flex items-center justify-between gap-6 px-5 py-4">
+    <div className={[
+      'px-5 py-4 gap-x-6 gap-y-3',
+      stacked ? 'flex flex-col' : 'flex items-center justify-between flex-wrap',
+    ].join(' ')}>
       <div className="min-w-0">
         <p className="text-sm font-medium text-ink tracking-tightish">{label}</p>
-        {hint && <p className="text-2xs text-ink-faint mt-0.5 leading-snug">{hint}</p>}
+        {hint && <p className="text-2xs text-ink-faint mt-0.5 leading-snug max-w-md">{hint}</p>}
       </div>
       <div className="flex-shrink-0">{children}</div>
     </div>
@@ -23,11 +47,12 @@ function Row({ label, hint, children }) {
 }
 
 // ─── Toggle ──────────────────────────────────────────────────────────────────
-function Toggle({ checked, onChange }) {
+function Toggle({ checked, onChange, label }) {
   return (
     <button
       role="switch"
       aria-checked={checked}
+      aria-label={label}
       onClick={() => onChange(!checked)}
       className={[
         'relative inline-flex h-5 w-9 items-center rounded-pill transition-colors duration-base ease-out',
@@ -45,33 +70,24 @@ function Toggle({ checked, onChange }) {
   )
 }
 
-// ─── ThemePicker ─────────────────────────────────────────────────────────────
-function ThemePicker() {
-  const { theme, setTheme } = useTheme()
-
-  const options = [
-    { value: 'light',  Icon: Sun,     label: 'Light' },
-    { value: 'dark',   Icon: Moon,    label: 'Dark'  },
-    { value: 'system', Icon: Monitor, label: 'Auto'  },
-  ]
-
+// ─── Segmented control ───────────────────────────────────────────────────────
+function Segmented({ value, onChange, options }) {
   return (
     <div className="flex items-center gap-0.5 p-0.5 bg-bg-elev2 border border-line rounded-md">
-      {options.map(({ value, Icon, label }) => {
-        const active = theme === value
+      {options.map(({ value: v, Icon, label }) => {
+        const active = value === v
         return (
-          <Tooltip key={value} label={label} side="bottom">
+          <Tooltip key={v} label={label} side="bottom">
             <button
-              onClick={() => setTheme(value)}
+              onClick={() => onChange(v)}
+              aria-pressed={active}
               className={[
-                'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-sm text-xs font-medium',
+                'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-sm text-xs font-medium capitalize',
                 'tracking-tightish transition-[background,color] duration-fast ease-out',
-                active
-                  ? 'bg-paper text-ink shadow-e1'
-                  : 'text-ink-faint hover:text-ink-muted',
+                active ? 'bg-paper text-ink shadow-e1' : 'text-ink-faint hover:text-ink-muted',
               ].join(' ')}
             >
-              <Icon size={13} />
+              {Icon && <Icon size={13} />}
               {label}
             </button>
           </Tooltip>
@@ -81,39 +97,79 @@ function ThemePicker() {
   )
 }
 
-// ─── TABS: Preferences / Security / Storage ──────────────────────────────────
-const TABS = [
-  { value: 'preferences', label: 'Preferences' },
-  { value: 'security',    label: 'Security'    },
-  { value: 'storage',     label: 'Storage'     },
-]
+// ─── ThemePicker ─────────────────────────────────────────────────────────────
+function ThemePicker() {
+  const { theme, setTheme } = useTheme()
+  return (
+    <Segmented
+      value={theme}
+      onChange={setTheme}
+      options={[
+        { value: 'light',  Icon: Sun,     label: 'Light' },
+        { value: 'dark',   Icon: Moon,    label: 'Dark'  },
+        { value: 'system', Icon: Monitor, label: 'Auto'  },
+      ]}
+    />
+  )
+}
+
+// ─── Mono key/value chip ─────────────────────────────────────────────────────
+function Code({ children }) {
+  return (
+    <code className="text-2xs font-mono bg-bg-elev2 text-ink-muted border border-line px-2.5 py-1 rounded-md break-all">
+      {children}
+    </code>
+  )
+}
+
+function Pill({ tone = 'neutral', Icon, children }) {
+  const tones = {
+    ok:      'text-success bg-success-bg border-success',
+    neutral: 'text-ink-faint bg-bg-elev2 border-line',
+    info:    'text-accent-press bg-accent-tint border-accent-tint-2',
+  }
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-2xs font-semibold px-2.5 py-1 rounded-pill border tracking-tightish ${tones[tone]}`}>
+      {Icon && <Icon size={11} />}{children}
+    </span>
+  )
+}
+
+// ─── Section header inside a card ────────────────────────────────────────────
+function SectionLabel({ Icon, children }) {
+  return (
+    <div className="flex items-center gap-2 px-5 pt-4 pb-1">
+      {Icon && <Icon size={13} className="text-ink-faint" />}
+      <span className="mono-label">{children}</span>
+    </div>
+  )
+}
 
 export default function Settings() {
   const navigate = useNavigate()
-  const { status } = useAuthStore()
-  const [tab, setTab] = useState('preferences')
+  const { status, logout } = useAuthStore()
+  const { showToast, toast } = useToast()
 
-  // Password change
-  const [showPassword, setShowPassword] = useState(false)
-  const [newPassword, setNewPassword] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState(null)
+  const [info, setInfo] = useState(null)
+  const [infoLoading, setInfoLoading] = useState(true)
+  const [tab, setTab] = useState('account')
 
-  // App preferences stored in localStorage
+  useEffect(() => {
+    let live = true
+    api.systemInfo()
+      .then(d => { if (live) setInfo(d) })
+      .catch(() => { if (live) setInfo(null) })
+      .finally(() => { if (live) setInfoLoading(false) })
+    return () => { live = false }
+  }, [])
+
+  // ── App preferences (localStorage) ──────────────────────────────────────────
   const [autosaveDelay, setAutosaveDelay] = useState(() =>
-    parseInt(localStorage.getItem('vulos_autosave_delay') ?? '2000')
-  )
+    parseInt(localStorage.getItem('vulos_autosave_delay') ?? '2000'))
   const [spellcheck, setSpellcheck] = useState(() =>
-    localStorage.getItem('vulos_spellcheck') !== 'false'
-  )
+    localStorage.getItem('vulos_spellcheck') !== 'false')
   const [defaultView, setDefaultView] = useState(() =>
-    localStorage.getItem('vulos_default_view') ?? 'grid'
-  )
-
-  const showToast = (msg, ok = true) => {
-    setToast({ msg, ok })
-    setTimeout(() => setToast(null), 2800)
-  }
+    localStorage.getItem('vulos_default_view') ?? 'grid')
 
   const savePrefs = () => {
     localStorage.setItem('vulos_autosave_delay', autosaveDelay)
@@ -122,125 +178,161 @@ export default function Settings() {
     showToast('Preferences saved')
   }
 
-  const changePassword = async () => {
-    if (!newPassword.trim()) return
-    setSaving(true)
+  // ── Identity (local display name) ───────────────────────────────────────────
+  const readIdentity = () => {
     try {
-      const res = await fetch('/api/auth/password', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: newPassword }),
-      })
-      if (res.ok) {
-        setNewPassword('')
-        showToast('Password updated — restart the server to apply')
-      } else {
-        const { error } = await res.json().catch(() => ({}))
-        showToast(error || 'Failed to update password', false)
-      }
-    } catch {
-      showToast('Server unreachable', false)
+      const p = JSON.parse(localStorage.getItem('presence_identity') || '{}')
+      if (p?.displayName) return p
+    } catch {}
+    return { displayName: 'You', accountId: '' }
+  }
+  const [identity, setIdentity] = useState(readIdentity)
+  const [nameDraft, setNameDraft] = useState(identity.displayName)
+  const accountId = info?.account_id && info.account_id !== 'self' ? info.account_id : identity.accountId
+
+  const saveName = () => {
+    const next = { ...identity, displayName: nameDraft.trim() || 'You' }
+    setIdentity(next)
+    try { localStorage.setItem('presence_identity', JSON.stringify(next)) } catch {}
+    showToast('Display name updated')
+  }
+
+  // ── Password change (per-user store) ────────────────────────────────────────
+  const [curPw, setCurPw] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [confirmPw, setConfirmPw] = useState('')
+  const [showPw, setShowPw] = useState(false)
+  const [savingPw, setSavingPw] = useState(false)
+
+  const changePassword = async () => {
+    if (!newPw || newPw !== confirmPw) {
+      showToast('New passwords do not match', 'error'); return
+    }
+    setSavingPw(true)
+    try {
+      await api.changePassword(curPw, newPw)
+      setCurPw(''); setNewPw(''); setConfirmPw('')
+      showToast('Password updated')
+    } catch (e) {
+      showToast(e.message || 'Failed to update password', 'error')
     } finally {
-      setSaving(false)
+      setSavingPw(false)
     }
   }
 
-  // ── current account identity (for warm serif nameplate) ────────────────────
-  let identity = { displayName: 'You', accountId: '' }
-  try {
-    const stored = localStorage.getItem('presence_identity')
-    if (stored) {
-      const p = JSON.parse(stored)
-      if (p?.displayName) identity = p
-    }
-  } catch {}
+  const authMode = info?.auth?.mode // 'disabled' | 'shared' | 'per-user'
+  const isAdmin = !!info?.is_admin
+
+  const TABS = [
+    { value: 'account',    label: 'Account' },
+    { value: 'appearance', label: 'Appearance' },
+    { value: 'security',   label: 'Security' },
+    { value: 'storage',    label: 'Storage' },
+    ...(isAdmin ? [{ value: 'admin', label: 'Admin' }] : []),
+  ]
 
   return (
     <div className="flex-1 overflow-auto bg-bg">
       {/* ── Topbar ── */}
       <div className="sticky top-0 z-10 flex items-center gap-3 px-5 h-11 bg-paper border-b border-line">
         <Tooltip label="Back" side="bottom">
-          <IconButton size="sm" onClick={() => navigate(-1)}>
-            <ArrowLeft size={15} />
-          </IconButton>
+          <IconButton size="sm" onClick={() => navigate(-1)}><ArrowLeft size={15} /></IconButton>
         </Tooltip>
         <h1 className="text-sm font-semibold text-ink tracking-tightish flex-1">Settings</h1>
-        {/* Theme toggle — lives at the top per spec */}
         <ThemePicker />
       </div>
 
       <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
 
-        {/* ── Account nameplate ── warm serif for the name */}
+        {/* ── Account nameplate ── */}
         <div className="flex items-center gap-4 px-5 py-4 bg-paper border border-line rounded-lg">
-          {/* Avatar initial */}
-          <div className="w-10 h-10 rounded-full bg-accent-tint border border-accent flex items-center justify-center flex-shrink-0">
-            <span className="text-sm font-semibold text-accent-press select-none">
-              {identity.displayName.slice(0, 1).toUpperCase()}
+          <div className="w-11 h-11 rounded-full bg-accent-tint border border-accent flex items-center justify-center flex-shrink-0">
+            <span className="text-base font-semibold text-accent-press select-none">
+              {(identity.displayName || 'Y').slice(0, 1).toUpperCase()}
             </span>
           </div>
-          <div className="min-w-0">
-            <p className="font-serif text-lg text-ink leading-tight">{identity.displayName}</p>
-            {identity.accountId && (
-              <p className="text-2xs text-ink-faint tracking-tightish mt-0.5">{identity.accountId}</p>
-            )}
+          <div className="min-w-0 flex-1">
+            <p className="font-serif text-lg text-ink leading-tight truncate">{identity.displayName}</p>
+            <p className="text-2xs text-ink-faint tracking-tightish mt-0.5 truncate">
+              {accountId || 'Local account'}
+            </p>
           </div>
+          {!infoLoading && info && (
+            <Pill tone="info" Icon={info.integration_mode === 'cloud' ? Cloud : Server}>
+              {info.integration_mode === 'cloud' ? 'Cloud-linked' : 'Self-hosted'}
+            </Pill>
+          )}
         </div>
 
         {/* ── Tabs ── */}
         <Card>
           <Tabs value={tab} onChange={setTab} items={TABS} />
 
-          {/* ── Preferences ── */}
-          {tab === 'preferences' && (
+          {/* ════ ACCOUNT ════ */}
+          {tab === 'account' && (
             <div>
-              <Row label="Autosave delay" hint="How long after typing before changes are saved automatically">
-                <select
-                  value={autosaveDelay}
-                  onChange={e => setAutosaveDelay(Number(e.target.value))}
-                  className={[
-                    'h-8 text-sm text-ink bg-paper border border-line rounded-md px-3',
-                    'transition-[border-color,box-shadow] duration-fast ease-out',
-                    'focus:outline-none focus:border-accent focus:shadow-focus',
-                    'tracking-tightish',
-                  ].join(' ')}
-                >
-                  <option value={1000}>1 second</option>
-                  <option value={2000}>2 seconds</option>
-                  <option value={3000}>3 seconds</option>
-                  <option value={5000}>5 seconds</option>
-                </select>
+              <Row label="Display name" hint="Shown on presence, comments, and your cursor. Stored locally on this device.">
+                <div className="flex items-center gap-2">
+                  <Input value={nameDraft} onChange={e => setNameDraft(e.target.value)} size="sm" className="w-44" placeholder="Your name" />
+                  <Button variant="secondary" size="sm" onClick={saveName} disabled={nameDraft.trim() === identity.displayName}>
+                    <Save size={13} /> Save
+                  </Button>
+                </div>
               </Row>
-
               <div className="border-t border-line">
-                <Row label="Spell check" hint="Enable browser spell checking in document editors">
-                  <Toggle checked={spellcheck} onChange={setSpellcheck} />
+                <Row label="Account ID" hint="Your verified login identity on this server.">
+                  <Code>{accountId || 'self (single-user)'}</Code>
                 </Row>
               </div>
-
               <div className="border-t border-line">
-                <Row label="Default file view" hint="Grid or list view on app home pages">
-                  <div className="flex items-center gap-0.5 p-0.5 bg-bg-elev2 border border-line rounded-md">
-                    {['grid', 'list'].map(v => (
-                      <button
-                        key={v}
-                        onClick={() => setDefaultView(v)}
-                        className={[
-                          'h-7 px-3 rounded-sm text-xs font-medium capitalize tracking-tightish',
-                          'transition-[background,color,box-shadow] duration-fast ease-out',
-                          defaultView === v
-                            ? 'bg-paper text-ink shadow-e1'
-                            : 'text-ink-faint hover:text-ink-muted',
-                        ].join(' ')}
-                      >
-                        {v}
-                      </button>
-                    ))}
-                  </div>
+                <Row label="Version" hint="The build this instance is running.">
+                  <Code>{infoLoading ? '…' : (info?.version || 'unknown')}</Code>
                 </Row>
               </div>
+              {status?.enabled && (
+                <div className="border-t border-line px-5 py-3 flex justify-end bg-bg-elev2">
+                  <Button variant="destructive" size="sm" onClick={() => { logout() }}>
+                    <LogOut size={13} /> Sign out
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
 
+          {/* ════ APPEARANCE ════ */}
+          {tab === 'appearance' && (
+            <div>
+              <Row label="Theme" hint="Light, dark, or follow your operating system.">
+                <ThemePicker />
+              </Row>
+              <div className="border-t border-line">
+                <Row label="Autosave delay" hint="How long after you stop typing before changes are saved.">
+                  <select
+                    value={autosaveDelay}
+                    onChange={e => setAutosaveDelay(Number(e.target.value))}
+                    className="h-8 text-sm text-ink bg-paper border border-line rounded-md px-3 transition-[border-color,box-shadow] duration-fast ease-out focus:outline-none focus:border-accent focus:shadow-focus tracking-tightish"
+                  >
+                    <option value={1000}>1 second</option>
+                    <option value={2000}>2 seconds</option>
+                    <option value={3000}>3 seconds</option>
+                    <option value={5000}>5 seconds</option>
+                  </select>
+                </Row>
+              </div>
+              <div className="border-t border-line">
+                <Row label="Spell check" hint="Enable browser spell checking in document editors.">
+                  <Toggle checked={spellcheck} onChange={setSpellcheck} label="Spell check" />
+                </Row>
+              </div>
+              <div className="border-t border-line">
+                <Row label="Default file view" hint="Grid or list view on app home pages.">
+                  <Segmented
+                    value={defaultView}
+                    onChange={setDefaultView}
+                    options={[{ value: 'grid', label: 'Grid' }, { value: 'list', label: 'List' }]}
+                  />
+                </Row>
+              </div>
               <div className="border-t border-line px-5 py-3 flex justify-end bg-bg-elev2">
                 <Button variant="primary" size="sm" onClick={savePrefs}>
                   <Save size={13} /> Save preferences
@@ -249,107 +341,178 @@ export default function Settings() {
             </div>
           )}
 
-          {/* ── Security ── */}
+          {/* ════ SECURITY ════ */}
           {tab === 'security' && (
             <div>
-              {status?.enabled ? (
-                <>
-                  <Row
-                    label="Login protection"
-                    hint="Password authentication is currently enabled"
-                  >
-                    <span className="inline-flex items-center gap-1.5 text-2xs font-semibold text-success bg-success-bg border border-success px-2.5 py-1 rounded-pill tracking-tightish">
-                      <CheckCircle2 size={11} /> Enabled
-                    </span>
+              <Row label="Authentication" hint="How this server gates access. Configured in config.yaml.">
+                {infoLoading ? (
+                  <Loader2 size={14} className="animate-spin text-ink-faint" />
+                ) : authMode === 'disabled' ? (
+                  <Pill tone="neutral" Icon={AlertCircle}>Disabled</Pill>
+                ) : authMode === 'per-user' ? (
+                  <Pill tone="ok" Icon={CheckCircle2}>Per-user accounts</Pill>
+                ) : (
+                  <Pill tone="ok" Icon={Lock}>Shared password</Pill>
+                )}
+              </Row>
+
+              {!infoLoading && authMode === 'per-user' && typeof info?.auth?.user_count === 'number' && (
+                <div className="border-t border-line">
+                  <Row label="Registered accounts" hint="People with their own credentials on this instance.">
+                    <Code>{info.auth.user_count}</Code>
                   </Row>
-                  <div className="border-t border-line">
-                    <Row
-                      label="Change password"
-                      hint="Updates config.yaml — requires server restart to take effect"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Input
-                          type={showPassword ? 'text' : 'password'}
-                          value={newPassword}
-                          onChange={e => setNewPassword(e.target.value)}
-                          placeholder="New password"
-                          size="sm"
-                          trailing={
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword(v => !v)}
-                              className="text-ink-faint hover:text-ink transition-colors"
-                            >
-                              {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
-                            </button>
-                          }
-                          className="w-44"
-                        />
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={changePassword}
-                          disabled={!newPassword.trim() || saving}
-                        >
-                          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                          Update
-                        </Button>
-                      </div>
-                    </Row>
+                </div>
+              )}
+
+              {/* Per-user: working self-service password change */}
+              {!infoLoading && authMode === 'per-user' && (
+                <>
+                  <SectionLabel Icon={KeyRound}>Change password</SectionLabel>
+                  <div className="px-5 pb-4 pt-1 space-y-2.5">
+                    <Input
+                      type={showPw ? 'text' : 'password'} value={curPw}
+                      onChange={e => setCurPw(e.target.value)} placeholder="Current password" size="sm"
+                    />
+                    <Input
+                      type={showPw ? 'text' : 'password'} value={newPw}
+                      onChange={e => setNewPw(e.target.value)} placeholder="New password (min 10 chars)" size="sm"
+                      trailing={
+                        <button type="button" onClick={() => setShowPw(v => !v)} className="text-ink-faint hover:text-ink transition-colors">
+                          {showPw ? <EyeOff size={13} /> : <Eye size={13} />}
+                        </button>
+                      }
+                    />
+                    <Input
+                      type={showPw ? 'text' : 'password'} value={confirmPw}
+                      onChange={e => setConfirmPw(e.target.value)} placeholder="Confirm new password" size="sm"
+                    />
+                    <div className="flex justify-end pt-1">
+                      <Button variant="primary" size="sm" onClick={changePassword}
+                        disabled={!curPw || !newPw || savingPw}>
+                        {savingPw ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                        Update password
+                      </Button>
+                    </div>
                   </div>
                 </>
-              ) : (
-                <Row
-                  label="Login protection"
-                  hint="Enable via config.yaml: set auth.enabled: true"
-                >
-                  <span className="inline-flex items-center gap-1.5 text-2xs font-semibold text-ink-faint bg-bg-elev2 border border-line px-2.5 py-1 rounded-pill tracking-tightish">
-                    <AlertCircle size={11} /> Disabled
-                  </span>
-                </Row>
+              )}
+
+              {/* Shared / disabled: honest guidance */}
+              {!infoLoading && authMode === 'shared' && (
+                <div className="border-t border-line px-5 py-4">
+                  <p className="text-2xs text-ink-faint leading-relaxed">
+                    This instance uses a single shared password from <Code>config.yaml</Code> (<code className="font-mono">auth.password</code>).
+                    Change it there and restart the server. To enable per-user accounts and self-service password
+                    changes, register an account, then mint invites from the Admin tab.
+                  </p>
+                </div>
+              )}
+              {!infoLoading && authMode === 'disabled' && (
+                <div className="border-t border-line px-5 py-4">
+                  <p className="text-2xs text-ink-faint leading-relaxed">
+                    Login is turned off — anyone who can reach this server has full access. This is fine for a
+                    trusted local machine. To require a password, set <code className="font-mono">auth.enabled: true</code> in <Code>config.yaml</Code>,
+                    set a strong <code className="font-mono">VULOS_OFFICE_JWT_SECRET</code>, and restart.
+                  </p>
+                </div>
               )}
             </div>
           )}
 
-          {/* ── Storage ── */}
+          {/* ════ STORAGE ════ */}
           {tab === 'storage' && (
             <div>
-              <Row label="Storage backend" hint="Configured in config.yaml">
-                <code className="text-2xs font-mono bg-bg-elev2 text-ink-muted border border-line px-2.5 py-1 rounded-md">
-                  local files
-                </code>
-              </Row>
-              <div className="border-t border-line">
-                <Row label="Data directory" hint="Where your files are saved on disk">
-                  <code className="text-2xs font-mono bg-bg-elev2 text-ink-muted border border-line px-2.5 py-1 rounded-md">
-                    ./data/
-                  </code>
-                </Row>
+              {infoLoading ? (
+                <div className="px-5 py-8 flex justify-center"><Loader2 size={16} className="animate-spin text-ink-faint" /></div>
+              ) : (
+                <>
+                  <Row label="File store" hint="Where documents and their version history are persisted.">
+                    <Pill tone="info" Icon={info?.storage?.backend === 'postgres' ? Database : HardDrive}>
+                      {info?.storage?.backend === 'postgres' ? 'PostgreSQL' : 'Local files'}
+                    </Pill>
+                  </Row>
+                  <div className="border-t border-line">
+                    <Row label="Data directory" hint="On-disk location of the local file/version store.">
+                      <Code>{info?.storage?.data_dir || './data'}</Code>
+                    </Row>
+                  </div>
+                  <div className="border-t border-line">
+                    <Row label="Uploads directory" hint="Where embedded images and attachments are written.">
+                      <Code>{info?.storage?.uploads_dir || './uploads'}</Code>
+                    </Row>
+                  </div>
+
+                  <SectionLabel Icon={Boxes}>Object storage (blobs)</SectionLabel>
+                  <div className="px-5 pb-1">
+                    {info?.storage?.object_store?.active ? (
+                      <div className="space-y-3 pb-3">
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-sm text-ink">Backend</span>
+                          <Pill tone="ok" Icon={CheckCircle2}>
+                            {info.storage.object_store.kind === 'minio' ? 'MinIO / S3' : 'Tigris'} · connected
+                          </Pill>
+                        </div>
+                        {info.storage.object_store.endpoint && (
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-sm text-ink-muted">Endpoint</span>
+                            <Code>{info.storage.object_store.endpoint}</Code>
+                          </div>
+                        )}
+                        {info.storage.object_store.bucket && (
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-sm text-ink-muted">Bucket</span>
+                            <Code>{info.storage.object_store.bucket}</Code>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-2xs text-ink-faint leading-relaxed pb-3">
+                        No object store configured — blobs are served from the local <Code>data_dir</Code>.
+                        To use S3-compatible storage (MinIO / AWS S3 / Tigris), set <code className="font-mono">VULOS_MINIO_ENDPOINT</code>,
+                        <code className="font-mono"> VULOS_MINIO_BUCKET</code>, and credentials, then restart. See <Code>SELFHOST.md</Code>.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="border-t border-line px-5 py-3 bg-bg-elev2">
+                    <p className="text-2xs text-ink-faint leading-relaxed flex items-start gap-2">
+                      <Folder size={12} className="mt-0.5 flex-shrink-0" />
+                      Storage is configured in <code className="font-mono">config.yaml</code> and environment variables, not from this UI,
+                      so configuration stays reproducible and version-controllable.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ════ ADMIN (admin only) ════ */}
+          {tab === 'admin' && isAdmin && (
+            <div className="p-5 space-y-8">
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Shield size={14} className="text-accent-press" />
+                  <p className="mono-label">Invite tokens</p>
+                </div>
+                <InvitesPanel onError={(m) => m && showToast(m, 'error')} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Shield size={14} className="text-accent-press" />
+                  <p className="mono-label">Audit log</p>
+                </div>
+                <AuditPanel onError={(m) => m && showToast(m, 'error')} />
               </div>
             </div>
           )}
         </Card>
 
-        {/* About */}
         <p className="text-center text-2xs text-ink-faint tracking-eyebrow uppercase pb-4">
-          Vulos Office — open-source local-first office suite
+          Vulos Office — open-source, self-hostable office suite
         </p>
       </div>
 
-      {/* ── Toast ── */}
-      {toast && (
-        <div
-          className={[
-            'fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2',
-            'px-4 py-2.5 rounded-lg shadow-e3 text-sm font-medium text-white',
-            'animate-rise-in',
-            toast.ok ? 'bg-ink' : 'bg-danger',
-          ].join(' ')}
-        >
-          {toast.ok ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
+      {toast}
     </div>
   )
 }

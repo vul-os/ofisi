@@ -71,6 +71,11 @@ const ROUTES = [
     description: 'PDF viewer / annotator',
     waitFor: '[data-testid="pdf-editor"], .pdf-viewer, canvas',
   },
+  {
+    name: 'settings',
+    path: '/settings',
+    description: 'Settings — standalone account / storage / admin',
+  },
 ]
 
 // ── Local server management ───────────────────────────────────────────────────
