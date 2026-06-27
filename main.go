@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"vulos-office/backend/billing"
 	"vulos-office/backend/config"
@@ -157,7 +158,12 @@ func main() {
 	// Settings/Admin UI, plus authenticated self-service password change.
 	systemHandler := handlers.NewSystemHandler(cfg, Version, integrationMode)
 	protected.GET("/system/info", systemHandler.Info)
-	protected.POST("/auth/password", systemHandler.ChangePassword)
+	// Rate-limit the self-service password change: it re-verifies the CURRENT
+	// password, so without a limit it is an online brute-force oracle. 5
+	// attempts/minute per client IP is ample for a human while blunting
+	// automated guessing.
+	pwLimiter := middleware.NewRateLimiter(5, time.Minute)
+	protected.POST("/auth/password", pwLimiter.Middleware(), systemHandler.ChangePassword)
 
 	// Pin the file-ACL authorizer to the active storage backend BEFORE any file
 	// handler is constructed. Under Postgres this co-locates ACL ownership in the
@@ -210,9 +216,20 @@ func main() {
 	protected.POST("/upload", uploadHandler.Upload)
 	api.GET("/uploads/:filename", uploadHandler.Serve)
 
-	localFilesHandler := handlers.NewLocalFilesHandler()
-	protected.GET("/local-files", localFilesHandler.Scan)
-	protected.GET("/local-files/serve", localFilesHandler.Serve)
+	// Local-files browse/serve exposes the SERVER PROCESS's own ~/Documents,
+	// ~/Downloads and ~/Desktop. That is a convenience for a single-user /
+	// standalone self-host (the operator browsing their own machine), but in a
+	// multi-tenant deploy (auth enabled) it would let ANY authenticated user read
+	// the operator's personal files. Register these routes ONLY when auth is
+	// disabled (standalone single-user mode); when auth is enabled they are
+	// intentionally absent (404).
+	if !cfg.Auth.Enabled {
+		localFilesHandler := handlers.NewLocalFilesHandler()
+		protected.GET("/local-files", localFilesHandler.Scan)
+		protected.GET("/local-files/serve", localFilesHandler.Serve)
+	} else {
+		log.Printf("[local-files] auth enabled (multi-tenant): local-files browse/serve routes disabled to avoid cross-tenant exposure of the server's home directory")
+	}
 
 	// Team chat + huddles ("Spaces") is now the standalone Vulos Talk product:
 	// its meeting/lobby/TURN/recording + spaces/presence API moved to vulos-talk.

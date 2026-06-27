@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -43,13 +45,50 @@ func init() {
 // ─────────────────────────────────────────────────────────
 
 type sealStack struct {
-	store  storage.Storage
-	acl    fileacl.Store
-	env    *EnvelopeHandler
-	seal   *SealHandler
-	sign   *SigningHandler
-	orch   *OrchestrationHandler
-	verify *VerifyHandler
+	store      storage.Storage
+	acl        fileacl.Store
+	uploadsDir string
+	env        *EnvelopeHandler
+	seal       *SealHandler
+	sign       *SigningHandler
+	orch       *OrchestrationHandler
+	verify     *VerifyHandler
+}
+
+// sampleSourcePDF is a minimal but valid one-page PDF used as the on-disk source
+// document for seal round-trip tests. The seal pipeline now FAILS when the
+// source PDF is absent (it no longer silently seals a blank placeholder), so the
+// tests must provide a real source file in uploadsDir.
+var sampleSourcePDF = []byte(`%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>
+endobj
+xref
+0 4
+0000000000 65535 f
+0000000009 00000 n
+0000000058 00000 n
+0000000115 00000 n
+trailer
+<< /Size 4 /Root 1 0 R >>
+startxref
+190
+%%EOF
+`)
+
+// writeSourcePDF drops a valid source PDF at uploadsDir/<sourceFileID> so
+// loadSourcePDF resolves it on the exact-match path.
+func (s *sealStack) writeSourcePDF(t *testing.T, sourceFileID string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(s.uploadsDir, sourceFileID), sampleSourcePDF, 0o644); err != nil {
+		t.Fatalf("write source pdf: %v", err)
+	}
 }
 
 func newSealStack(t *testing.T) *sealStack {
@@ -64,13 +103,14 @@ func newSealStack(t *testing.T) *sealStack {
 	acl := fileacl.NewNullStore()
 	authz := NewFileAuthz(acl)
 	return &sealStack{
-		store:  st,
-		acl:    acl,
-		env:    NewEnvelopeHandlerWithAuthz(st, authz),
-		seal:   NewSealHandlerWithAuthz(st, cfg.Server.UploadsDir, authz),
-		sign:   NewSigningHandlerWithAuthz(st, authz),
-		orch:   NewOrchestrationHandlerWithAuthz(st, authz),
-		verify: NewVerifyHandler(st),
+		store:      st,
+		acl:        acl,
+		uploadsDir: cfg.Server.UploadsDir,
+		env:        NewEnvelopeHandlerWithAuthz(st, authz),
+		seal:       NewSealHandlerWithAuthz(st, cfg.Server.UploadsDir, authz),
+		sign:       NewSigningHandlerWithAuthz(st, authz),
+		orch:       NewOrchestrationHandlerWithAuthz(st, authz),
+		verify:     NewVerifyHandler(st),
 	}
 }
 
@@ -128,6 +168,7 @@ func seedSignedEnvelopeSS(t *testing.T, s *sealStack, owner string) string {
 	if err := s.acl.SetOwner("src-seal-ss1", owner); err != nil {
 		t.Fatalf("set owner: %v", err)
 	}
+	s.writeSourcePDF(t, "src-seal-ss1")
 
 	ownerR := s.protectedRouter(owner, false)
 

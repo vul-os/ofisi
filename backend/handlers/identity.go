@@ -39,3 +39,17 @@ func requesterID(c *gin.Context) string {
 	}
 	return "self"
 }
+
+// isRequestAdmin reports whether the verified session carries the admin scope.
+// Derived from the JWT (set by middleware.Auth), never a client header.
+func isRequestAdmin(c *gin.Context) bool {
+	return c.GetBool(middleware.CtxIsAdmin)
+}
+
+// isAuthorOrAdmin reports whether the current requester authored the resource
+// (matched against the VERIFIED requester id) or is an admin. Used to gate
+// mutate/delete of user-authored content (e.g. comment bodies) against IDOR
+// where file-access alone is too coarse.
+func isAuthorOrAdmin(c *gin.Context, authorID string) bool {
+	return isRequestAdmin(c) || requesterID(c) == authorID
+}

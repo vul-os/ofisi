@@ -86,9 +86,11 @@ func TestEntitlements_CPContract(t *testing.T) {
 	}
 }
 
-// Allowed must treat suspended:true as denied (when the cp answers) and fail
-// open when the cp is unreachable.
-func TestAllowed_SuspendedAndFailOpen(t *testing.T) {
+// Allowed must treat suspended:true as denied (when the cp answers). When the cp
+// is unreachable the fail-open is now BOUNDED: a cold-cache (never-seen) account
+// is DENIED rather than granted indefinitely, while a warm last-known
+// entitlement still rides out a transient blip.
+func TestAllowed_SuspendedAndBoundedFailOpen(t *testing.T) {
 	suspended := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"suspended":true}`)
 	}))
@@ -98,10 +100,26 @@ func TestAllowed_SuspendedAndFailOpen(t *testing.T) {
 		t.Fatal("suspended account must be denied")
 	}
 
-	// Unreachable cp → fail open (allow).
+	// Unreachable cp + COLD cache → DENY (closes the indefinite-grant window).
 	down := &cpEntitlements{cfg: Config{BaseURL: "http://127.0.0.1:0"}, http: suspended.Client()}
-	if !down.Allowed(context.Background(), "a", seam.FeatureOffice) {
-		t.Fatal("unreachable cp must fail open (allow)")
+	if down.Allowed(context.Background(), "a", seam.FeatureOffice) {
+		t.Fatal("unreachable cp with cold cache must DENY, not grant indefinitely")
+	}
+
+	// Warm last-known entitlement survives a transient cp blip: resolve once
+	// against a healthy cp (warming the cache), then point the SAME limiter at a
+	// dead address and confirm the warm entry still allows.
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"suspended":false,"features":{"office":true}}`)
+	}))
+	defer healthy.Close()
+	warm := &cpEntitlements{cfg: Config{BaseURL: healthy.URL}, http: healthy.Client()}
+	if !warm.Allowed(context.Background(), "b", seam.FeatureOffice) {
+		t.Fatal("healthy cp should allow account b")
+	}
+	warm.cfg.BaseURL = "http://127.0.0.1:0" // cp now unreachable
+	if !warm.Allowed(context.Background(), "b", seam.FeatureOffice) {
+		t.Fatal("warm last-known entitlement must ride out a transient cp blip (allow)")
 	}
 }
 

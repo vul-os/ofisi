@@ -125,7 +125,16 @@ func (h *CommentHandler) Update(c *gin.Context) {
 		return
 	}
 
-	if req.Body != "" {
+	// AUTHORSHIP: editing a comment's BODY is restricted to its author (or an
+	// admin) — file access alone is too coarse and would let any collaborator
+	// rewrite someone else's words (IDOR). Changing only the STATE
+	// (resolve/reopen) is intentionally collaborative: any participant with file
+	// access may resolve/reopen a thread.
+	if req.Body != "" && req.Body != cm.Body {
+		if !isAuthorOrAdmin(c, cm.AuthorID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "only the comment author may edit its text"})
+			return
+		}
 		cm.Body = req.Body
 	}
 	if req.State != "" {
@@ -145,6 +154,17 @@ func (h *CommentHandler) Delete(c *gin.Context) {
 	fileID := c.Param("id")
 	commentID := c.Param("cid")
 	if !h.authz.require(c, fileID) {
+		return
+	}
+	// AUTHORSHIP: only the comment's author (or an admin) may delete it; file
+	// access alone would let any collaborator remove someone else's comment.
+	cm, err := h.store.GetComment(fileID, commentID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "comment not found"})
+		return
+	}
+	if !isAuthorOrAdmin(c, cm.AuthorID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only the comment author may delete it"})
 		return
 	}
 	if err := h.store.DeleteComment(fileID, commentID); err != nil {
@@ -206,6 +226,11 @@ func (h *CommentHandler) UpdateReply(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "reply not found"})
 		return
 	}
+	// AUTHORSHIP: only the reply's author (or an admin) may edit its text.
+	if !isAuthorOrAdmin(c, r.AuthorID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only the reply author may edit it"})
+		return
+	}
 
 	var req models.UpdateReplyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -237,6 +262,11 @@ func (h *CommentHandler) DeleteReply(c *gin.Context) {
 	r, err := h.store.GetReply(commentID, replyID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "reply not found"})
+		return
+	}
+	// AUTHORSHIP: only the reply's author (or an admin) may delete it.
+	if !isAuthorOrAdmin(c, r.AuthorID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only the reply author may delete it"})
 		return
 	}
 

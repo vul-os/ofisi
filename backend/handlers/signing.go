@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"vulos-office/backend/billing"
+	"vulos-office/backend/middleware"
 	"vulos-office/backend/models"
 	"vulos-office/backend/signing"
 	"vulos-office/backend/storage"
@@ -462,10 +463,11 @@ func appendChainedAuditEvent(store storage.Storage, ev *models.AuditEvent) (stri
 // identityFromContext extracts a Vulos account identity from the request if
 // auth is enabled, else returns an empty string.
 func identityFromContext(c *gin.Context) string {
-	if v, ok := c.Get("account_id"); ok {
-		if id, ok := v.(string); ok {
-			return id
-		}
-	}
-	return ""
+	// middleware.Auth sets the verified account id under CtxUserID (the JWT
+	// subject). The previous "account_id" key was never set by any middleware, so
+	// the signer identity was always empty in the audit trail. Read the key the
+	// middleware actually writes so "sent"/Complete events capture the logged-in
+	// Vulos signer. When auth is disabled CtxUserID is empty, preserving the
+	// "no Vulos identity" contract for local single-user mode.
+	return c.GetString(middleware.CtxUserID)
 }

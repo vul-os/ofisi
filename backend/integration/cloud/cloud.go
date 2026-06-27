@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"vulos-office/backend/seam"
@@ -110,6 +111,49 @@ func (o *orgStampedIdentity) Authenticate(ctx context.Context, token string) (se
 type cpEntitlements struct {
 	cfg  Config
 	http *http.Client
+
+	// lastSeen is the bounded last-known-entitlement cache that makes the
+	// fail-open posture deliberate AND time-bounded. A successful For() refreshes
+	// it; Allowed() consults it ONLY when a fresh resolve errors. A WARM entry
+	// (within entCacheTTL) rides out a transient cp blip; once the entry is COLD
+	// (expired or never seen) Allowed DENIES rather than granting indefinitely
+	// through a prolonged cp outage.
+	cacheMu  sync.Mutex
+	lastSeen map[string]cachedEnt
+}
+
+// cachedEnt is a last-known entitlement with the time it was fetched.
+type cachedEnt struct {
+	ent     seam.Entitlement
+	fetched time.Time
+}
+
+// entCacheTTL bounds how long a last-known entitlement is trusted after the cp
+// stops answering. Mirrors the billing-layer warm-cache TTL (backend/billing
+// enforce.go): long enough to ride out a transient blip, short enough that a
+// prolonged outage stops granting and a real tier change is picked up soon.
+const entCacheTTL = 60 * time.Second
+
+// remember stores a freshly-resolved entitlement in the bounded cache.
+func (e *cpEntitlements) remember(accountID string, ent seam.Entitlement) {
+	e.cacheMu.Lock()
+	defer e.cacheMu.Unlock()
+	if e.lastSeen == nil {
+		e.lastSeen = make(map[string]cachedEnt)
+	}
+	e.lastSeen[accountID] = cachedEnt{ent: ent, fetched: time.Now()}
+}
+
+// warm returns the last-known entitlement for accountID iff it is still within
+// entCacheTTL. A cold/expired/absent entry returns ok=false.
+func (e *cpEntitlements) warm(accountID string) (seam.Entitlement, bool) {
+	e.cacheMu.Lock()
+	defer e.cacheMu.Unlock()
+	c, ok := e.lastSeen[accountID]
+	if !ok || time.Since(c.fetched) >= entCacheTTL {
+		return seam.Entitlement{}, false
+	}
+	return c.ent, true
 }
 
 // HeaderRelayAuth is the shared cp authentication header (matches the cp
@@ -150,23 +194,23 @@ func (e *cpEntitlements) For(ctx context.Context, accountID string) (seam.Entitl
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		return seam.Entitlement{}, err
 	}
-	return seam.Entitlement{
+	ent := seam.Entitlement{
 		Tier:            r.Tier,
 		Suspended:       r.Suspended,
 		MaxStorageBytes: r.MaxStorageBytes,
 		MaxSeats:        r.MaxSeats,
 		Features:        r.Features,
-	}, nil
+	}
+	// Warm the bounded cache on every successful resolve so Allowed() can ride
+	// out a subsequent transient cp blip without granting indefinitely.
+	e.remember(accountID, ent)
+	return ent, nil
 }
 
-func (e *cpEntitlements) Allowed(ctx context.Context, accountID, feature string) bool {
-	ent, err := e.For(ctx, accountID)
-	if err != nil {
-		// Fail open so a transient cp outage never locks self-features out; the
-		// control plane can still hard-deny via quota at the storage tier.
-		return true
-	}
-	// A suspended account is denied every feature when the cp actually answers.
+// allowedFor applies the feature decision to a resolved entitlement: a suspended
+// account is denied everything; an explicit feature=false denies; otherwise the
+// feature is allowed (generous-by-default for absent keys).
+func allowedFor(ent seam.Entitlement, feature string) bool {
 	if ent.Suspended {
 		return false
 	}
@@ -177,6 +221,28 @@ func (e *cpEntitlements) Allowed(ctx context.Context, accountID, feature string)
 		return v
 	}
 	return true
+}
+
+// Allowed reports whether accountID may use feature. Fail-open is now DELIBERATE
+// and BOUNDED rather than indefinite:
+//
+//   - a fresh cp resolve decides authoritatively (and warms the cache);
+//   - on a resolver error we consult the bounded last-known cache: a WARM entry
+//     (within entCacheTTL) still decides, so a known-good account survives a
+//     transient cp blip;
+//   - a COLD/absent entry (prolonged outage or never-seen account) is DENIED,
+//     closing the indefinite-grant abuse window the audit flagged.
+func (e *cpEntitlements) Allowed(ctx context.Context, accountID, feature string) bool {
+	ent, err := e.For(ctx, accountID)
+	if err == nil {
+		return allowedFor(ent, feature)
+	}
+	if ent, ok := e.warm(accountID); ok {
+		return allowedFor(ent, feature)
+	}
+	// cp unreachable and no warm last-known entitlement: deny rather than grant
+	// indefinitely. Short blips are covered by the warm cache above.
+	return false
 }
 
 // ---- Usage ------------------------------------------------------------------
