@@ -40,14 +40,16 @@ import { Sidebar, IconButton, Tooltip, ThemeSwitch } from './ui'
 // The "Talk" rail item launches it (external) instead of routing in-process.
 // Calendar + Contacts moved to the Vulos Mail/PIM product — Office is
 // documents-only, so they no longer appear in the rail.
-const TALK_URL = import.meta.env.VITE_TALK_URL || 'https://talk.vulos.org'
+const TALK_URL = import.meta.env.VITE_TALK_URL || ''
 
 const NAV_APPS = [
   { label: 'Docs',     icon: FileText,      route: '/docs'     },
   { label: 'Sheets',   icon: Table2,        route: '/sheets'   },
   { label: 'Slides',   icon: Presentation,  route: '/slides'   },
   { label: 'PDF',      icon: FileSearch,    route: '/pdf'      },
-  { label: 'Talk',     icon: MessageSquare, external: TALK_URL },
+  // Cross-product launcher to the standalone Talk product — shown only when
+  // wired (VITE_TALK_URL); standalone Office stays documents-only otherwise.
+  ...(TALK_URL ? [{ label: 'Talk', icon: MessageSquare, external: TALK_URL }] : []),
 ]
 
 /**
