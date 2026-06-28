@@ -5,13 +5,16 @@
  *   - <Sidebar>             root container; manages width (collapsed/expanded)
  *   - <Sidebar.Brand>       logo lockup + product name (fades wordmark collapsed)
  *   - <Sidebar.Section>     labelled group; mono uppercase label, hides collapsed
- *   - <Sidebar.Item>        nav row; teal left-rail + selected tint when active
+ *   - <Sidebar.Item>        nav row; accent left-rail + calm tint when active,
+ *                           optional per-app icon tint at rest
  *   - <Sidebar.Footer>      sticky bottom region (settings, collapse toggle…)
  *
  * Design DNA (vulos-cloud):
  *   - Surface sits one step above the canvas (#111 on #0c0c0c), hairline edge.
- *   - Active = 2px teal rail + #0e1f1f selected tint + #143030 border + teal
- *     icon. Restrained; the row tints rather than shouts.
+ *   - Active = a 2.5px accent left-rail + a calm accent-tint bg (no coloured
+ *     border) + the icon brightening to accent. The rail marks, it doesn't box.
+ *   - At rest, app icons carry one low-saturation tint each (iconAccent) so
+ *     Docs/Sheets/Slides/PDF/Talk are findable at a glance.
  *   - Hover lifts to #1e1e1e. Mono uppercase section labels (the IDE trait).
  *   - Width transitions 200ms ease-out so collapsing feels considered.
  */
@@ -43,26 +46,26 @@ Sidebar.Brand = function SidebarBrand({ logoSrc, name = 'Vulos Office' }) {
   const { collapsed } = useContext(SidebarCtx)
   return (
     <div className={[
-      'flex items-center gap-2.5 h-14 border-b border-line flex-shrink-0',
+      'flex items-center gap-3 h-14 border-b border-line flex-shrink-0',
       collapsed ? 'justify-center px-0' : 'px-4',
     ].join(' ')}>
       {logoSrc ? (
         <img
           src={logoSrc}
           alt=""
-          className="w-7 h-7 rounded-md object-cover flex-shrink-0 ring-1 ring-line-strong"
+          className="w-8 h-8 rounded-lg object-cover flex-shrink-0 ring-1 ring-line-strong shadow-e1"
         />
       ) : (
-        <div className="w-7 h-7 rounded-md bg-accent text-white flex items-center justify-center text-xs font-semibold flex-shrink-0">
+        <div className="w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center text-sm font-semibold flex-shrink-0 shadow-e1">
           V
         </div>
       )}
       {!collapsed && (
-        <div className="flex flex-col min-w-0 -space-y-0.5">
-          <span className="text-[13px] font-semibold tracking-tightish text-ink truncate leading-tight">
+        <div className="flex flex-col min-w-0">
+          <span className="text-sm font-semibold tracking-tight text-ink truncate leading-none">
             Vulos
           </span>
-          <span className="font-mono text-[10px] uppercase tracking-wider text-ink-faint leading-tight">
+          <span className="font-mono text-[9.5px] font-medium uppercase tracking-[0.2em] text-ink-faint leading-none mt-[3px]">
             Office
           </span>
         </div>
@@ -96,25 +99,29 @@ Sidebar.Item = function SidebarItem({
   onClick,
   icon: Icon,
   iconAccent,    // optional category tint for the icon when not active
+  dense,         // tighter row height + smaller glyph (Recent files)
   title,
   children,
   variant = 'nav',
 }) {
   const { collapsed } = useContext(SidebarCtx)
+  const glyph = dense ? 14 : 16
 
   const renderInner = (isActive) => (
     <>
+      {/* Accent left-rail — the active marker. A calm bar that "gets out of the
+          way" instead of boxing the whole row. */}
       <span
         aria-hidden
         className={[
-          'absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-r-full',
-          'transition-all duration-fast ease-out',
-          isActive ? 'bg-accent opacity-100' : 'bg-accent opacity-0',
+          'absolute left-0 top-1 bottom-1 w-[2.5px] rounded-r-full bg-accent',
+          'transition-opacity duration-fast ease-out',
+          isActive ? 'opacity-100' : 'opacity-0',
         ].join(' ')}
       />
       {Icon && (
         <Icon
-          size={16}
+          size={glyph}
           strokeWidth={isActive ? 2.1 : 1.8}
           className={[
             'flex-shrink-0 transition-colors duration-fast ease-out',
@@ -123,8 +130,8 @@ Sidebar.Item = function SidebarItem({
         />
       )}
       {!collapsed && (
-        <span className="truncate text-[13px] tracking-tightish flex-1 flex items-center gap-1.5">
-          {children}
+        <span className="flex-1 min-w-0 flex items-center gap-1.5">
+          <span className="truncate text-[13px] tracking-tightish">{children}</span>
         </span>
       )}
     </>
@@ -132,11 +139,14 @@ Sidebar.Item = function SidebarItem({
 
   const cn = (isActive) =>
     [
-      'group relative flex items-center gap-2.5 h-8 px-2.5 rounded-md',
+      'group relative flex items-center gap-2.5 px-2.5 rounded-md',
+      dense ? 'h-7' : 'h-8',
       'transition-colors duration-fast ease-out',
       collapsed ? 'justify-center' : '',
+      // Active = subtle accent tint + rail (above) + brightened icon. No
+      // coloured border, so the row reads calm rather than filled/boxed.
       isActive
-        ? 'bg-accent-tint text-ink border border-accent-tint-2'
+        ? 'bg-accent-tint text-ink border border-transparent'
         : 'text-ink-muted border border-transparent hover:bg-bg-hover hover:text-ink',
       variant === 'danger' ? 'hover:bg-danger-bg hover:text-danger hover:border-transparent' : '',
     ].join(' ')

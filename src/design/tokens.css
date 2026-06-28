@@ -75,6 +75,22 @@
   --signal-info:       #C96AFF;
   --signal-info-bg:    color-mix(in srgb, #C96AFF 12%, transparent);
 
+  /* ── Per-app icon tints — one low-saturation hue per app so Docs / Sheets /
+   *    Slides / PDF / Talk are findable at a glance. These colour the ICON
+   *    STROKE only in the rail (never a row background); the `-bg` chip is for
+   *    the Home cards so the sidebar ↔ content language agrees. Tuned for the
+   *    near-black rail (#1a1a1a) — legible, calm, no glow. */
+  --app-docs:      #6f9fd8;                                  /* soft blue   */
+  --app-docs-bg:   color-mix(in srgb, #6f9fd8 13%, transparent);
+  --app-sheets:    #5cc08a;                                  /* soft green  */
+  --app-sheets-bg: color-mix(in srgb, #5cc08a 13%, transparent);
+  --app-slides:    #e2a93f;                                  /* warm amber  */
+  --app-slides-bg: color-mix(in srgb, #e2a93f 13%, transparent);
+  --app-pdf:       #e0726a;                                  /* soft red    */
+  --app-pdf-bg:    color-mix(in srgb, #e0726a 13%, transparent);
+  --app-talk:      #3fc1b0;                                  /* teal        */
+  --app-talk-bg:   color-mix(in srgb, #3fc1b0 13%, transparent);
+
   /* ── Semantic aliases (DEFAULT = near-black dark) ─────────────────────── */
   --bg:        var(--bg-base);        /* #0c0c0c */
   --bg-elev-1: var(--bg-surface);     /* #111111 — panels, cards */
@@ -231,6 +247,18 @@
   --signal-warning-bg: color-mix(in srgb, #f59e0b 12%, transparent);
   --signal-error-bg:   color-mix(in srgb, #f43f5e 10%, transparent);
   --signal-info-bg:    color-mix(in srgb, #C96AFF 10%, transparent);
+
+  /* Per-app tints — darkened for AA contrast on light surfaces (white / #f7f7f7). */
+  --app-docs:      #2f6cba;
+  --app-docs-bg:   color-mix(in srgb, #2f6cba 10%, transparent);
+  --app-sheets:    #1f8a55;
+  --app-sheets-bg: color-mix(in srgb, #1f8a55 10%, transparent);
+  --app-slides:    #a9760f;
+  --app-slides-bg: color-mix(in srgb, #a9760f 12%, transparent);
+  --app-pdf:       #bf443c;
+  --app-pdf-bg:    color-mix(in srgb, #bf443c 10%, transparent);
+  --app-talk:      #0c7e77;
+  --app-talk-bg:   color-mix(in srgb, #0c7e77 10%, transparent);
 
   --elev-1: 0 1px 2px rgba(20, 20, 20, 0.06),
             0 1px 3px rgba(20, 20, 20, 0.05);

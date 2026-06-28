@@ -10,18 +10,18 @@ import { importFromUrl } from '../lib/importFile'
 import NewFileModal from './NewFileModal'
 import { Card, Button, Tooltip, useToast } from './ui'
 
-// ─── Token-aligned type map (no raw indigo/emerald/amber) ───────────────────
+// ─── Per-app tint map — shares the rail's tokens so content ↔ sidebar agree ──
 const typeInfo = {
-  doc:   { icon: FileText,     iconCn: 'text-accent',         bgCn: 'bg-accent-tint',         route: 'docs'   },
-  sheet: { icon: Table2,       iconCn: 'text-success',        bgCn: 'bg-success-bg',          route: 'sheets' },
-  slide: { icon: Presentation, iconCn: 'text-warning',        bgCn: 'bg-warning-bg',          route: 'slides' },
+  doc:   { icon: FileText,     iconCn: 'text-app-docs',   bgCn: 'bg-app-docs-bg',   route: 'docs'   },
+  sheet: { icon: Table2,       iconCn: 'text-app-sheets', bgCn: 'bg-app-sheets-bg', route: 'sheets' },
+  slide: { icon: Presentation, iconCn: 'text-app-slides', bgCn: 'bg-app-slides-bg', route: 'slides' },
 }
 
 const localTypeInfo = {
-  doc:   { icon: FileText,     iconCn: 'text-accent',   bgCn: 'bg-accent-tint',  label: 'Document'     },
-  sheet: { icon: Table2,       iconCn: 'text-success',  bgCn: 'bg-success-bg',   label: 'Spreadsheet'  },
-  slide: { icon: Presentation, iconCn: 'text-warning',  bgCn: 'bg-warning-bg',   label: 'Presentation' },
-  pdf:   { icon: FileSearch,   iconCn: 'text-danger',   bgCn: 'bg-danger-bg',    label: 'PDF'          },
+  doc:   { icon: FileText,     iconCn: 'text-app-docs',   bgCn: 'bg-app-docs-bg',   label: 'Document'     },
+  sheet: { icon: Table2,       iconCn: 'text-app-sheets', bgCn: 'bg-app-sheets-bg', label: 'Spreadsheet'  },
+  slide: { icon: Presentation, iconCn: 'text-app-slides', bgCn: 'bg-app-slides-bg', label: 'Presentation' },
+  pdf:   { icon: FileSearch,   iconCn: 'text-app-pdf',    bgCn: 'bg-app-pdf-bg',    label: 'PDF'          },
 }
 
 function formatDate(ms) {
