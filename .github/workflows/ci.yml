@@ -49,6 +49,49 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+  # ── Go backend — Postgres integration ───────────────────────────────────────
+  # Runs the full Go test suite with VULOS_TEST_POSTGRES_DSN set so the
+  # dual-backend contract tests (backend_contract_test.go,
+  # fileacl_postgres_test.go) exercise a real Postgres instance in the
+  # "office" schema. Depends on the base go-ci job succeeding first.
+  go-postgres:
+    name: Go test (Postgres — schema office)
+    runs-on: ubuntu-latest
+    needs: go-ci
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vulos
+          POSTGRES_PASSWORD: vulos
+          POSTGRES_DB: vulos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vulos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout sibling vulos-apps
+        run: git clone --depth 1 https://github.com/vul-os/vulos-apps ../vulos-apps
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests with Postgres backend
+        env:
+          VULOS_TEST_POSTGRES_DSN: "postgres://vulos:vulos@localhost:5432/vulos_test?sslmode=disable"
+        run: go test ./backend/storage/... -v -count=1
+
   # ── Frontend ────────────────────────────────────────────────────────────────
   frontend:
     name: Frontend build / test

@@ -38,6 +38,11 @@ type PostgresConfig struct {
 	Password string `yaml:"password"`
 	Database string `yaml:"database"`
 	SSLMode  string `yaml:"sslmode"`
+	// DSN is a full Postgres connection URL (postgres://…). When set it takes
+	// precedence over the individual host/port/user/password/database fields.
+	// Populated at runtime from DATABASE_URL or VULOS_DATABASE_URL; not written
+	// to config.yaml.
+	DSN string `yaml:"-"`
 }
 
 func Load(path string) (*Config, error) {

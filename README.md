@@ -198,6 +198,8 @@ storage:
 
 | Variable | Purpose |
 |----------|---------|
+| `DATABASE_URL` | **Postgres backend** — full `postgres://…` connection URL. When set, selects Postgres as the document storage backend (schema `office`) and overrides `config.yaml storage.type`. Alias: `VULOS_DATABASE_URL` (checked second). Unset = embedded JSON-file default. |
+| `VULOS_DATABASE_URL` | Alias for `DATABASE_URL` (checked if `DATABASE_URL` is unset). |
 | `VULOS_OFFICE_JWT_SECRET` | HS256 secret for session JWTs — **required when auth is enabled** |
 | `VULOS_OFFICE_DEV` | `1` uses a labelled insecure dev secret — local development only |
 | `VULOS_OFFICE_CORS_ORIGINS` | Comma-separated allowed CORS origins |
@@ -206,6 +208,21 @@ storage:
 | `VULOS_CP_BASE_URL` | **Opt-in** vulos-cloud control plane URL (enables the cloud seam) |
 | `VULOS_CP_TOKEN` | Outbound service token for the control plane |
 | `VULOS_ORG_ID` | Tenant / org scoping (used by the cloud adapter and storage) |
+
+#### Postgres shared-database setup (cloud / Neon)
+
+Vulos Office uses the dedicated schema `office` inside the shared database, so it co-exists with other VulOS products (`mail`, `talk`, etc.) in a single Neon project without table-name collisions:
+
+```bash
+# Neon / shared Postgres (DATABASE_URL takes precedence over config.yaml)
+export DATABASE_URL="postgres://user:pass@ep-cool-term.us-east-2.aws.neon.tech/neondb?sslmode=require"
+./vulos-office
+
+# Run migrations first (idempotent, safe to re-run after upgrades)
+./vulos-office migrate up
+```
+
+The binary creates the `office` schema and all tables automatically on first boot. `migrate up` makes this explicit and can be run out-of-band before a rolling restart.
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete reference.
 

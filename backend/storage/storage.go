@@ -1,9 +1,24 @@
 package storage
 
 import (
+	"log"
+	"os"
+	"strings"
+
 	"vulos-office/backend/config"
 	"vulos-office/backend/models"
 )
+
+// databaseURL returns the first non-empty value of DATABASE_URL or
+// VULOS_DATABASE_URL (in that order), or "" if neither is set.
+// Either variable selects the Postgres backend and sets the schema to "office"
+// so all products can share a single Neon / Postgres instance.
+func databaseURL() string {
+	if v := strings.TrimSpace(os.Getenv("DATABASE_URL")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("VULOS_DATABASE_URL"))
+}
 
 // DefaultVersionCap is the maximum number of versions retained per file.
 const DefaultVersionCap = 50
@@ -78,6 +93,14 @@ type Storage interface {
 }
 
 func New(cfg *config.Config) (Storage, error) {
+	// DATABASE_URL / VULOS_DATABASE_URL take precedence over config.yaml
+	// storage.type so that the cloud hosting environment can inject a single
+	// shared Neon URL without changing the checked-in config file.
+	if dsn := databaseURL(); dsn != "" {
+		log.Printf("[storage] DATABASE_URL set — selecting postgres backend (schema: office)")
+		cfg.Storage.Type = "postgres"
+		cfg.Storage.Postgres.DSN = dsn
+	}
 	switch cfg.Storage.Type {
 	case "postgres":
 		return NewPostgresStorage(cfg)

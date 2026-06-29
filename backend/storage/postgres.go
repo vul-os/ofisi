@@ -17,27 +17,63 @@ type PostgresStorage struct {
 	pool *pgxpool.Pool
 }
 
+// NewPostgresStorage opens a pgxpool connection to Postgres, ensures the
+// "office" schema exists, pins every connection's search_path to "office"
+// (so all CREATE TABLE / SELECT statements operate in that schema without
+// explicit qualification), and runs the idempotent startup migration.
+//
+// Connection source priority:
+//  1. cfg.Storage.Postgres.DSN — full postgres://… URL (set by the
+//     DATABASE_URL / VULOS_DATABASE_URL env-override path in storage.New).
+//  2. Structured fields Host/Port/User/Password/Database/SSLMode from
+//     config.yaml — used when there is no URL env var.
 func NewPostgresStorage(cfg *config.Config) (*PostgresStorage, error) {
 	pg := cfg.Storage.Postgres
-	dsn := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		pg.Host, pg.Port, pg.User, pg.Password, pg.Database, pg.SSLMode,
-	)
 
-	pool, err := pgxpool.New(context.Background(), dsn)
+	// Build the raw DSN: URL wins over structured fields.
+	rawDSN := pg.DSN
+	if rawDSN == "" {
+		rawDSN = fmt.Sprintf(
+			"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+			pg.Host, pg.Port, pg.User, pg.Password, pg.Database, pg.SSLMode,
+		)
+	}
+
+	poolCfg, err := pgxpool.ParseConfig(rawDSN)
+	if err != nil {
+		return nil, fmt.Errorf("parse postgres config: %w", err)
+	}
+	// Pin every connection's search_path to the "office" schema so all table
+	// references are schema-qualified transparently. This lets the "office"
+	// product share a single Neon database with other products (each uses its
+	// own schema: "mail", "talk", "office", etc.) without table-name clashes.
+	poolCfg.ConnConfig.RuntimeParams["search_path"] = "office"
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect to postgres: %w", err)
 	}
 
 	s := &PostgresStorage{pool: pool}
 	if err := s.migrate(); err != nil {
+		pool.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return s, nil
 }
 
 func (s *PostgresStorage) migrate() error {
-	_, err := s.pool.Exec(context.Background(), `
+	ctx := context.Background()
+	// CREATE SCHEMA must run with an unqualified connection (no search_path
+	// restriction) — it is a database-level statement. The pool's search_path
+	// is already set to "office" via RuntimeParams, so Postgres will resolve
+	// table names inside this connection to the office schema once it exists.
+	// Using CREATE SCHEMA IF NOT EXISTS is idempotent and safe to call on
+	// every startup.
+	if _, err := s.pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS office`); err != nil {
+		return fmt.Errorf("create schema office: %w", err)
+	}
+	_, err := s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS files (
 			id          TEXT PRIMARY KEY,
 			name        TEXT NOT NULL,
@@ -761,4 +797,3 @@ DELETE FROM suggestions WHERE file_id=$1 AND id=$2`, fileID, suggestionID)
 	}
 	return nil
 }
-
