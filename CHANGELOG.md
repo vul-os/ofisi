@@ -6,7 +6,11 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased] — 2026-06-27
+## [Unreleased]
+
+---
+
+## [0.1.0] — 2026-06-29
 
 ### Added — Standalone, server-honest Settings + admin surface
 
@@ -88,10 +92,6 @@ split into their own products, combined with Office by the **Vulos Workspace** s
 
 Office's sidebar keeps an **external** launcher link to Talk (`talk.vulos.org`) — a
 cross-product link, not an in-process surface.
-
----
-
-## [Unreleased] — 2026-06-16
 
 ### Added (Google-parity Wave H — Sheets/Slides/Docs polish)
 
@@ -189,11 +189,7 @@ cross-product link, not an in-process surface.
   `SLIDE_FONT_SIZES` constant.
 - Total: **272 tests** (all passing).
 
----
-
-## [Unreleased] — 2026-06-15
-
-### Added
+### Added (Wave C)
 - **CHANNEL-INVITE-UI**: `InviteMemberModal` in the Spaces channel header (private channels only).
   - `UserPlus` icon button appears in the `ChannelView` topbar actions for `type === 'private'` channels.
   - Modal lets any channel member enter an account id and optional display name, calls `spacesInviteMember`, shows 201 success / 409 "already a member" / generic error, refreshes the member list on success.
@@ -240,20 +236,7 @@ cross-product link, not an in-process surface.
   - `web+vulosoffice://` protocol handler registered on mount via
     `navigator.registerProtocolHandler`; `?goto=<path>` query param parsed and navigated on load.
   - `/pdf/:id` route added (was missing from the main monolithic app router).
-
-### Fixed
-- FIX-OFFICE-STORE-WIRE-01: Wire OrgBucketClient into file CRUD, sealed PDFs — blob sync to S3/Tigris when configured; SQLite-only fallback when not
-- OFFICE-27 (Postgres): Implement CreateSuggestion/GetSuggestion/UpdateSuggestion/DeleteSuggestion in PostgresStorage
-- OFFICE-62: Replace fabric-null presence stub with working REST/poll heartbeat + roster (15 s interval)
-- P1-4: Add POST /api/spaces/channels/:channelId/members (private-channel invite) with membership authz
-- P1-5: Wire optional SMTP reminder emails (VULOS_SMTP_* env); honest "no mailer configured" when absent
-
-### Changed
-- P2-7: Call cap: render capacity warning at ≥6 participants; MEET-SPACES-01 clarified: P2P mesh only, no SFU/LiveKit (intentional product limit — no change)
-- P2-8: Replace alert() in importFile.js with thrown errors (caller handles UI feedback)
-
-### Added (Wave C / prior unreleased)
-- Build-time version injection via `-ldflags "-X main.Version=vX.Y.Z"`.
+- **Build-time version injection** via `-ldflags "-X main.Version=vX.Y.Z"`.
 - `GET /version` endpoint returns the build version as JSON.
 - `--version` / `version` CLI subcommand prints the build version and exits.
 - `.github/workflows/release.yml`: automated release pipeline triggered on `v*`
@@ -261,7 +244,16 @@ cross-product link, not an in-process surface.
   lib, generates SHA-256 checksums, creates a GitHub Release, and optionally
   publishes to npm (gated on `NPM_TOKEN` secret).
 
-### Changed (Wave C / prior unreleased)
+### Fixed (Wave C)
+- FIX-OFFICE-STORE-WIRE-01: Wire OrgBucketClient into file CRUD, sealed PDFs — blob sync to S3/Tigris when configured; SQLite-only fallback when not
+- OFFICE-27 (Postgres): Implement CreateSuggestion/GetSuggestion/UpdateSuggestion/DeleteSuggestion in PostgresStorage
+- OFFICE-62: Replace fabric-null presence stub with working REST/poll heartbeat + roster (15 s interval)
+- P1-4: Add POST /api/spaces/channels/:channelId/members (private-channel invite) with membership authz
+- P1-5: Wire optional SMTP reminder emails (VULOS_SMTP_* env); honest "no mailer configured" when absent
+
+### Changed (Wave C)
+- P2-7: Call cap: render capacity warning at ≥6 participants; MEET-SPACES-01 clarified: P2P mesh only, no SFU/LiveKit (intentional product limit — no change)
+- P2-8: Replace alert() in importFile.js with thrown errors (caller handles UI feedback)
 - Renamed internal `forumHandler` variable → `spacesHandler` in `main.go`
   (the `/api/spaces/*` routes are Spaces, not a forum).
 - `docs/ARCHITECTURE.md` rewritten to reflect current reality: REST-based
@@ -273,11 +265,7 @@ cross-product link, not an in-process surface.
 - CI: fixed `node-version-file: package.json` (no `engines.node` field) → pin
   to Node 22.
 
----
-
-## [1.0.0] — 2026-05-24
-
-### Added
+### Added (Foundation)
 
 #### Vulos Spaces
 - Full team-chat surface: channels, DMs, threads, reactions, pins, user status,
@@ -319,10 +307,10 @@ cross-product link, not an in-process surface.
 
 #### @vulos/office-client library
 - Multi-entry Vite library build (`vite.config.lib.js`) exporting `docs`,
-  `sheets`, `slides`, `pdf`, `spaces`, `calendar`, `contacts` as individually
-  importable sub-packages for embedding in the Vulos OS shell.
+  `sheets`, `slides`, `pdf` as individually importable sub-packages for embedding
+  in the Vulos OS shell.
 
-### Removed
+### Removed (Foundation)
 - **LiveKit / SFU dependency**: LiveKit client SDK removed from the calling
   stack. Spaces calling now uses the P2P mesh via `@vulos/relay-client` only;
   large-room SFU integration is a future milestone.
@@ -332,7 +320,7 @@ cross-product link, not an in-process surface.
 - **Dual meeting endpoints**: the two parallel meeting handler implementations
   were merged into one.
 
-### Changed
+### Changed (Foundation)
 - Identity: all references updated from `@vumail.org` to `@vulos.org`.
 - Storage interface extended with file versioning (OFFICE-08): `ListVersions`,
   `GetVersion`, `RestoreVersion`, `PruneVersions`, `LabelVersion`.
@@ -341,5 +329,5 @@ cross-product link, not an in-process surface.
 
 ---
 
-[Unreleased]: https://github.com/vul-os/vulos-office/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/vul-os/vulos-office/releases/tag/v1.0.0
+[Unreleased]: https://github.com/vul-os/vulos-office/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/vul-os/vulos-office/releases/tag/v0.1.0
