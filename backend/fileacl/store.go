@@ -57,11 +57,38 @@ const (
 	RoleOwner Role = "owner"
 	// RoleEditor may read and write content but cannot delete or manage collaborators.
 	RoleEditor Role = "editor"
+	// RoleCommenter may read content and add comments/suggestions, but cannot
+	// edit the document body, delete it, or manage collaborators. It sits
+	// between viewer and editor for write-scoping purposes (see
+	// FileAuthz.requireEditor, which denies it content edits).
+	RoleCommenter Role = "commenter"
 	// RoleViewer may read content only.
 	RoleViewer Role = "viewer"
 	// RoleNone indicates no access (the account is not a collaborator).
 	RoleNone Role = ""
 )
+
+// NormalizeRole maps the share-API role vocabulary (view/comment/edit and their
+// long forms) onto the canonical fileacl roles. An unrecognized/empty value
+// returns RoleNone so callers can reject it (fail closed) or apply a default.
+func NormalizeRole(s string) Role {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "edit", "editor", "write", "writer":
+		return RoleEditor
+	case "comment", "commenter":
+		return RoleCommenter
+	case "view", "viewer", "read", "reader":
+		return RoleViewer
+	default:
+		return RoleNone
+	}
+}
+
+// IsGrantableRole reports whether role is one a collaborator may be granted
+// (editor, commenter, or viewer). RoleOwner is set via SetOwner, not granted.
+func IsGrantableRole(role Role) bool {
+	return role == RoleEditor || role == RoleCommenter || role == RoleViewer
+}
 
 // CollaboratorEntry pairs an account id with its role on a specific file.
 type CollaboratorEntry struct {

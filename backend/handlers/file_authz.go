@@ -229,8 +229,10 @@ func (a *FileAuthz) requireEditor(c *gin.Context, fileID string) bool {
 		// No ACL record (unowned/legacy): require() already passed, allow.
 		return true
 	}
-	if role == fileacl.RoleViewer {
-		c.JSON(http.StatusForbidden, gin.H{"error": "viewers cannot modify content"})
+	// Fail closed: only owners and editors may mutate content. Viewers and
+	// commenters (and any future non-edit role) are read-only for the body.
+	if role != fileacl.RoleOwner && role != fileacl.RoleEditor {
+		c.JSON(http.StatusForbidden, gin.H{"error": "your role does not permit modifying content"})
 		return false
 	}
 	return true
