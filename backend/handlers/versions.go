@@ -52,7 +52,9 @@ func (h *VersionHandler) RestoreVersion(c *gin.Context) {
 	fileID := c.Param("id")
 	versionID := c.Param("vid")
 
-	if !h.authz.require(c, fileID) {
+	// Restoring reverts file.Content to a prior version — a full body overwrite.
+	// It is a mutation, so require editor rights: a viewer/commenter gets 403.
+	if !h.authz.requireEditor(c, fileID) {
 		return
 	}
 

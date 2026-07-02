@@ -126,7 +126,9 @@ type createSnapshotRequest struct {
 func (h *ActivityHandler) CreateNamedSnapshot(c *gin.Context) {
 	fileID := c.Param("id")
 
-	if !h.authz.require(c, fileID) {
+	// Creating a snapshot writes a new version derived from the current body;
+	// it is a mutation, so require editor rights (a viewer/commenter gets 403).
+	if !h.authz.requireEditor(c, fileID) {
 		return
 	}
 
@@ -166,7 +168,9 @@ func (h *ActivityHandler) LabelVersion(c *gin.Context) {
 	fileID := c.Param("id")
 	versionID := c.Param("vid")
 
-	if !h.authz.require(c, fileID) {
+	// Labeling mutates stored version metadata; require editor rights so a
+	// viewer/commenter gets 403.
+	if !h.authz.requireEditor(c, fileID) {
 		return
 	}
 
