@@ -9,6 +9,7 @@ import Underline from '@tiptap/extension-underline'
 import TextStyle from '@tiptap/extension-text-style'
 import Color from '@tiptap/extension-color'
 import Placeholder from '@tiptap/extension-placeholder'
+import { FontSize, FontFamily } from '../../lib/tiptap/fontStyle.js'
 import {
   ArrowLeft, Save, Loader2, Play, Plus, Trash2,
   ChevronUp, ChevronDown, Download, EyeOff, MessageSquare,
@@ -162,6 +163,9 @@ export default function SlidesEditor() {
       Underline,
       TextStyle,
       Color,
+      // Render font size / family on the textStyle mark (base ext is a shell).
+      FontSize,
+      FontFamily,
       Placeholder.configure({ placeholder: 'Slide content…' }),
     ],
     content: activeSlide?.content || '<p></p>',

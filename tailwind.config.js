@@ -164,12 +164,17 @@ export default {
           '0%':   { opacity: 0, transform: 'translateX(8px)' },
           '100%': { opacity: 1, transform: 'translateX(0)' },
         },
+        'slide-in-left': {
+          '0%':   { opacity: 0, transform: 'translateX(-8px)' },
+          '100%': { opacity: 1, transform: 'translateX(0)' },
+        },
       },
       animation: {
         'fade-in':        'fade-in var(--duration-base) var(--ease-out) both',
         'rise-in':        'rise-in var(--duration-slow) var(--ease-spring) both',
         'scale-in':       'scale-in var(--duration-base) var(--ease-spring) both',
         'slide-in-right': 'slide-in-right var(--duration-base) var(--ease-out) both',
+        'slide-in-left':  'slide-in-left var(--duration-base) var(--ease-out) both',
       },
     },
   },

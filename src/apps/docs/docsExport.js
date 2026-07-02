@@ -157,13 +157,26 @@ function inlineNodes(nodes) {
     const hasMark = (type) => marks.some((m) => m.type === type)
     const markAttr = (type, attr) => marks.find((m) => m.type === type)?.attrs?.[attr]
     const color = markAttr('color', 'color')?.replace('#', '')
+    // Font size / family live on the textStyle mark (see lib/tiptap/fontStyle.js).
+    const rawSize = markAttr('textStyle', 'fontSize')
+    const sizePt = rawSize ? parseFloat(rawSize) : NaN
+    const rawFamily = markAttr('textStyle', 'fontFamily')
+    // docx wants a single font name, not a CSS stack — take the first, unquoted.
+    const font = rawFamily
+      ? rawFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '')
+      : undefined
     return new TextRun({
       text: node.text || '',
       bold: hasMark('bold'),
       italics: hasMark('italic'),
       underline: hasMark('underline') ? {} : undefined,
       strike: hasMark('strike'),
+      superScript: hasMark('superscript'),
+      subScript: hasMark('subscript'),
       color: color || undefined,
+      // docx size is in half-points.
+      size: Number.isFinite(sizePt) && sizePt > 0 ? Math.round(sizePt * 2) : undefined,
+      font,
     })
   })
 }

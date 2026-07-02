@@ -20,6 +20,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import CharacterCount from '@tiptap/extension-character-count'
 import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
+import { FontSize, FontFamily } from '../../lib/tiptap/fontStyle.js'
 
 // Lightweight subscript / superscript marks (no extra npm packages needed).
 const Subscript = Mark.create({
@@ -35,9 +36,10 @@ const Superscript = Mark.create({
   renderHTML() { return ['sup', 0] },
   addKeyboardShortcuts() { return { 'Mod-.': () => this.editor.commands.toggleMark(this.name) } },
 })
-import { ArrowLeft, Save, Loader2, AlertCircle, History, Users, MessageSquare, Activity, GitBranch, Check, Circle, Search, Type as TypeIcon } from 'lucide-react'
+import { ArrowLeft, Save, Loader2, AlertCircle, History, Users, MessageSquare, Activity, GitBranch, Check, Circle, Search, Type as TypeIcon, ListTree } from 'lucide-react'
 import FindReplace from './components/FindReplace'
 import WordCountModal from './components/WordCountModal'
+import DocumentOutline from './components/DocumentOutline'
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
 import { readDraft, clearDraft } from '../../lib/draftStore'
@@ -220,6 +222,8 @@ export default function DocsEditor() {
   const [showHistory, setShowHistory] = useState(false)
   const [showComments, setShowComments] = useState(false)
   const [showActivity, setShowActivity] = useState(false)
+  const [showOutline, setShowOutline] = useState(false)
+  const scrollRef = useRef(null)  // canvas scroll container, for outline tracking
   // Find/Replace
   const [findMode, setFindMode] = useState(null) // null | 'find' | 'replace'
   // Word count modal
@@ -258,6 +262,10 @@ export default function DocsEditor() {
       Link.configure({ openOnClick: false }),
       TextStyle,
       Color,
+      // Teach the textStyle mark to actually render font size / family — the
+      // base extension only defines the mark shell (see fontStyle.js).
+      FontSize,
+      FontFamily,
       Highlight.configure({ multicolor: true }),
       Underline,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
@@ -767,6 +775,11 @@ export default function DocsEditor() {
         }
         actions={
           <>
+            <Tooltip label="Document outline">
+              <IconButton size="sm" active={showOutline} onClick={() => setShowOutline((v) => !v)}>
+                <ListTree size={14} />
+              </IconButton>
+            </Tooltip>
             <Tooltip label="Find (Cmd+F)">
               <IconButton size="sm" active={!!findMode} onClick={() => setFindMode((m) => (m ? null : 'find'))}>
                 <Search size={14} />
@@ -841,6 +854,14 @@ export default function DocsEditor() {
 
       {/* Editor canvas + side panels */}
       <div className="flex-1 flex overflow-hidden bg-bg">
+        {/* Document outline rail (navigable, live) */}
+        {showOutline && (
+          <DocumentOutline
+            editor={editor}
+            scrollContainerRef={scrollRef}
+            onClose={() => setShowOutline(false)}
+          />
+        )}
         {/*
           Page canvas — the document feels like paper:
             - warm paper background under a measured (~720px) writing column
@@ -848,7 +869,7 @@ export default function DocsEditor() {
             - subtle 1-px line on the page edge, no heavy shadow
             - .paper-grain adds a near-imperceptible letterpress tooth
         */}
-        <div className="flex-1 overflow-auto px-6 py-10 relative">
+        <div ref={scrollRef} className="flex-1 overflow-auto px-6 py-10 relative">
           {/* Find/Replace floating bar */}
           {findMode && (
             <FindReplace
