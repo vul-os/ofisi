@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -48,26 +49,55 @@ func NewLocalStorage(cfg *config.Config) (*LocalStorage, error) {
 
 // ---- helpers ----
 
-func (s *LocalStorage) filePath(id string) string {
-	return filepath.Join(s.dataDir, id+".json")
+// idPattern constrains any identifier used to build a storage path to a safe
+// single path segment. It permits only ASCII letters, digits, '_' and '-', so
+// it rejects empty ids, "." / "..", path separators, and NUL/control bytes.
+var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// errInvalidID is returned when a client- or body-supplied identifier would
+// escape the storage directory (path traversal) or is otherwise malformed.
+var errInvalidID = fmt.Errorf("invalid id")
+
+// validID reports whether id is a safe single path segment (see idPattern).
+// Any id that reaches a path helper is validated with this so a crafted id such
+// as "../../etc/passwd" can never be joined into a filesystem path.
+func validID(id string) bool { return idPattern.MatchString(id) }
+
+func (s *LocalStorage) filePath(id string) (string, error) {
+	if !validID(id) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.dataDir, id+".json"), nil
 }
 
-func (s *LocalStorage) versionPath(fileID, versionID string) string {
-	return filepath.Join(s.versionsDir, fileID+"_"+versionID+".json")
+func (s *LocalStorage) versionPath(fileID, versionID string) (string, error) {
+	if !validID(fileID) || !validID(versionID) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.versionsDir, fileID+"_"+versionID+".json"), nil
 }
 
-func (s *LocalStorage) envelopePath(id string) string {
-	return filepath.Join(s.envelopesDir, id+".json")
+func (s *LocalStorage) envelopePath(id string) (string, error) {
+	if !validID(id) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.envelopesDir, id+".json"), nil
 }
 
-func (s *LocalStorage) signerPath(id string) string {
-	return filepath.Join(s.signersDir, id+".json")
+func (s *LocalStorage) signerPath(id string) (string, error) {
+	if !validID(id) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.signersDir, id+".json"), nil
 }
 
 // auditDir/<envelopeID>/<eventID>.json — kept in a per-envelope sub-directory
 // so ListAuditEvents can scan only relevant files.
-func (s *LocalStorage) auditEventPath(envelopeID, eventID string) string {
-	return filepath.Join(s.auditDir, envelopeID, eventID+".json")
+func (s *LocalStorage) auditEventPath(envelopeID, eventID string) (string, error) {
+	if !validID(envelopeID) || !validID(eventID) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.auditDir, envelopeID, eventID+".json"), nil
 }
 
 // ============================================================
@@ -100,7 +130,11 @@ func (s *LocalStorage) ListFiles() ([]*models.File, error) {
 }
 
 func (s *LocalStorage) GetFile(id string) (*models.File, error) {
-	data, err := os.ReadFile(s.filePath(id))
+	path, err := s.filePath(id)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("file not found")
@@ -121,7 +155,11 @@ func (s *LocalStorage) CreateFile(file *models.File) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.filePath(file.ID), data, 0644)
+	path, err := s.filePath(file.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) UpdateFile(file *models.File) error {
@@ -147,11 +185,19 @@ func (s *LocalStorage) UpdateFile(file *models.File) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.filePath(file.ID), data, 0644)
+	path, err := s.filePath(file.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) DeleteFile(id string) error {
-	if err := os.Remove(s.filePath(id)); err != nil {
+	path, err := s.filePath(id)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("file not found")
 		}
@@ -169,7 +215,11 @@ func (s *LocalStorage) CreateVersion(v *models.FileVersion) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.versionPath(v.FileID, v.ID), data, 0644)
+	path, err := s.versionPath(v.FileID, v.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) ListVersions(fileID string) ([]*models.FileVersion, error) {
@@ -199,7 +249,11 @@ func (s *LocalStorage) ListVersions(fileID string) ([]*models.FileVersion, error
 }
 
 func (s *LocalStorage) GetVersion(fileID, versionID string) (*models.FileVersion, error) {
-	data, err := os.ReadFile(s.versionPath(fileID, versionID))
+	path, err := s.versionPath(fileID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("version not found")
@@ -220,7 +274,9 @@ func (s *LocalStorage) PruneVersions(fileID string, cap int) error {
 	}
 	// versions is newest-first; remove tail beyond cap
 	for i := cap; i < len(versions); i++ {
-		_ = os.Remove(s.versionPath(fileID, versions[i].ID))
+		if path, err := s.versionPath(fileID, versions[i].ID); err == nil {
+			_ = os.Remove(path)
+		}
 	}
 	return nil
 }
@@ -236,7 +292,11 @@ func (s *LocalStorage) LabelVersion(fileID, versionID, label string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.versionPath(fileID, versionID), data, 0644)
+	path, err := s.versionPath(fileID, versionID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 // ============================================================
@@ -251,11 +311,19 @@ func (s *LocalStorage) CreateEnvelope(env *models.Envelope) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.envelopePath(env.ID), data, 0644)
+	path, err := s.envelopePath(env.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) GetEnvelope(id string) (*models.Envelope, error) {
-	data, err := os.ReadFile(s.envelopePath(id))
+	path, err := s.envelopePath(id)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("envelope not found")
@@ -303,11 +371,19 @@ func (s *LocalStorage) UpdateEnvelope(env *models.Envelope) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.envelopePath(env.ID), data, 0644)
+	path, err := s.envelopePath(env.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) DeleteEnvelope(id string) error {
-	if err := os.Remove(s.envelopePath(id)); err != nil {
+	path, err := s.envelopePath(id)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("envelope not found")
 		}
@@ -333,11 +409,19 @@ func (s *LocalStorage) UpsertSigner(sg *models.Signer) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.signerPath(sg.ID), data, 0644)
+	path, err := s.signerPath(sg.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) GetSigner(id string) (*models.Signer, error) {
-	data, err := os.ReadFile(s.signerPath(id))
+	path, err := s.signerPath(id)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("signer not found")
@@ -381,8 +465,11 @@ func (s *LocalStorage) ListSignersByEnvelope(envelopeID string) ([]*models.Signe
 // ============================================================
 // Tokens are stored as <dataDir>/tokens/<token>.json → {envelope_id, signer_id}.
 
-func (s *LocalStorage) tokenPath(token string) string {
-	return filepath.Join(s.dataDir, "tokens", token+".json")
+func (s *LocalStorage) tokenPath(token string) (string, error) {
+	if !validID(token) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.dataDir, "tokens", token+".json"), nil
 }
 
 type localTokenRef struct {
@@ -391,6 +478,10 @@ type localTokenRef struct {
 }
 
 func (s *LocalStorage) StoreSignerToken(token, envelopeID, signerID string) error {
+	path, err := s.tokenPath(token)
+	if err != nil {
+		return err
+	}
 	dir := filepath.Join(s.dataDir, "tokens")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create tokens dir: %w", err)
@@ -400,11 +491,15 @@ func (s *LocalStorage) StoreSignerToken(token, envelopeID, signerID string) erro
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.tokenPath(token), data, 0644)
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) ResolveToken(token string) (string, string, error) {
-	data, err := os.ReadFile(s.tokenPath(token))
+	path, err := s.tokenPath(token)
+	if err != nil {
+		return "", "", err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", "", fmt.Errorf("token not found")
@@ -424,11 +519,14 @@ func (s *LocalStorage) ResolveToken(token string) (string, string, error) {
 // AppendAuditEvent writes a new, immutable event file.
 // There is intentionally no UpdateAuditEvent or DeleteAuditEvent method.
 func (s *LocalStorage) AppendAuditEvent(ev *models.AuditEvent) error {
-	dir := filepath.Join(s.auditDir, ev.EnvelopeID)
+	path, err := s.auditEventPath(ev.EnvelopeID, ev.ID)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create audit envelope dir: %w", err)
 	}
-	path := s.auditEventPath(ev.EnvelopeID, ev.ID)
 	// Guard: never overwrite an existing audit event.
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("audit event %s already exists (append-only)", ev.ID)
@@ -475,13 +573,26 @@ func (s *LocalStorage) ListAuditEvents(envelopeID string) ([]*models.AuditEvent,
 // Sealed PDF store (OFFICE-46)
 // ============================================================
 
+func (s *LocalStorage) sealedPath(envelopeID string) (string, error) {
+	if !validID(envelopeID) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.sealedDir, envelopeID+".pdf"), nil
+}
+
 func (s *LocalStorage) StoreSealedPDF(envelopeID string, data []byte) error {
-	path := filepath.Join(s.sealedDir, envelopeID+".pdf")
+	path, err := s.sealedPath(envelopeID)
+	if err != nil {
+		return err
+	}
 	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) GetSealedPDF(envelopeID string) ([]byte, error) {
-	path := filepath.Join(s.sealedDir, envelopeID+".pdf")
+	path, err := s.sealedPath(envelopeID)
+	if err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -498,30 +609,43 @@ func (s *LocalStorage) GetSealedPDF(envelopeID string) ([]byte, error) {
 // comments/<fileID>/<commentID>.json
 // replies/<commentID>/<replyID>.json
 
-func (s *LocalStorage) commentPath(fileID, commentID string) string {
-	return filepath.Join(s.commentsDir, fileID, commentID+".json")
+func (s *LocalStorage) commentPath(fileID, commentID string) (string, error) {
+	if !validID(fileID) || !validID(commentID) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.commentsDir, fileID, commentID+".json"), nil
 }
 
-func (s *LocalStorage) replyPath(commentID, replyID string) string {
-	return filepath.Join(s.repliesDir, commentID, replyID+".json")
+func (s *LocalStorage) replyPath(commentID, replyID string) (string, error) {
+	if !validID(commentID) || !validID(replyID) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.repliesDir, commentID, replyID+".json"), nil
 }
 
 func (s *LocalStorage) CreateComment(c *models.Comment) error {
+	path, err := s.commentPath(c.FileID, c.ID)
+	if err != nil {
+		return err
+	}
 	c.CreatedAt = time.Now()
 	c.UpdatedAt = time.Now()
-	dir := filepath.Join(s.commentsDir, c.FileID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.commentPath(c.FileID, c.ID), data, 0644)
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) GetComment(fileID, commentID string) (*models.Comment, error) {
-	data, err := os.ReadFile(s.commentPath(fileID, commentID))
+	path, err := s.commentPath(fileID, commentID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("comment not found")
@@ -573,11 +697,19 @@ func (s *LocalStorage) UpdateComment(c *models.Comment) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.commentPath(c.FileID, c.ID), data, 0644)
+	path, err := s.commentPath(c.FileID, c.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) DeleteComment(fileID, commentID string) error {
-	if err := os.Remove(s.commentPath(fileID, commentID)); err != nil {
+	path, err := s.commentPath(fileID, commentID)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("comment not found")
 		}
@@ -587,21 +719,28 @@ func (s *LocalStorage) DeleteComment(fileID, commentID string) error {
 }
 
 func (s *LocalStorage) CreateReply(r *models.CommentReply) error {
+	path, err := s.replyPath(r.CommentID, r.ID)
+	if err != nil {
+		return err
+	}
 	r.CreatedAt = time.Now()
 	r.UpdatedAt = time.Now()
-	dir := filepath.Join(s.repliesDir, r.CommentID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.replyPath(r.CommentID, r.ID), data, 0644)
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) GetReply(commentID, replyID string) (*models.CommentReply, error) {
-	data, err := os.ReadFile(s.replyPath(commentID, replyID))
+	path, err := s.replyPath(commentID, replyID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("reply not found")
@@ -653,7 +792,11 @@ func (s *LocalStorage) UpdateReply(r *models.CommentReply) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.replyPath(r.CommentID, r.ID), data, 0644)
+	path, err := s.replyPath(r.CommentID, r.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 // ============================================================
@@ -661,26 +804,36 @@ func (s *LocalStorage) UpdateReply(r *models.CommentReply) error {
 // ============================================================
 // suggestions/<fileID>/<suggestionID>.json
 
-func (s *LocalStorage) suggestionPath(fileID, suggestionID string) string {
-	return filepath.Join(s.suggestionsDir, fileID, suggestionID+".json")
+func (s *LocalStorage) suggestionPath(fileID, suggestionID string) (string, error) {
+	if !validID(fileID) || !validID(suggestionID) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.suggestionsDir, fileID, suggestionID+".json"), nil
 }
 
 func (s *LocalStorage) CreateSuggestion(sg *models.Suggestion) error {
+	path, err := s.suggestionPath(sg.FileID, sg.ID)
+	if err != nil {
+		return err
+	}
 	sg.CreatedAt = time.Now()
 	sg.UpdatedAt = time.Now()
-	dir := filepath.Join(s.suggestionsDir, sg.FileID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(sg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.suggestionPath(sg.FileID, sg.ID), data, 0644)
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) GetSuggestion(fileID, suggestionID string) (*models.Suggestion, error) {
-	data, err := os.ReadFile(s.suggestionPath(fileID, suggestionID))
+	path, err := s.suggestionPath(fileID, suggestionID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("suggestion not found")
@@ -732,11 +885,19 @@ func (s *LocalStorage) UpdateSuggestion(sg *models.Suggestion) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.suggestionPath(sg.FileID, sg.ID), data, 0644)
+	path, err := s.suggestionPath(sg.FileID, sg.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func (s *LocalStorage) DeleteSuggestion(fileID, suggestionID string) error {
-	if err := os.Remove(s.suggestionPath(fileID, suggestionID)); err != nil {
+	path, err := s.suggestionPath(fileID, suggestionID)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("suggestion not found")
 		}

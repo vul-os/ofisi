@@ -108,9 +108,11 @@ func (h *EnvelopeHandler) Create(c *gin.Context) {
 	}
 
 	now := time.Now().UTC()
-	if env.ID == "" {
-		env.ID = uuid.New().String()
-	}
+	// SECURITY: never honor a client-supplied envelope id. The id flows into the
+	// storage path (envelopePath) and is stamped as an ACL owner key, so a
+	// crafted id ("../../x") could escape the store or hijack another envelope's
+	// ownership. Always mint a fresh server-side id.
+	env.ID = uuid.New().String()
 	env.CreatedAt = now
 	env.UpdatedAt = now
 	if env.Status == "" {
