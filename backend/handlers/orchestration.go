@@ -84,6 +84,14 @@ func (h *OrchestrationHandler) Status(c *gin.Context) {
 		return
 	}
 
+	// Authorization: the status payload leaks the full signer roster
+	// (names/emails/status), so only the document/envelope owner (or admin) may
+	// read it — matching Remind/Cancel/Send. Deny with 404 (never leak existence).
+	if !h.authz.canAccessEnvelopeACL(c, env.SourceFileID, env.ID) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "envelope not found"})
+		return
+	}
+
 	signers := make([]SignerProgress, 0, len(env.Signers))
 	for _, sg := range env.Signers {
 		signers = append(signers, SignerProgress{
