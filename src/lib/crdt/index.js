@@ -251,16 +251,27 @@ function diffToOps(prevText, nextText, crdt) {
   const prevMid = prevText.slice(prefixLen, prevText.length - suffixLen)
   const nextMid = nextText.slice(prefixLen, nextText.length - suffixLen)
 
-  // Delete old middle (right-to-left preserves indices).
+  // Delete old middle (right-to-left preserves indices). Apply each op as it is
+  // produced so subsequent localInsert/localDelete calls see the post-delete
+  // visible order (mirrors the wave-25 P2P path in p2pSession.js).
   for (let i = prevMid.length - 1; i >= 0; i--) {
     const op = crdt.localDelete(prefixLen + i)
-    if (op) ops.push(op)
+    if (op) { crdt.apply(op); ops.push(op) }
   }
 
-  // Insert new middle (left-to-right).
+  // Insert new middle (left-to-right). Apply each op BEFORE producing the next
+  // so the next character's parent is the character we just inserted. Otherwise
+  // every insert in a multi-char run attaches to the SAME parent id, and because
+  // RGA sorts same-parent siblings by DESCENDING OpID the run renders reversed
+  // (e.g. "hello" → "olleh"). Applying as we go chains the parents 'h'←'e'←…
+  //
+  // This does not change the op wire format ({k,id,p,v,t}) — only the `p` value
+  // each insert carries — so it stays interop-compatible with backend/crdt/text.go
+  // (the Go RGA mirror), and CRDT convergence is preserved: two peers applying
+  // this same op set walk the identical parent chain to the identical text.
   for (let i = 0; i < nextMid.length; i++) {
     const op = crdt.localInsert(prefixLen + i, nextMid[i])
-    if (op) ops.push(op)
+    if (op) { crdt.apply(op); ops.push(op) }
   }
 
   return ops
