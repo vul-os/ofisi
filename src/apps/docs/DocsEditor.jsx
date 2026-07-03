@@ -36,7 +36,7 @@ const Superscript = Mark.create({
   renderHTML() { return ['sup', 0] },
   addKeyboardShortcuts() { return { 'Mod-.': () => this.editor.commands.toggleMark(this.name) } },
 })
-import { ArrowLeft, Save, Loader2, AlertCircle, History, Users, MessageSquare, Activity, GitBranch, Check, Circle, Search, Type as TypeIcon, ListTree } from 'lucide-react'
+import { ArrowLeft, Save, Loader2, AlertCircle, History, Users, MessageSquare, Activity, GitBranch, Check, Circle, Search, Type as TypeIcon, ListTree, Share2, Eye } from 'lucide-react'
 import FindReplace from './components/FindReplace'
 import WordCountModal from './components/WordCountModal'
 import DocumentOutline from './components/DocumentOutline'
@@ -49,6 +49,8 @@ import CommentsPanel from '../../components/CommentsPanel'
 import SuggestionPanel from '../../components/SuggestionPanel'
 import ActivityFeed from '../../components/ActivityFeed'
 import { DocsCollabSession } from '../../lib/crdt/index.js'
+import { useP2PCollab } from './useP2PCollab.js'
+import P2PShareModal from './components/P2PShareModal.jsx'
 import { getSuggestionStore } from '../../lib/crdt/suggestions.js'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { DocsCursorLayer } from '../../components/RemoteCursors.jsx'
@@ -249,6 +251,30 @@ export default function DocsEditor() {
   // Flag: true while we're applying a remote op so onUpdate doesn't re-broadcast.
   const applyingRemoteRef = useRef(false)
 
+  // ── WAVE-25: secure local/P2P collab (invite-link, E2E, ro-enforced) ───────
+  // Additive second collab mode — orthogonal to the cloud DocsCollabSession
+  // above. Active only when the URL carries a #vp2p= invite or the user shares.
+  const [showP2PShare, setShowP2PShare] = useState(false)
+  const editorRefForP2P = useRef(null)   // set below once `editor` exists
+  const applyRemoteP2PText = useCallback((remoteText) => {
+    const ed = editorRefForP2P.current
+    if (!ed) return
+    applyingRemoteRef.current = true
+    try {
+      const cur = ed.getText()
+      if (cur !== remoteText) {
+        applyTextPatch(ed, cur, remoteText)
+        prevCrdtTextRef.current = ed.getText()
+      }
+    } finally {
+      applyingRemoteRef.current = false
+    }
+  }, [])
+  const p2p = useP2PCollab({ fileId: id, onRemoteText: applyRemoteP2PText })
+  // Stable ref so the once-created onUpdate closure always calls the latest
+  // p2p.onLocalText (assigned on every render below).
+  const p2pOnLocalTextRef = useRef(null)
+
   // Subscribe to save state changes for this file
   useEffect(() => {
     const unsub = onSaveStateChange(id, (state) => setSaveStatus({ ...state }))
@@ -332,9 +358,15 @@ export default function DocsEditor() {
       saveTimer.current = setTimeout(() => doSave(), AUTOSAVE_DELAY_MS)
 
       // CRDT broadcast: skip if this update was triggered by a remote apply.
-      if (!applyingRemoteRef.current && collabRef.current) {
+      if (!applyingRemoteRef.current) {
         const nextText = ed.getText()
-        collabRef.current.applyLocal(prevCrdtTextRef.current, nextText)
+        if (collabRef.current) {
+          collabRef.current.applyLocal(prevCrdtTextRef.current, nextText)
+        }
+        // WAVE-25: also drive the P2P session when active (no-op for ro peers).
+        if (p2pOnLocalTextRef.current) {
+          p2pOnLocalTextRef.current(prevCrdtTextRef.current, nextText)
+        }
         prevCrdtTextRef.current = nextText
       }
     },
@@ -439,7 +471,24 @@ export default function DocsEditor() {
   const editorRef = useRef(null)
   useEffect(() => {
     editorRef.current = editor
+    editorRefForP2P.current = editor
   }, [editor])
+
+  // WAVE-25: keep the stable ref pointed at the latest p2p.onLocalText.
+  p2pOnLocalTextRef.current = p2p.onLocalText
+
+  // WAVE-25: read-only peers cannot edit the shared document — make the editor
+  // itself non-editable so the UX matches the ro capability (they still see
+  // live remote edits and a read-only badge).
+  useEffect(() => {
+    if (editor) editor.setEditable(!p2p.readOnly)
+  }, [editor, p2p.readOnly])
+
+  // WAVE-25: seed the P2P diff baseline once the editor mounts, so the first
+  // local edit diffs against the real content, not ''.
+  useEffect(() => {
+    if (editor && p2p.active) prevCrdtTextRef.current = editor.getText()
+  }, [editor, p2p.active])
 
   // ── OFFICE-27: Suggestion mode ────────────────────────────────────────────
 
@@ -771,6 +820,25 @@ export default function DocsEditor() {
                 {peerCount}
               </span>
             )}
+            {/* WAVE-25: P2P collaboration status */}
+            {p2p.active && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-pill bg-accent-tint text-accent-press"
+                title={`Peer-to-peer collaboration (${p2p.peerCount} peer(s), end-to-end encrypted)`}
+              >
+                <Users size={11} />
+                {p2p.peerCount} · P2P
+              </span>
+            )}
+            {p2p.readOnly && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-pill bg-bg-elev2 text-ink-muted border border-line"
+                title="You joined with a view-only link — you can read live edits but not change the document."
+              >
+                <Eye size={11} />
+                View only
+              </span>
+            )}
           </>
         }
         actions={
@@ -819,6 +887,22 @@ export default function DocsEditor() {
               <Tooltip label={`${pendingSuggestions} pending suggestion${pendingSuggestions === 1 ? '' : 's'}`}>
                 <IconButton size="sm" active={showSuggestions} onClick={() => setShowSuggestions((v) => !v)}>
                   <GitBranch size={14} />
+                </IconButton>
+              </Tooltip>
+            )}
+            {/* WAVE-25: Share → collaborate via link (P2P). Hidden for ro peers
+                who joined via a view-only link (they cannot re-share as owner). */}
+            {!p2p.readOnly && (
+              <Tooltip label="Collaborate via link (P2P, end-to-end encrypted)">
+                <IconButton
+                  size="sm"
+                  active={showP2PShare}
+                  onClick={async () => {
+                    setShowP2PShare(true)
+                    try { if (!p2p.links) await p2p.startShare() } catch { /* surfaced in modal */ }
+                  }}
+                >
+                  <Share2 size={14} />
                 </IconButton>
               </Tooltip>
             )}
@@ -969,6 +1053,15 @@ export default function DocsEditor() {
       {showWordCount && (
         <WordCountModal editor={editor} onClose={() => setShowWordCount(false)} />
       )}
+
+      {/* WAVE-25: P2P collaborate-via-link modal */}
+      <P2PShareModal
+        open={showP2PShare}
+        onClose={() => setShowP2PShare(false)}
+        links={p2p.links}
+        roomId={p2p.roomId}
+        onRotate={() => p2p.rotate()}
+      />
     </div>
   )
 }
