@@ -27,7 +27,12 @@ import { exportSlidesToPdf, exportSlidesToPptx } from './slidesExport'
 import { TreeSession, getTreeReplicaId, ordKeyBetween } from '../../lib/crdt/tree.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
+import { usePresence } from '@vulos/relay-client/presence'
 import { getSlideViewers } from '../../components/RemoteCursors.jsx'
+import PresenceBar from '../../components/PresenceBar.jsx'
+import ConnectionPill from '../../components/ConnectionPill.jsx'
+import { useCollabFabric } from '../../lib/collab/useCollabFabric.js'
+import { getCollabIdentity, identityColor, deriveStatusPill, countLivePeers } from '../../lib/collab/presenceCommon.js'
 import { Button, IconButton, Tooltip, Topbar, Menu, UrlPopover, LoadingState } from '../../components/ui'
 import ThemeGallery from './ThemeGallery.jsx'
 import MasterSlideEditor from './MasterSlideEditor.jsx'
@@ -149,10 +154,28 @@ export default function SlidesEditor() {
   // Presenter view hook
   const { openPresenter, syncSlide } = usePresenterView(slidesData)
 
-  // Live cursors (OFFICE-25)
+  // ── Collaboration presence (WAVE-27) ────────────────────────────────────────
+  // Stable per-tab replica id doubles as the fabric peerId (shared by CRDT sync
+  // and presence/cursor transport).
+  const replicaIdRef = useRef(null)
+  if (!replicaIdRef.current) replicaIdRef.current = getTreeReplicaId()
+  const replicaId = replicaIdRef.current
+
+  const { fabric, peers: collabPeers, joined, configured } =
+    useCollabFabric({ sessionId: id, peerId: replicaId })
+
+  const identityRef = useRef(null)
+  if (!identityRef.current) identityRef.current = getCollabIdentity(replicaId)
+  const localIdentity = identityRef.current
+
+  // Live cursors + presence roster (OFFICE-25 / WAVE-27)
   const { remoteCursors, broadcastSlideCursor } = useLiveCursors({
-    fabric: null, localIdentity: null, color: 'var(--signal-warning)',
+    fabric, localIdentity, color: identityColor(localIdentity),
   })
+  const { roster } = usePresence({ fabric, localIdentity })
+
+  const collabPill = deriveStatusPill({ configured, joined, peers: collabPeers })
+  const livePeerCount = countLivePeers(collabPeers)
 
   const editor = useEditor({
     extensions: [
@@ -186,10 +209,11 @@ export default function SlidesEditor() {
   }, [id])
 
   // ── CRDT session (OFFICE-23) ──────────────────────────────────────────────
+  // WAVE-27: attach the live fabric (when present) so slide-tree ops sync over
+  // the same transport as presence; null fabric keeps the local-only behaviour.
   useEffect(() => {
     if (!id) return
-    const replicaId = getTreeReplicaId()
-    const session = new TreeSession({ sessionId: id, replicaId, fabricClient: null })
+    const session = new TreeSession({ sessionId: id, replicaId, fabricClient: fabric || null })
     treeSessionRef.current = session
 
     const seedTimer = setTimeout(() => {
@@ -229,7 +253,7 @@ export default function SlidesEditor() {
       session.destroy()
       treeSessionRef.current = null
     }
-  }, [id]) // eslint-disable-line
+  }, [id, fabric]) // eslint-disable-line — recreate session when the fabric attaches
 
   // ── Sync editor when switching slides ─────────────────────────────────────
   useEffect(() => {
@@ -557,18 +581,23 @@ export default function SlidesEditor() {
           />
         }
         meta={
-          <span
-            role="status"
-            aria-live="polite"
-            className={[
-              'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
-              statusInfo.tone === 'success' ? 'text-success' :
-              statusInfo.tone === 'danger'  ? 'text-danger' : 'text-ink-faint',
-            ].join(' ')}
-          >
-            <StatusIcon size={11} aria-hidden className={statusInfo.spin ? 'animate-spin' : ''} />
-            {statusInfo.text}
-          </span>
+          <>
+            <span
+              role="status"
+              aria-live="polite"
+              className={[
+                'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
+                statusInfo.tone === 'success' ? 'text-success' :
+                statusInfo.tone === 'danger'  ? 'text-danger' : 'text-ink-faint',
+              ].join(' ')}
+            >
+              <StatusIcon size={11} aria-hidden className={statusInfo.spin ? 'animate-spin' : ''} />
+              {statusInfo.text}
+            </span>
+            {/* WAVE-27: collaboration presence — roster + connection pill */}
+            <PresenceBar roster={roster} className="ml-1" />
+            <ConnectionPill pill={collabPill} peerCount={livePeerCount} />
+          </>
         }
         actions={
           <>

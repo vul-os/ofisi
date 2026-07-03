@@ -15,7 +15,12 @@ import { importCSVFile } from './csvImport'
 import { GridSession, getGridReplicaId } from '../../lib/crdt/grid.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
+import { usePresence } from '@vulos/relay-client/presence'
 import { SheetsCursorLayer } from '../../components/RemoteCursors.jsx'
+import PresenceBar from '../../components/PresenceBar.jsx'
+import ConnectionPill from '../../components/ConnectionPill.jsx'
+import { useCollabFabric } from '../../lib/collab/useCollabFabric.js'
+import { getCollabIdentity, identityColor, deriveStatusPill, countLivePeers } from '../../lib/collab/presenceCommon.js'
 import { Button, IconButton, Tooltip, Topbar, Menu, useToast, useDialogA11y } from '../../components/ui'
 import { useSheetKeyboardShortcuts, KeyboardShortcutsHelp, useShortcutsHelp } from './KeyboardShortcuts.jsx'
 import SheetsFindReplace from './SheetsFindReplace.jsx'
@@ -333,6 +338,23 @@ export default function SheetsEditor() {
   const workbookRef     = useRef(null)
   const importInputRef  = useRef(null)
 
+  // ── Collaboration presence (WAVE-27) ────────────────────────────────────────
+  // Stable per-tab replica id doubles as the fabric peerId, so the CRDT sync and
+  // the presence/cursor transport share one identity.
+  const replicaIdRef = useRef(null)
+  if (!replicaIdRef.current) replicaIdRef.current = getGridReplicaId()
+  const replicaId = replicaIdRef.current
+
+  // Owns + joins the same relay-client FabricClient Docs uses; degrades to
+  // local-only (fabric stays null-ish, offline pill) when no peering backend.
+  const { fabric, peers: collabPeers, joined, configured } =
+    useCollabFabric({ sessionId: id, peerId: replicaId })
+
+  // Stable local identity (signed-in account or per-tab guest) + its colour.
+  const identityRef = useRef(null)
+  if (!identityRef.current) identityRef.current = getCollabIdentity(replicaId)
+  const localIdentity = identityRef.current
+
   // ── Keyboard shortcuts ──────────────────────────────────────────────────────
   const { show: showShortcutsHelp, openHelp, closeHelp } = useShortcutsHelp()
   useSheetKeyboardShortcuts({
@@ -361,10 +383,12 @@ export default function SheetsEditor() {
   }, [])
 
   // ── CRDT collaboration (OFFICE-23) ──────────────────────────────────────────
+  // WAVE-27: pass the live fabric (when available) so grid ops sync over the
+  // same transport that carries presence. When `fabric` is null (no peering
+  // backend) this is exactly the previous local-only path.
   useEffect(() => {
     if (!id) return
-    const replicaId = getGridReplicaId()
-    const session = new GridSession({ sessionId: id, replicaId, fabricClient: null })
+    const session = new GridSession({ sessionId: id, replicaId, fabricClient: fabric || null })
     gridSessionRef.current = session
     session.requestSnapshot()
 
@@ -395,7 +419,7 @@ export default function SheetsEditor() {
       session.destroy()
       gridSessionRef.current = null
     }
-  }, [id]) // eslint-disable-line
+  }, [id, fabric]) // eslint-disable-line — recreate session when the fabric attaches
 
   useEffect(() => {
     const unsub = onSaveStateChange(id, (state) => setSaveStatus({ ...state }))
@@ -420,10 +444,15 @@ export default function SheetsEditor() {
     readDraft(id).then((d) => { if (d && d.ts) setDraft(d) })
   }, [id])
 
-  // ── Live cursors (OFFICE-25) ────────────────────────────────────────────────
+  // ── Live cursors + presence roster (OFFICE-25 / WAVE-27) ────────────────────
   const { remoteCursors, broadcastSheetCursor } = useLiveCursors({
-    fabric: null, localIdentity: null, color: 'var(--teal-500)',
+    fabric, localIdentity, color: identityColor(localIdentity),
   })
+  const { roster } = usePresence({ fabric, localIdentity })
+
+  // Status pill: Live / Connecting / Reconnecting / Offline from fabric state.
+  const collabPill = deriveStatusPill({ configured, joined, peers: collabPeers })
+  const livePeerCount = countLivePeers(collabPeers)
 
   const getCellRect = useCallback((row, col) => {
     const container = workbookWrapRef.current
@@ -639,21 +668,26 @@ export default function SheetsEditor() {
           />
         }
         meta={
-          statusInfo && (
-            <span
-              role="status"
-              aria-live="polite"
-              className={[
-                'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
-                statusInfo.tone === 'success' ? 'text-success' :
-                statusInfo.tone === 'danger'  ? 'text-danger'  : 'text-ink-faint',
-              ].join(' ')}
-              title={saveStatus.error || ''}
-            >
-              {StatusIcon && <StatusIcon size={11} aria-hidden className={statusInfo.spin ? 'animate-spin' : ''} />}
-              {statusInfo.text}
-            </span>
-          )
+          <>
+            {statusInfo && (
+              <span
+                role="status"
+                aria-live="polite"
+                className={[
+                  'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
+                  statusInfo.tone === 'success' ? 'text-success' :
+                  statusInfo.tone === 'danger'  ? 'text-danger'  : 'text-ink-faint',
+                ].join(' ')}
+                title={saveStatus.error || ''}
+              >
+                {StatusIcon && <StatusIcon size={11} aria-hidden className={statusInfo.spin ? 'animate-spin' : ''} />}
+                {statusInfo.text}
+              </span>
+            )}
+            {/* WAVE-27: collaboration presence — roster + connection pill */}
+            <PresenceBar roster={roster} className="ml-1" />
+            <ConnectionPill pill={collabPill} peerCount={livePeerCount} />
+          </>
         }
         actions={
           <>
