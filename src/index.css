@@ -232,6 +232,26 @@
 }
 
 /* ============================================================================
+ * Reduced-motion — global safety net.
+ * The keyframe mounts (fade-in / rise-in / scale-in / slide-in) already collapse
+ * to 0ms because they ride --duration-base / --duration-slow, which the tokens
+ * file zeroes under reduced-motion. Tailwind's built-in `animate-spin`, however,
+ * hard-codes a 1s loop and ignores our tokens — so a save/loading spinner keeps
+ * spinning for motion-sensitive users. Neutralise the looping animations here so
+ * "reduce" is honoured everywhere, not just on our own keyframes.
+ * ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin { animation: none; }
+  .animate-fade-in,
+  .animate-rise-in,
+  .animate-scale-in,
+  .animate-slide-in-right,
+  .animate-slide-in-left {
+    animation-duration: 1ms;   /* effectively instant, but still "runs" so `both` fill applies */
+  }
+}
+
+/* ============================================================================
  * Scrollbar — slim, warm-neutral, on-brand
  * ========================================================================== */
 ::-webkit-scrollbar { width: 8px; height: 8px; }

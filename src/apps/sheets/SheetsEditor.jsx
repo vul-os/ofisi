@@ -16,7 +16,7 @@ import { GridSession, getGridReplicaId } from '../../lib/crdt/grid.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { SheetsCursorLayer } from '../../components/RemoteCursors.jsx'
-import { Button, IconButton, Tooltip, Topbar, Menu } from '../../components/ui'
+import { Button, IconButton, Tooltip, Topbar, Menu, useToast, useDialogA11y } from '../../components/ui'
 import { useSheetKeyboardShortcuts, KeyboardShortcutsHelp, useShortcutsHelp } from './KeyboardShortcuts.jsx'
 import SheetsFindReplace from './SheetsFindReplace.jsx'
 
@@ -75,8 +75,15 @@ function FreezePanel({ workbookRef }) {
     const onDown = (e) => {
       if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false)
     }
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); setMode(null) }
+    }
     document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
   const freeze = (type, row, column) => {
@@ -155,14 +162,14 @@ function FreezePanel({ workbookRef }) {
                 className={[
                   'w-full h-7 px-2 text-sm rounded-sm',
                   'bg-paper border border-line focus:border-line-strong',
-                  'focus-visible:outline-none',
+                  'focus-visible:outline-none focus-visible:shadow-focus',
                 ].join(' ')}
                 autoFocus
               />
               <div className="flex gap-1.5">
                 <button
                   onClick={() => freeze(mode === 'rows' ? 'row' : 'column', mode === 'rows' ? count : 0, mode === 'cols' ? count : 0)}
-                  className="flex-1 h-7 rounded-sm bg-accent text-white text-xs font-medium hover:bg-accent/90 transition-colors"
+                  className="flex-1 h-7 rounded-sm bg-accent text-white text-xs font-medium hover:bg-accent-hover transition-colors focus-visible:outline-none focus-visible:shadow-focus"
                 >
                   Apply
                 </button>
@@ -228,9 +235,16 @@ function CellCommentPanel({ data, activeCell, onChange, onClose }) {
   }
 
   const cellLabel = `${String.fromCharCode(65 + activeCell.col)}${activeCell.row + 1}`
+  const panelRef = useRef(null)
+  // Trap focus, close on Esc, restore focus to the triggering control on close.
+  useDialogA11y(panelRef, onClose)
 
   return (
     <div
+      ref={panelRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Comment on cell ${cellLabel}`}
       className={[
         'absolute right-4 left-4 sm:left-auto top-4 z-40 w-auto sm:w-72 bg-paper border border-line rounded-lg shadow-e3',
         'flex flex-col animate-scale-in',
@@ -242,7 +256,7 @@ function CellCommentPanel({ data, activeCell, onChange, onClose }) {
         </span>
         <button
           onClick={onClose}
-          className="text-ink-faint hover:text-ink transition-colors"
+          className="text-ink-faint hover:text-ink transition-colors rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
           aria-label="Close comment panel"
         >
           <X size={13} />
@@ -257,26 +271,25 @@ function CellCommentPanel({ data, activeCell, onChange, onClose }) {
           'flex-1 w-full p-3 text-sm bg-transparent border-none outline-none resize-none',
           'text-ink placeholder:text-ink-faint',
         ].join(' ')}
-        autoFocus
       />
       <div className="flex items-center justify-end gap-2 px-3 py-2 border-t border-line">
         {currentComment && (
           <button
             onClick={() => { setText(''); handleSave() }}
-            className="text-xs text-danger hover:underline"
+            className="text-xs text-danger hover:underline rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
           >
             Delete
           </button>
         )}
         <button
           onClick={onClose}
-          className="h-7 px-3 rounded-sm border border-line text-xs text-ink-muted hover:border-line-strong transition-colors"
+          className="h-7 px-3 rounded-sm border border-line text-xs text-ink-muted hover:border-line-strong transition-colors focus-visible:outline-none focus-visible:shadow-focus"
         >
           Cancel
         </button>
         <button
           onClick={handleSave}
-          className="h-7 px-3 rounded-sm bg-accent text-white text-xs font-medium hover:bg-accent/90 transition-colors"
+          className="h-7 px-3 rounded-sm bg-accent text-white text-xs font-medium hover:bg-accent-hover transition-colors focus-visible:outline-none focus-visible:shadow-focus"
         >
           Save
         </button>
@@ -295,6 +308,7 @@ export default function SheetsEditor() {
   const [saveStatus, setSaveStatus] = useState(getSaveState(id))
   const [draft, setDraft] = useState(null)
   const [retryCount, setRetryCount] = useState(0)
+  const { showToast, toast } = useToast()
 
   // Panel visibility state
   const [showComments,      setShowComments]      = useState(false)
@@ -394,7 +408,10 @@ export default function SheetsEditor() {
         setFile(f)
         setTitle(f.name)
         setData(normalizeSheets(f.content))
-      }).catch(() => navigate('/sheets'))
+      }).catch(() => {
+        showToast('Could not open this spreadsheet.', 'error')
+        navigate('/sheets')
+      })
     }
   }, [id])
 
@@ -511,8 +528,10 @@ export default function SheetsEditor() {
         saveTimer.current = setTimeout(() => doSave(next), AUTOSAVE_DELAY_MS)
         return next
       })
+      showToast(`Imported “${file.name}”`, 'success')
     } catch (err) {
       console.error('CSV import failed:', err)
+      showToast('Could not import CSV — check the file and try again.', 'error')
     }
     e.target.value = ''
   }
@@ -529,11 +548,14 @@ export default function SheetsEditor() {
         // Reload file content from server.
         const updated = await api.getFile(id)
         setData(updated.content || data)
+        showToast(`Imported “${file.name}”`, 'success')
       } else {
         console.error('XLSX import failed:', await res.text())
+        showToast('Could not import spreadsheet — the server rejected the file.', 'error')
       }
     } catch (err) {
       console.error('XLSX import error:', err)
+      showToast('Could not import spreadsheet — check your connection and try again.', 'error')
     }
     e.target.value = ''
   }
@@ -619,6 +641,8 @@ export default function SheetsEditor() {
         meta={
           statusInfo && (
             <span
+              role="status"
+              aria-live="polite"
               className={[
                 'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
                 statusInfo.tone === 'success' ? 'text-success' :
@@ -626,7 +650,7 @@ export default function SheetsEditor() {
               ].join(' ')}
               title={saveStatus.error || ''}
             >
-              {StatusIcon && <StatusIcon size={11} className={statusInfo.spin ? 'animate-spin' : ''} />}
+              {StatusIcon && <StatusIcon size={11} aria-hidden className={statusInfo.spin ? 'animate-spin' : ''} />}
               {statusInfo.text}
             </span>
           )
@@ -885,6 +909,9 @@ export default function SheetsEditor() {
 
       {/* Keyboard shortcuts help */}
       {showShortcutsHelp && <KeyboardShortcutsHelp onClose={closeHelp} />}
+
+      {/* Transient notifier (import success / failure, …) */}
+      {toast}
     </div>
   )
 }

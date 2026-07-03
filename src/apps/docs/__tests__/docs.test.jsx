@@ -237,8 +237,10 @@ describe('WordCountModal', () => {
     const editor = makeEditor()
     const onClose = vi.fn()
     const { container } = render(<WordCountModal editor={editor} onClose={onClose} />)
-    // Click the overlay (the outermost div with role=dialog)
-    const overlay = container.querySelector('[role="dialog"]')
+    // Click the backdrop scrim (the outermost fixed-inset div that wraps the
+    // role=dialog box). The dialog role now sits on the content box per correct
+    // ARIA, so the click-to-dismiss target is the scrim's parent overlay.
+    const overlay = container.querySelector('.fixed.inset-0')
     fireEvent.click(overlay)
     expect(onClose).toHaveBeenCalled()
   })
@@ -360,9 +362,13 @@ describe('Responsive layout classes', () => {
     const { container } = render(
       <WordCountModal editor={editor} onClose={vi.fn()} />
     )
-    const dialog = container.querySelector('[role="dialog"]')
-    expect(dialog.className).toMatch(/fixed/)
-    expect(dialog.className).toMatch(/inset-0/)
+    // The full-screen backdrop scrim carries the fixed/inset positioning; the
+    // role=dialog box is the centred content within it.
+    const overlay = container.firstChild
+    expect(overlay.className).toMatch(/fixed/)
+    expect(overlay.className).toMatch(/inset-0/)
+    // And the accessible dialog box is nested inside that overlay.
+    expect(overlay.querySelector('[role="dialog"]')).toBeTruthy()
   })
 })
 

@@ -107,13 +107,13 @@ function ReplyItem({ reply, fileId, commentId, authorId, onDeleted }) {
             <button
               onClick={handleSave}
               disabled={busy}
-              className="px-2 py-0.5 text-2xs bg-accent text-white rounded-xs hover:bg-accent-hover disabled:opacity-60 transition-colors"
+              className="px-2 py-0.5 text-2xs bg-accent text-white rounded-xs hover:bg-accent-hover disabled:opacity-60 transition-colors focus-visible:outline-none focus-visible:shadow-focus"
             >
               Save
             </button>
             <button
               onClick={() => { setEditing(false); setDraft(reply.body) }}
-              className="px-2 py-0.5 text-2xs border border-line text-ink-muted rounded-xs hover:bg-bg-elev2 transition-colors"
+              className="px-2 py-0.5 text-2xs border border-line text-ink-muted rounded-xs hover:bg-bg-elev2 transition-colors focus-visible:outline-none focus-visible:shadow-focus"
             >
               Cancel
             </button>
@@ -124,8 +124,8 @@ function ReplyItem({ reply, fileId, commentId, authorId, onDeleted }) {
       )}
       {isOwn && !editing && (
         <div className="flex gap-2">
-          <button onClick={() => setEditing(true)} className="text-2xs text-accent hover:underline">Edit</button>
-          <button onClick={handleDelete} disabled={busy} className="text-2xs text-danger/80 hover:text-danger">Delete</button>
+          <button onClick={() => setEditing(true)} className="text-2xs text-accent hover:underline rounded-sm focus-visible:outline-none focus-visible:shadow-focus">Edit</button>
+          <button onClick={handleDelete} disabled={busy} className="text-2xs text-danger/80 hover:text-danger rounded-sm focus-visible:outline-none focus-visible:shadow-focus">Delete</button>
         </div>
       )}
     </div>
@@ -231,7 +231,9 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
         </div>
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="text-ink-faint hover:text-ink-muted flex-shrink-0 mt-0.5 transition-colors"
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Collapse comment' : 'Expand comment'}
+          className="text-ink-faint hover:text-ink-muted flex-shrink-0 mt-0.5 transition-colors rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
         >
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
@@ -252,13 +254,13 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
                 <button
                   onClick={handleSaveEdit}
                   disabled={busy}
-                  className="px-2.5 py-1 text-xs bg-accent text-white rounded-sm hover:bg-accent-hover disabled:opacity-60 transition-colors"
+                  className="px-2.5 py-1 text-xs bg-accent text-white rounded-sm hover:bg-accent-hover disabled:opacity-60 transition-colors focus-visible:outline-none focus-visible:shadow-focus"
                 >
                   Save
                 </button>
                 <button
                   onClick={() => { setEditing(false); setEditDraft(item.body) }}
-                  className="px-2.5 py-1 text-xs border border-line text-ink-muted rounded-sm hover:bg-bg-elev2 transition-colors"
+                  className="px-2.5 py-1 text-xs border border-line text-ink-muted rounded-sm hover:bg-bg-elev2 transition-colors focus-visible:outline-none focus-visible:shadow-focus"
                 >
                   Cancel
                 </button>
@@ -298,7 +300,8 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
               <button
                 onClick={handleReply}
                 disabled={!replyDraft.trim() || busy}
-                className="p-1.5 bg-accent text-white rounded-sm hover:bg-accent-hover disabled:opacity-40 flex-shrink-0 transition-colors"
+                aria-label="Post reply"
+                className="p-1.5 bg-accent text-white rounded-sm hover:bg-accent-hover disabled:opacity-40 flex-shrink-0 transition-colors focus-visible:outline-none focus-visible:shadow-focus"
               >
                 <Send size={12} />
               </button>
@@ -311,7 +314,7 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
               <button
                 onClick={handleReopen}
                 disabled={busy}
-                className="flex items-center gap-1 text-2xs text-ink-faint hover:text-accent transition-colors"
+                className="flex items-center gap-1 text-2xs text-ink-faint hover:text-accent transition-colors rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
               >
                 <RotateCcw size={10} /> Reopen
               </button>
@@ -319,7 +322,7 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
               <button
                 onClick={handleResolve}
                 disabled={busy}
-                className="flex items-center gap-1 text-2xs text-success hover:text-accent-press transition-colors"
+                className="flex items-center gap-1 text-2xs text-success hover:text-accent-press transition-colors rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
               >
                 <CheckCircle size={10} /> Resolve
               </button>
@@ -328,14 +331,14 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
               <>
                 <button
                   onClick={() => setEditing(true)}
-                  className="text-2xs text-accent hover:underline"
+                  className="text-2xs text-accent hover:underline rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
                 >
                   Edit
                 </button>
                 <button
                   onClick={handleDelete}
                   disabled={busy}
-                  className="flex items-center gap-0.5 text-2xs text-danger/80 hover:text-danger transition-colors"
+                  className="flex items-center gap-0.5 text-2xs text-danger/80 hover:text-danger transition-colors rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
                 >
                   <Trash2 size={10} /> Delete
                 </button>
@@ -470,7 +473,7 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
         <button
           onClick={handleAdd}
           disabled={!newBody.trim() || busy}
-          className="w-full h-7 text-xs font-medium bg-accent text-white rounded-sm hover:bg-accent-hover disabled:opacity-50 transition-colors tracking-tightish"
+          className="w-full h-7 text-xs font-medium bg-accent text-white rounded-sm hover:bg-accent-hover disabled:opacity-50 transition-colors tracking-tightish focus-visible:outline-none focus-visible:shadow-focus"
         >
           {busy ? 'Posting…' : 'Comment'}
         </button>

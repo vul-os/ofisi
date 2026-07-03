@@ -9,7 +9,7 @@
  * so sweeping the cursor across a toolbar doesn't flicker.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { cloneElement, isValidElement, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 const GAP = 6
@@ -24,6 +24,25 @@ export default function Tooltip({ label, children, side = 'bottom', className = 
   useEffect(() => () => clearTimeout(timer.current), [])
 
   if (!label) return children
+
+  // The bubble is visual-only (pointer-events:none, portalled). It does NOT
+  // provide an accessible name. So if the wrapped control has no name of its
+  // own, borrow the tooltip label as its aria-label — otherwise an icon-only
+  // button reads as an anonymous "button" to assistive tech. We deliberately
+  // do NOT touch a child that already has a name via aria-label/-labelledby,
+  // a title, or visible text content (overriding visible text would violate
+  // WCAG 2.5.3 "Label in Name").
+  const hasTextContent =
+    isValidElement(children) &&
+    ['string', 'number'].includes(typeof children.props.children)
+  const labelledChildren =
+    isValidElement(children) &&
+    !children.props['aria-label'] &&
+    !children.props['aria-labelledby'] &&
+    !children.props.title &&
+    !hasTextContent
+      ? cloneElement(children, { 'aria-label': label })
+      : children
 
   const show = () => {
     clearTimeout(timer.current)
@@ -58,7 +77,7 @@ export default function Tooltip({ label, children, side = 'bottom', className = 
       onFocusCapture={show}
       onBlurCapture={hide}
     >
-      {children}
+      {labelledChildren}
       {open && createPortal(
         <span
           ref={bubbleRef}

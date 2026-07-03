@@ -82,6 +82,7 @@ export function StatusPicker({ currentStatus, currentText = '', onStatusChange, 
             onClick={() => { onStatusChange(o.value, text); onClose() }}
             className={[
               'w-full flex items-center gap-2.5 px-3 py-1.5 text-sm transition-colors duration-fast',
+              'focus-visible:outline-none focus-visible:shadow-focus',
               active ? 'text-ink font-semibold bg-accent-tint' : 'text-ink-muted hover:bg-bg-elev2',
             ].join(' ')}
           >

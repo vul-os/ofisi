@@ -15,9 +15,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { History, RotateCcw, Loader2, AlertCircle, Bookmark } from 'lucide-react'
+import { History, RotateCcw, Loader2, AlertCircle, Bookmark, X } from 'lucide-react'
 import { api } from '../lib/api'
-import { Button, IconButton, Modal } from './ui'
+import { Button, IconButton, Modal, LoadingState } from './ui'
 
 function formatRelative(dateStr) {
   const d = new Date(dateStr)
@@ -161,9 +161,7 @@ export default function HistoryPanel({ fileId, onRestore, onClose }) {
           </div>
           {onClose && (
             <IconButton size="sm" onClick={onClose} title="Close">
-              <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-                <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
+              <X size={14} />
             </IconButton>
           )}
         </div>
@@ -171,9 +169,7 @@ export default function HistoryPanel({ fileId, onRestore, onClose }) {
         {/* ── Body ── */}
         <div className="flex-1 overflow-y-auto">
           {loading && (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 size={18} className="animate-spin text-accent" />
-            </div>
+            <LoadingState size="sm" label="Loading history…" className="py-12" />
           )}
 
           {error && !loading && (

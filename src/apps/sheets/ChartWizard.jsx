@@ -10,9 +10,9 @@
  *   onClose   {fn}        — close wizard
  *   onChange  {fn(data)}  — called with updated data after insertion
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { X, BarChart2 } from 'lucide-react'
-import { Button, IconButton } from '../../components/ui'
+import { Button, IconButton, useDialogA11y } from '../../components/ui'
 
 const CHART_TYPES = [
   { value: 'bar',    label: 'Bar',    icon: '▬' },
@@ -64,6 +64,9 @@ export default function ChartWizard({ data, onClose, onChange }) {
   const [xLabel,      setXLabel]      = useState('')
   const [yLabel,      setYLabel]      = useState('')
   const [legendPos,   setLegendPos]   = useState('bottom')
+  const dialogRef = useRef(null)
+  // Trap focus, close on Esc, restore focus to the trigger on close.
+  useDialogA11y(dialogRef, onClose)
 
   function handleInsert() {
     const chart = buildChartDescriptor({
@@ -91,13 +94,19 @@ export default function ChartWizard({ data, onClose, onChange }) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-paper rounded-xl border border-line shadow-e4 w-[480px] max-h-[80vh] flex flex-col overflow-hidden animate-scale-in">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Insert chart"
+        className="bg-paper rounded-xl border border-line shadow-e3 w-[480px] max-h-[80vh] flex flex-col overflow-hidden animate-scale-in"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-line">
           <span className="text-sm font-semibold text-ink flex items-center gap-2">
-            <BarChart2 size={14} className="text-accent" /> Insert chart
+            <BarChart2 size={14} className="text-accent" aria-hidden /> Insert chart
           </span>
-          <IconButton size="xs" onClick={onClose}><X size={13} /></IconButton>
+          <IconButton size="sm" title="Close" onClick={onClose}><X size={13} /></IconButton>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">

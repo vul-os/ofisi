@@ -17,7 +17,7 @@
  */
 
 import { useState } from 'react'
-import { Check, XCircle, Type, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Check, XCircle, Type, Trash2, ChevronDown, ChevronUp, X } from 'lucide-react'
 import { Tabs, Button, IconButton } from './ui'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -187,9 +187,7 @@ export default function SuggestionPanel({
           <span className="text-sm font-semibold text-ink tracking-tightish">Suggestions</span>
         </div>
         <IconButton size="sm" onClick={onClose} title="Close">
-          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
+          <X size={14} />
         </IconButton>
       </div>
 

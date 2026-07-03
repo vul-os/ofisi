@@ -411,15 +411,19 @@ function InsertTableMenu({ editor }) {
           style={{ gridTemplateColumns: `repeat(${COLS}, 16px)` }}
         >
           {cells.map(({ r, c }) => (
-            <div
+            <button
               key={`${r}-${c}`}
+              type="button"
+              aria-label={`Insert ${r} by ${c} table`}
               onMouseEnter={() => setHover({ row: r, col: c })}
               onMouseLeave={() => setHover(null)}
+              onFocus={() => setHover({ row: r, col: c })}
               onClick={() => {
                 editor.chain().focus().insertTable({ rows: r, cols: c, withHeaderRow: true }).run()
               }}
               className={[
                 'w-4 h-4 border rounded-xs cursor-pointer transition-colors',
+                'focus-visible:outline-none focus-visible:shadow-focus',
                 hilite(r, c) ? 'bg-accent border-accent' : 'bg-bg-elev2 border-line hover:border-accent-press',
               ].join(' ')}
             />

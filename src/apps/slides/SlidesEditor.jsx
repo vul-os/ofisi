@@ -28,7 +28,7 @@ import { TreeSession, getTreeReplicaId, ordKeyBetween } from '../../lib/crdt/tre
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { getSlideViewers } from '../../components/RemoteCursors.jsx'
-import { Button, IconButton, Tooltip, Topbar, Menu, UrlPopover } from '../../components/ui'
+import { Button, IconButton, Tooltip, Topbar, Menu, UrlPopover, LoadingState } from '../../components/ui'
 import ThemeGallery from './ThemeGallery.jsx'
 import MasterSlideEditor from './MasterSlideEditor.jsx'
 import TransitionPanel from './TransitionPanel.jsx'
@@ -514,7 +514,7 @@ export default function SlidesEditor() {
   if (!editor) {
     return (
       <div className="flex-1 flex items-center justify-center bg-bg">
-        <Loader2 className="animate-spin text-accent" size={22} />
+        <LoadingState label="Opening presentation…" />
       </div>
     )
   }
@@ -558,13 +558,15 @@ export default function SlidesEditor() {
         }
         meta={
           <span
+            role="status"
+            aria-live="polite"
             className={[
               'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
               statusInfo.tone === 'success' ? 'text-success' :
               statusInfo.tone === 'danger'  ? 'text-danger' : 'text-ink-faint',
             ].join(' ')}
           >
-            <StatusIcon size={11} className={statusInfo.spin ? 'animate-spin' : ''} />
+            <StatusIcon size={11} aria-hidden className={statusInfo.spin ? 'animate-spin' : ''} />
             {statusInfo.text}
           </span>
         }
@@ -699,6 +701,7 @@ export default function SlidesEditor() {
                     role="button"
                     tabIndex={0}
                     aria-current={isActive ? 'true' : undefined}
+                    aria-label={`Slide ${idx + 1}${slide.title ? `: ${slide.title}` : ''}${isActive ? ' (current)' : ''}`}
                     draggable
                     onDragStart={() => setDragSlideIdx(idx)}
                     onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx) }}
@@ -814,6 +817,7 @@ export default function SlidesEditor() {
                         role="button"
                         tabIndex={0}
                         aria-current={isActive ? 'true' : undefined}
+                        aria-label={`Slide ${idx + 1}${slide.title ? `: ${slide.title}` : ''}${isActive ? ' (current)' : ''}`}
                         draggable
                         onDragStart={() => setDragSlideIdx(idx)}
                         onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx) }}
@@ -899,10 +903,12 @@ export default function SlidesEditor() {
                         <div className="absolute top-1 right-1 hidden group-hover:flex [@media(pointer:coarse)]:flex gap-0.5 bg-bg-elev2/80 rounded-md">
                           <IconButton
                             size="sm" title="Move up"
+                            disabled={idx === 0}
                             onClick={(e) => { e.stopPropagation(); moveSlide(idx, -1) }}
                           ><ChevronUp size={12} /></IconButton>
                           <IconButton
                             size="sm" title="Move down"
+                            disabled={idx === slidesData.slides.length - 1}
                             onClick={(e) => { e.stopPropagation(); moveSlide(idx, 1) }}
                           ><ChevronDown size={12} /></IconButton>
                           <IconButton

@@ -12,7 +12,7 @@
  *   api        api module (for uploadImage)
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Image as ImageIcon, Video, Square, Circle as CircleIcon, ArrowRight, X, Upload } from 'lucide-react'
 
 const SHAPES = [
@@ -69,6 +69,27 @@ export default function InsertPanel({ editor, onInsert, api: apiProp }) {
   const [shapeStroke, setShapeStroke] = useState('#5b4dd0')
   const [showVideo, setShowVideo] = useState(false)
   const [showShape, setShowShape] = useState(false)
+  const rootRef = useRef(null)
+
+  // Close the video/shape popovers on Escape or an outside click, matching the
+  // shared <Menu> dismissal behaviour.
+  useEffect(() => {
+    if (!showVideo && !showShape) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setShowVideo(false); setShowShape(false) }
+    }
+    const onDown = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) {
+        setShowVideo(false); setShowShape(false)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onDown)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onDown)
+    }
+  }, [showVideo, showShape])
 
   const insertHtml = (html) => {
     if (editor) {
@@ -113,7 +134,7 @@ export default function InsertPanel({ editor, onInsert, api: apiProp }) {
   }
 
   return (
-    <div className="flex items-center gap-1 flex-wrap">
+    <div ref={rootRef} className="flex items-center gap-1 flex-wrap">
       {/* Image */}
       <button
         type="button"
@@ -141,10 +162,10 @@ export default function InsertPanel({ editor, onInsert, api: apiProp }) {
           <Video size={12} /> Video
         </button>
         {showVideo && (
-          <div className="absolute top-full mt-1 left-0 z-20 bg-paper border border-line rounded-lg shadow-e2 p-3 w-72">
+          <div role="dialog" aria-label="Embed video" className="absolute top-full mt-1 left-0 z-20 bg-paper border border-line rounded-lg shadow-e2 p-3 w-72">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-ink">Embed video</span>
-              <button type="button" onClick={() => setShowVideo(false)} className="text-ink-faint hover:text-ink">
+              <button type="button" aria-label="Close" onClick={() => setShowVideo(false)} className="text-ink-faint hover:text-ink rounded-sm focus-visible:outline-none focus-visible:shadow-focus">
                 <X size={12} />
               </button>
             </div>
@@ -164,7 +185,7 @@ export default function InsertPanel({ editor, onInsert, api: apiProp }) {
             <button
               type="button"
               onClick={handleVideoInsert}
-              className="mt-2 w-full text-xs bg-accent text-white rounded-md py-1.5 hover:bg-accent/90 transition-colors font-semibold"
+              className="mt-2 w-full text-xs bg-accent text-white rounded-md py-1.5 hover:bg-accent-hover transition-colors font-semibold focus-visible:outline-none focus-visible:shadow-focus"
             >
               Insert
             </button>
@@ -188,10 +209,10 @@ export default function InsertPanel({ editor, onInsert, api: apiProp }) {
           <Square size={12} /> Shape
         </button>
         {showShape && (
-          <div className="absolute top-full mt-1 left-0 z-20 bg-paper border border-line rounded-lg shadow-e2 p-3 w-56">
+          <div role="dialog" aria-label="Insert shape" className="absolute top-full mt-1 left-0 z-20 bg-paper border border-line rounded-lg shadow-e2 p-3 w-56">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-ink">Insert shape</span>
-              <button type="button" onClick={() => setShowShape(false)} className="text-ink-faint hover:text-ink">
+              <button type="button" aria-label="Close" onClick={() => setShowShape(false)} className="text-ink-faint hover:text-ink rounded-sm focus-visible:outline-none focus-visible:shadow-focus">
                 <X size={12} />
               </button>
             </div>

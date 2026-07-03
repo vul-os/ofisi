@@ -167,7 +167,7 @@ export default function PivotPanel({ data, onClose, onInsert }) {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-line">
         <span className="text-xs font-semibold text-ink tracking-tightish">Pivot table</span>
-        <IconButton size="xs" onClick={onClose}><X size={13} /></IconButton>
+        <IconButton size="sm" title="Close" onClick={onClose}><X size={13} /></IconButton>
       </div>
 
       <div className="flex-1 px-3 py-3 space-y-4 text-xs">

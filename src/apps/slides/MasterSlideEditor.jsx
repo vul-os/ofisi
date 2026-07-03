@@ -276,7 +276,7 @@ export default function MasterSlideEditor({ masters, onSave, onClose }) {
           <button
             type="button"
             onClick={handleSave}
-            className="text-xs bg-accent text-white px-4 py-1.5 rounded-md hover:bg-accent/90 transition-colors font-semibold"
+            className="text-xs bg-accent text-white px-4 py-1.5 rounded-md hover:bg-accent-hover transition-colors font-semibold focus-visible:outline-none focus-visible:shadow-focus"
           >
             Save masters
           </button>

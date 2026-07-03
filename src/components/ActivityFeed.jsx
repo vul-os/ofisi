@@ -17,10 +17,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Activity, Bookmark, Loader2, AlertCircle, RotateCcw,
-  Plus, CheckCircle, Edit3, MessageSquare, Shield,
+  Plus, CheckCircle, Edit3, MessageSquare, Shield, X,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import { Tabs, Button, IconButton, Input, Modal } from './ui'
+import { Tabs, Button, IconButton, Input, Modal, LoadingState } from './ui'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -96,12 +96,6 @@ function ActivityList({ fileId }) {
   }, [fileId])
 
   useEffect(() => { load() }, [load])
-
-  if (loading) return (
-    <div className="flex items-center justify-center py-12">
-      <Loader2 size={18} className="animate-spin text-accent" />
-    </div>
-  )
 
   if (error) return (
     <div className="flex flex-col items-center gap-2 py-10 px-4 text-center">
@@ -272,9 +266,7 @@ function SnapshotsTab({ fileId, onRestore }) {
 
         <div className="flex-1 overflow-y-auto">
           {loading && (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 size={18} className="animate-spin text-accent" />
-            </div>
+            <LoadingState size="sm" label="Loading activity…" className="py-8" />
           )}
 
           {error && !loading && (
@@ -448,9 +440,7 @@ export default function ActivityFeed({ fileId, onRestore, onClose }) {
         </div>
         {onClose && (
           <IconButton size="sm" onClick={onClose} title="Close">
-            <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-              <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
+            <X size={14} />
           </IconButton>
         )}
       </div>

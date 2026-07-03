@@ -17,8 +17,7 @@
  * Also exports <KeyboardShortcutsHelp /> — the help overlay.
  */
 import { useEffect, useCallback, useState } from 'react'
-import { X, Keyboard } from 'lucide-react'
-import { IconButton } from '../../components/ui'
+import { Modal } from '../../components/ui'
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 
@@ -195,33 +194,22 @@ const SHORTCUTS = [
 
 export function KeyboardShortcutsHelp({ onClose }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div className="bg-paper rounded-xl border border-line shadow-e4 w-[420px] max-h-[80vh] flex flex-col overflow-hidden animate-scale-in">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-line">
-          <span className="text-sm font-semibold text-ink flex items-center gap-2">
-            <Keyboard size={14} className="text-accent" /> Keyboard shortcuts
-          </span>
-          <IconButton size="xs" onClick={onClose}><X size={13} /></IconButton>
-        </div>
-        <div className="overflow-y-auto px-4 py-3">
-          <table className="w-full text-xs border-collapse">
-            <tbody>
-              {SHORTCUTS.map(({ keys, desc }, i) => (
-                <tr key={i} className={i % 2 === 0 ? 'bg-bg/50' : ''}>
-                  <td className="py-1.5 pr-4 font-mono font-medium text-ink whitespace-nowrap">
-                    {keys}
-                  </td>
-                  <td className="py-1.5 text-ink-muted">{desc}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <Modal open onClose={onClose} size="md" title="Keyboard shortcuts">
+      <Modal.Body className="max-h-[70vh] overflow-y-auto">
+        <table className="w-full text-xs border-collapse">
+          <tbody>
+            {SHORTCUTS.map(({ keys, desc }, i) => (
+              <tr key={i} className={i % 2 === 0 ? 'bg-bg/50' : ''}>
+                <td className="py-1.5 pr-4 font-mono font-medium text-ink whitespace-nowrap">
+                  {keys}
+                </td>
+                <td className="py-1.5 text-ink-muted">{desc}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Modal.Body>
+    </Modal>
   )
 }
 

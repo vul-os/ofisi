@@ -13,7 +13,7 @@
  *   onApply     {fn(rowsToHide: number[])} — called when a view is activated
  */
 import { useState, useMemo, useCallback } from 'react'
-import { X, Plus, Trash2, Filter, CheckCircle } from 'lucide-react'
+import { X, Plus, Trash2, Filter, CheckCircle, Pencil } from 'lucide-react'
 import { Button, IconButton } from '../../components/ui'
 
 // ── Row/cell helpers ──────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ export default function FilterPanel({ data, onClose, onApply }) {
         <span className="text-xs font-semibold text-ink tracking-tightish flex items-center gap-1.5">
           <Filter size={12} /> Filter views
         </span>
-        <IconButton size="xs" onClick={onClose}><X size={13} /></IconButton>
+        <IconButton size="sm" title="Close" onClick={onClose}><X size={13} /></IconButton>
       </div>
 
       <div className="flex-1 px-3 py-3 space-y-3 text-xs overflow-y-auto">
@@ -166,13 +166,14 @@ export default function FilterPanel({ data, onClose, onApply }) {
                 <span className="flex-1 text-ink truncate">{sv.name}</span>
                 <button
                   onClick={() => applyView(i)}
-                  className="text-accent hover:underline"
+                  className="text-accent hover:underline rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
+                  aria-label="Apply filter"
                   title="Apply filter"
                 >
                   <CheckCircle size={12} />
                 </button>
-                <button onClick={() => editExisting(i)} className="text-ink-faint hover:text-ink" title="Edit">✏</button>
-                <button onClick={() => deleteView(i)} className="text-ink-faint hover:text-danger" title="Delete">
+                <button onClick={() => editExisting(i)} aria-label="Edit filter view" className="text-ink-faint hover:text-ink rounded-sm focus-visible:outline-none focus-visible:shadow-focus" title="Edit"><Pencil size={11} /></button>
+                <button onClick={() => deleteView(i)} aria-label="Delete filter view" className="text-ink-faint hover:text-danger rounded-sm focus-visible:outline-none focus-visible:shadow-focus" title="Delete">
                   <Trash2 size={11} />
                 </button>
               </div>

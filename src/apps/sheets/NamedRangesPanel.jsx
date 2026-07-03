@@ -89,7 +89,7 @@ export default function NamedRangesPanel({ data, onClose, onChange }) {
     <div className="flex flex-col w-full sm:w-72 flex-shrink-0 h-full border-l border-line bg-paper overflow-y-auto">
       <div className="flex items-center justify-between px-3 py-2 border-b border-line">
         <span className="text-xs font-semibold text-ink tracking-tightish">Named ranges</span>
-        <IconButton size="xs" onClick={onClose}><X size={13} /></IconButton>
+        <IconButton size="sm" title="Close" onClick={onClose}><X size={13} /></IconButton>
       </div>
 
       <div className="flex-1 px-3 py-3 space-y-3 text-xs overflow-y-auto">
@@ -105,10 +105,10 @@ export default function NamedRangesPanel({ data, onClose, onChange }) {
                   <p className="font-semibold text-ink truncate">{r.name}</p>
                   <p className="text-ink-faint text-[10px] truncate">{r.sheetName}!{r.range}</p>
                 </div>
-                <button onClick={() => startEdit(i)} className="text-ink-faint hover:text-ink mt-0.5">
+                <button onClick={() => startEdit(i)} aria-label={`Edit named range ${r.name}`} className="text-ink-faint hover:text-ink mt-0.5 rounded-sm focus-visible:outline-none focus-visible:shadow-focus">
                   <Edit2 size={11} />
                 </button>
-                <button onClick={() => remove(i)} className="text-ink-faint hover:text-danger mt-0.5">
+                <button onClick={() => remove(i)} aria-label={`Delete named range ${r.name}`} className="text-ink-faint hover:text-danger mt-0.5 rounded-sm focus-visible:outline-none focus-visible:shadow-focus">
                   <Trash2 size={11} />
                 </button>
               </div>

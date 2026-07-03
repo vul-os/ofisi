@@ -8,8 +8,9 @@
  *   onClose  {function}
  */
 
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { X, Type, AlignLeft, FileText } from 'lucide-react'
+import { useDialogA11y } from '../../../components/ui'
 
 // Estimate pages from word count (250 words/page, Google Docs default)
 const WORDS_PER_PAGE = 250
@@ -32,6 +33,10 @@ function getSelectionText(editor) {
 }
 
 export default function WordCountModal({ editor, onClose }) {
+  const dialogRef = useRef(null)
+  // Trap focus, close on Esc, restore focus to the trigger on close.
+  useDialogA11y(dialogRef, onClose)
+
   const stats = useMemo(() => {
     if (!editor) return null
     const fullText = editor.getText()
@@ -54,13 +59,16 @@ export default function WordCountModal({ editor, onClose }) {
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Word count"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 animate-fade-in"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-paper border border-line rounded-xl shadow-e3 w-80 overflow-hidden animate-scale-in">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Word count"
+        className="bg-paper border border-line rounded-xl shadow-e3 w-80 overflow-hidden animate-scale-in"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-line bg-bg-elev2">
           <div className="flex items-center gap-2">

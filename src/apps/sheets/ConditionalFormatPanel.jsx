@@ -11,7 +11,7 @@
  *   onChange   {fn(data)}  — called with updated workbook after a rule is saved
  */
 import { useState } from 'react'
-import { X, Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react'
+import { X, Plus, Trash2, ChevronUp, ChevronDown, Pencil } from 'lucide-react'
 import { Button, IconButton } from '../../components/ui'
 
 const RULE_TYPES = [
@@ -187,7 +187,7 @@ export default function ConditionalFormatPanel({ data, onClose, onChange }) {
     <div className="flex flex-col w-full sm:w-80 flex-shrink-0 h-full border-l border-line bg-paper overflow-y-auto">
       <div className="flex items-center justify-between px-3 py-2 border-b border-line">
         <span className="text-xs font-semibold text-ink tracking-tightish">Conditional formatting</span>
-        <IconButton size="xs" onClick={onClose}><X size={13} /></IconButton>
+        <IconButton size="sm" title="Close" onClick={onClose}><X size={13} /></IconButton>
       </div>
 
       <div className="flex-1 px-3 py-3 space-y-3 text-xs overflow-y-auto">
@@ -209,14 +209,14 @@ export default function ConditionalFormatPanel({ data, onClose, onChange }) {
                 <span className="flex-1 truncate text-ink">
                   {r.conditionName} {r.conditionSymbol || ''} {r.conditionValue?.[0] || ''}
                 </span>
-                <button onClick={() => moveRule(i, -1)} className="text-ink-faint hover:text-ink">
+                <button onClick={() => moveRule(i, -1)} aria-label="Move rule up" className="text-ink-faint hover:text-ink rounded-sm focus-visible:outline-none focus-visible:shadow-focus">
                   <ChevronUp size={11} />
                 </button>
-                <button onClick={() => moveRule(i, 1)}  className="text-ink-faint hover:text-ink">
+                <button onClick={() => moveRule(i, 1)}  aria-label="Move rule down" className="text-ink-faint hover:text-ink rounded-sm focus-visible:outline-none focus-visible:shadow-focus">
                   <ChevronDown size={11} />
                 </button>
-                <button onClick={() => startEdit(i)}   className="text-ink-faint hover:text-ink">✏</button>
-                <button onClick={() => deleteRule(i)}  className="text-ink-faint hover:text-danger">
+                <button onClick={() => startEdit(i)}   aria-label="Edit rule" className="text-ink-faint hover:text-ink rounded-sm focus-visible:outline-none focus-visible:shadow-focus"><Pencil size={11} /></button>
+                <button onClick={() => deleteRule(i)}  aria-label="Delete rule" className="text-ink-faint hover:text-danger rounded-sm focus-visible:outline-none focus-visible:shadow-focus">
                   <Trash2 size={11} />
                 </button>
               </div>

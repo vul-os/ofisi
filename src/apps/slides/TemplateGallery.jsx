@@ -157,7 +157,7 @@ export default function TemplateGallery({ onApply, onClose }) {
             className={[
               'text-xs px-4 py-1.5 rounded-md font-semibold transition-colors',
               selected
-                ? 'bg-accent text-white hover:bg-accent/90'
+                ? 'bg-accent text-white hover:bg-accent-hover'
                 : 'bg-line text-ink-faint cursor-not-allowed',
             ].join(' ')}
           >

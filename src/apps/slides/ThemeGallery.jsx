@@ -320,7 +320,7 @@ export default function ThemeGallery({ currentThemeId, customTheme, onApply, onC
           <button
             type="button"
             onClick={handleApply}
-            className="text-xs bg-accent text-white px-4 py-1.5 rounded-md hover:bg-accent/90 transition-colors font-semibold"
+            className="text-xs bg-accent text-white px-4 py-1.5 rounded-md hover:bg-accent-hover transition-colors font-semibold focus-visible:outline-none focus-visible:shadow-focus"
           >
             Apply to all slides
           </button>
