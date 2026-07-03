@@ -15,6 +15,13 @@ lerna-debug.log*
 node_modules
 dist/*
 !dist/.gitkeep
+
+# Playwright E2E artifacts
+/test-results/
+/playwright-report/
+/blob-report/
+/.playwright/
+/e2e-results/
 dist-ssr
 dist-lib/
 dist-office/

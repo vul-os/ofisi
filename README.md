@@ -262,7 +262,8 @@ Setting `VULOS_CP_BASE_URL` selects the `backend/integration/cloud` adapter, whi
 
 ```bash
 npm run dev:web        # Vite (:5173) + Go API (:8080)
-npm test               # frontend tests (Vitest)
+npm test               # frontend unit + RTL/MSW integration tests (Vitest)
+npm run test:e2e       # browser E2E (Playwright, builds + serves vite preview)
 npm run build          # frontend dist/ + Go binary
 npm run build:all      # all sub-targets (office) + library
 npm run build:lib      # @vulos/office-client library only
@@ -273,6 +274,15 @@ go build ./...
 go test ./...
 go vet ./...
 ```
+
+**Frontend test layers** (see [docs/TESTING.md](docs/TESTING.md)):
+
+- **Vitest** (`npm test`) — unit tests plus RTL + MSW *integration* tests that
+  mount real editor component trees (real TipTap, real panels, real API client)
+  against a mocked `/api`. Runs headless in jsdom; no browser needed.
+- **Playwright** (`npm run test:e2e`) — browser-level E2E against a production
+  `vite preview` build with the whole backend mocked in-browser via
+  `page.route`. First run: `npx playwright install --with-deps chromium`.
 
 > **Frozen invariants:** pure Go (no CGO), JSX only (never `.tsx`), no Google SSO, no Stripe. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
