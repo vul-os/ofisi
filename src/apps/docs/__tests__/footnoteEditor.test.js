@@ -5,7 +5,7 @@
  * comment decoration plugin builds/maps highlights over a live document.
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
 import Document from '@tiptap/extension-document'
 import Paragraph from '@tiptap/extension-paragraph'
@@ -16,7 +16,14 @@ import {
   FootnotesList,
   FootnoteNumberingExtension,
   scanFootnotes,
+  numberFootnotesInHtml,
+  collectFootnoteRefIds,
+  computeFootnoteOrder,
 } from '../footnotes.js'
+import { exportToHtml } from '../docsExport.js'
+import { saveAs } from 'file-saver'
+
+vi.mock('file-saver', () => ({ saveAs: vi.fn() }))
 import {
   createCommentDecorationsExtension,
   COMMENT_PLUGIN_KEY,
@@ -92,6 +99,66 @@ describe('footnote insertion (live editor)', () => {
     // Orphaned list item (and now-empty list) should be gone.
     expect(scan.itemIds).toHaveLength(0)
     expect(scan.listPos).toBeNull()
+  })
+})
+
+describe('footnote export numbering (WAVE-47)', () => {
+  it('numberFootnotesInHtml bakes sequential numbers into refs and list items', () => {
+    // Two footnotes; getHTML() carries structure with no numbers.
+    const editor = makeEditor()
+    editor.commands.setTextSelection(6)
+    editor.commands.insertFootnote()
+    editor.commands.focus('end')
+    editor.commands.insertFootnote()
+
+    const raw = editor.getHTML()
+    // Cold HTML has the ids but no baked numbers.
+    expect(raw).not.toContain('data-fn-num="1"')
+
+    const numbered = numberFootnotesInHtml(raw)
+    // Inline refs now carry 1 and 2 as attribute + text.
+    expect(numbered).toContain('data-fn-num="1"')
+    expect(numbered).toContain('data-fn-num="2"')
+    // The visible marker text is sequential (not a "*"/"•" fallback).
+    const refNums = Array.from(numbered.matchAll(/<sup[^>]*data-fn-id[^>]*>(\d+)<\/sup>/g))
+      .map((m) => m[1])
+    expect(refNums).toEqual(['1', '2'])
+    // List items get numbered too.
+    expect(numbered).toContain('class="footnote-num">1. ')
+    expect(numbered).toContain('class="footnote-num">2. ')
+  })
+
+  it('export numbering matches in-editor computeFootnoteOrder', () => {
+    const editor = makeEditor()
+    editor.commands.setTextSelection(6)
+    editor.commands.insertFootnote()
+    editor.commands.focus('end')
+    editor.commands.insertFootnote()
+
+    const order = computeFootnoteOrder(collectFootnoteRefIds(editor.getJSON()))
+    const numbers = Array.from(order.values())
+    expect(numbers).toEqual([1, 2]) // sequential, matches the editor decorations
+  })
+
+  it('exportToHtml emits sequential footnote numbers in the saved HTML', () => {
+    const editor = makeEditor()
+    editor.commands.setTextSelection(6)
+    editor.commands.insertFootnote()
+    editor.commands.focus('end')
+    editor.commands.insertFootnote()
+
+    exportToHtml(editor, 'doc-with-footnotes')
+
+    expect(saveAs).toHaveBeenCalled()
+    const blob = saveAs.mock.calls.at(-1)[0]
+    // file-saver receives a Blob; pull its text back out. jsdom Blob supports .text().
+    return blob.text().then((html) => {
+      expect(html).toContain('data-fn-num="1"')
+      expect(html).toContain('data-fn-num="2"')
+      const refNums = Array.from(html.matchAll(/<sup[^>]*data-fn-id[^>]*>(\d+)<\/sup>/g))
+        .map((m) => m[1])
+      expect(refNums).toEqual(['1', '2'])
+    })
   })
 })
 

@@ -87,6 +87,84 @@ export function reconcileFootnoteItems(bodyRefIds, itemIds) {
   return { toAdd, toRemove, ordered }
 }
 
+/**
+ * Collect footnoteRef ids in body order from a TipTap/ProseMirror JSON doc.
+ * Mirrors what `scanFootnotes` does for a live doc, but works on the plain JSON
+ * that the export path (`editor.getJSON()`) produces — so DOCX export can derive
+ * the same sequential numbers the editor shows.
+ * @param {object} json  a doc node ({ type, content }) or its content array
+ * @returns {string[]}   footnote ref ids in document order (refs only, not items)
+ */
+export function collectFootnoteRefIds(json) {
+  const ids = []
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return
+    if (Array.isArray(node)) { node.forEach(walk); return }
+    if (node.type === 'footnoteRef' && node.attrs && node.attrs.id) {
+      ids.push(node.attrs.id)
+    }
+    if (Array.isArray(node.content)) node.content.forEach(walk)
+  }
+  walk(json)
+  return ids
+}
+
+/**
+ * Export-time numbering pass over a serialized HTML string (from `getHTML()`).
+ *
+ * In the live editor the sequential numbers are supplied by a decoration plugin
+ * (they are never part of the document), so a cold `getHTML()` carries the
+ * footnote ref/list structure with NO numbers — the CSS then falls back to `*`
+ * and `•` markers. This pass re-derives the numbers with `computeFootnoteOrder`
+ * (the exact same numbering the editor uses) and bakes them into the exported
+ * markup so an exported HTML file shows `1, 2, 3…` in both the inline refs and
+ * the footnotes list, matching the in-editor order.
+ *
+ * It:
+ *   - numbers refs (`sup[data-fn-id]`) in body order,
+ *   - writes the number as both a `data-fn-num` attribute and visible text so it
+ *     renders even without the editor CSS,
+ *   - numbers the matching list items (`li[data-fn-id]`) to the same values.
+ *
+ * Requires a DOM (`DOMParser`) — available in the browser and under jsdom. If no
+ * parser is present it returns the input unchanged (best-effort, never throws).
+ *
+ * @param {string} html  serialized editor HTML
+ * @returns {string}     HTML with sequential footnote numbers baked in
+ */
+export function numberFootnotesInHtml(html) {
+  if (typeof html !== 'string' || !html.includes('data-fn-id')) return html
+  if (typeof DOMParser === 'undefined') return html
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(`<body>${html}</body>`, 'text/html')
+    const refs = Array.from(doc.querySelectorAll('sup[data-fn-id]'))
+    const order = computeFootnoteOrder(refs.map((el) => el.getAttribute('data-fn-id')))
+
+    for (const el of refs) {
+      const num = order.get(el.getAttribute('data-fn-id'))
+      if (!num) continue
+      el.setAttribute('data-fn-num', String(num))
+      el.textContent = String(num)
+    }
+    for (const el of Array.from(doc.querySelectorAll('li[data-fn-id]'))) {
+      const num = order.get(el.getAttribute('data-fn-id'))
+      if (!num) continue
+      el.setAttribute('data-fn-num', String(num))
+      // Prefix the item text with "N. " so the number is visible without CSS.
+      if (!el.querySelector('.footnote-num')) {
+        const marker = doc.createElement('span')
+        marker.className = 'footnote-num'
+        marker.textContent = `${num}. `
+        el.insertBefore(marker, el.firstChild)
+      }
+    }
+    return doc.body.innerHTML
+  } catch {
+    return html
+  }
+}
+
 // ---------------------------------------------------------------------------
 // footnoteRef — inline atom in the body
 // ---------------------------------------------------------------------------

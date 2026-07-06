@@ -4,10 +4,15 @@ import {
   Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun,
 } from 'docx'
 import TurndownService from 'turndown'
+import {
+  computeFootnoteOrder, collectFootnoteRefIds, numberFootnotesInHtml,
+} from './footnotes.js'
 
 // HTML
 export function exportToHtml(editor, filename) {
-  const body = editor.getHTML()
+  // Bake sequential footnote numbers into the markup (getHTML() alone omits
+  // them — they live in an editor decoration, not the document).
+  const body = numberFootnotesInHtml(editor.getHTML())
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -33,7 +38,7 @@ ${body}
 
 // Markdown
 export function exportToMarkdown(editor, filename) {
-  const html = editor.getHTML()
+  const html = numberFootnotesInHtml(editor.getHTML())
   const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' })
   const md = td.turndown(html)
   saveAs(new Blob([md], { type: 'text/markdown;charset=utf-8' }), `${filename}.md`)
@@ -50,7 +55,10 @@ export function exportToPdf(filename) {
 // DOCX
 export async function exportToDocx(editor, filename) {
   const json = editor.getJSON()
-  const children = await nodesToDocx(json.content || [])
+  // Derive the same sequential footnote numbering the editor shows so exported
+  // refs/items read 1, 2, 3… (the numbers are decoration-only in the doc JSON).
+  const fnOrder = computeFootnoteOrder(collectFootnoteRefIds(json))
+  const children = await nodesToDocx(json.content || [], fnOrder)
   const doc = new Document({
     styles: { default: { document: { run: { font: 'Calibri', size: 24 } } } },
     sections: [{ children }],
@@ -59,10 +67,10 @@ export async function exportToDocx(editor, filename) {
   saveAs(blob, `${filename}.docx`)
 }
 
-async function nodesToDocx(nodes) {
+async function nodesToDocx(nodes, fnOrder) {
   const out = []
   for (const node of nodes) {
-    out.push(...(await nodeToDocx(node)))
+    out.push(...(await nodeToDocx(node, fnOrder)))
   }
   return out
 }
@@ -103,19 +111,19 @@ const HEADING_MAP = {
   4: HeadingLevel.HEADING_4,
 }
 
-async function nodeToDocx(node) {
+async function nodeToDocx(node, fnOrder) {
   switch (node.type) {
     case 'paragraph':
-      return [new Paragraph({ children: inlineNodes(node.content || []) })]
+      return [new Paragraph({ children: inlineNodes(node.content || [], fnOrder) })]
     case 'heading':
-      return [new Paragraph({ heading: HEADING_MAP[node.attrs?.level] || HeadingLevel.HEADING_1, children: inlineNodes(node.content || []) })]
+      return [new Paragraph({ heading: HEADING_MAP[node.attrs?.level] || HeadingLevel.HEADING_1, children: inlineNodes(node.content || [], fnOrder) })]
     case 'bulletList':
     case 'orderedList':
       return await listToDocx(node, 0)
     case 'taskList':
       return await listToDocx(node, 0)
     case 'blockquote':
-      return await nodesToDocx(node.content || [])
+      return await nodesToDocx(node.content || [], fnOrder)
     case 'codeBlock':
       return [new Paragraph({ children: [new TextRun({ text: node.content?.map((n) => n.text).join('') || '', font: 'Courier New', size: 20 })] })]
     case 'horizontalRule':
@@ -145,13 +153,38 @@ async function nodeToDocx(node) {
       }
       return []
     }
+    case 'footnotesList': {
+      // Render the footnotes section: a rule, then one numbered paragraph per
+      // footnote item (number derived from the ref order in the body).
+      const out = [new Paragraph({ border: { top: { style: BorderStyle.SINGLE, size: 1, color: 'AAAAAA' } } })]
+      for (const item of node.content || []) {
+        if (item.type !== 'footnoteItem') continue
+        const num = fnOrder?.get(item.attrs?.id)
+        const marker = num ? `${num}. ` : ''
+        // A footnoteItem holds paragraph+ content; flatten them, prefixing the
+        // first with its number.
+        const paras = item.content || []
+        paras.forEach((para, i) => {
+          const inline = inlineNodes(para.content || [], fnOrder)
+          const children = i === 0
+            ? [new TextRun({ text: marker, bold: true }), ...inline]
+            : inline
+          out.push(new Paragraph({ children }))
+        })
+      }
+      return out
+    }
     default:
       return []
   }
 }
 
-function inlineNodes(nodes) {
+function inlineNodes(nodes, fnOrder) {
   return nodes.map((node) => {
+    if (node.type === 'footnoteRef') {
+      const num = fnOrder?.get(node.attrs?.id)
+      return new TextRun({ text: num ? String(num) : '*', superScript: true })
+    }
     if (node.type !== 'text') return new TextRun('')
     const marks = node.marks || []
     const hasMark = (type) => marks.some((m) => m.type === type)
