@@ -223,7 +223,7 @@ export class DocsCollabSession extends EventTarget {
 // insertion/deletion/paste).  For true concurrent divergence the CRDT
 // itself provides convergence regardless of this simplification.
 
-function diffToOps(prevText, nextText, crdt) {
+export function diffToOps(prevText, nextText, crdt) {
   const ops = []
 
   if (prevText === nextText) return ops

@@ -24,6 +24,7 @@ import (
 	"vulos-office/backend/audit"
 	"vulos-office/backend/billing"
 	"vulos-office/backend/directory"
+	"vulos-office/backend/docsync"
 	"vulos-office/backend/fileacl"
 	"vulos-office/backend/models"
 	"vulos-office/backend/services/docs_export"
@@ -48,6 +49,11 @@ type V1Handler struct {
 	// localServer is THIS cell's server identity, used to decide co-cloud vs
 	// remote locality at share time (Contract 3).
 	localServer string
+
+	// docSync is the server-collab op-log store (WAVE37). Optional: when wired,
+	// deleting a document also purges its relayed CRDT op log so a re-created id
+	// can't inherit stale collab state. nil in tests / when server-collab is off.
+	docSync docsync.Store
 }
 
 // NewV1Handler constructs a V1Handler over the process-wide authorizer + audit
@@ -74,6 +80,13 @@ func NewV1HandlerWithDeps(store storage.Storage, authz *FileAuthz, aud audit.Sto
 func (h *V1Handler) WithDirectory(r directory.Resolver, localServer string) *V1Handler {
 	h.dir = r
 	h.localServer = localServer
+	return h
+}
+
+// WithDocSync wires the server-collab op-log store so DeleteDocument also purges
+// the document's relayed CRDT op log. Returns the handler for chaining.
+func (h *V1Handler) WithDocSync(ds docsync.Store) *V1Handler {
+	h.docSync = ds
 	return h
 }
 
@@ -299,6 +312,11 @@ func (h *V1Handler) DeleteDocument(c *gin.Context) {
 		return
 	}
 	_ = h.authz.Store().Delete(id)
+	if h.docSync != nil {
+		if err := h.docSync.Delete(id); err != nil {
+			log.Printf("[v1] docsync op-log delete file=%s: %v (ignoring)", id, err)
+		}
+	}
 	if err := SharedBucketStore().DeleteObject(c, requesterID(c), "file/"+id); err != nil {
 		log.Printf("[v1] bucket sync delete file=%s: %v (ignoring)", id, err)
 	}

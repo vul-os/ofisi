@@ -184,4 +184,44 @@ export const api = {
     if (!res.ok) throw new Error('Upload failed')
     return res.json()
   },
+
+  // ── WAVE37: server-mediated collaboration (the CLOUD / account path) ────────
+  // These target the public /v1 surface (not /api). The SSE stream URL is built
+  // synchronously from the cached endpoint selection so EventSource can consume
+  // it; auth rides the same session cookie (withCredentials).
+
+  /** Synchronous /v1 collab SSE stream URL for EventSource. */
+  docCollabStreamUrl: (docId) =>
+    `${currentEndpoint()}/v1/documents/${encodeURIComponent(docId)}/collab/stream`,
+
+  /** GET the authoritative current CRDT state (late-joiner bootstrap). */
+  docCollabState: async (docId) => {
+    const res = await fetch(
+      `${currentEndpoint()}/v1/documents/${encodeURIComponent(docId)}/collab/state`,
+      { credentials: 'include' },
+    )
+    if (!res.ok) throw new Error(`collab state failed: ${res.statusText}`)
+    return res.json()
+  },
+
+  /**
+   * POST a batch of CRDT ops (and/or a snapshot) to the server relay. Rejected
+   * with 403 for a viewer/commenter (editor-gated). Returns {ok, accepted, seq}.
+   */
+  docCollabPublish: async (docId, { origin, ops, snap }) => {
+    const res = await fetch(
+      `${currentEndpoint()}/v1/documents/${encodeURIComponent(docId)}/collab/ops`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ origin, ops, snap }),
+      },
+    )
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw Object.assign(new Error(err.error || 'collab publish failed'), { status: res.status, ...err })
+    }
+    return res.json()
+  },
 }

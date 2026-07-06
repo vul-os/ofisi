@@ -50,6 +50,7 @@ import SuggestionPanel from '../../components/SuggestionPanel'
 import ActivityFeed from '../../components/ActivityFeed'
 import { DocsCollabSession } from '../../lib/crdt/index.js'
 import { useP2PCollab } from './useP2PCollab.js'
+import { useServerCollab } from './useServerCollab.js'
 import P2PShareModal from './components/P2PShareModal.jsx'
 import { getSuggestionStore } from '../../lib/crdt/suggestions.js'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
@@ -275,6 +276,20 @@ export default function DocsEditor() {
   // p2p.onLocalText (assigned on every render below).
   const p2pOnLocalTextRef = useRef(null)
 
+  // WAVE37: server-mediated collab (the CLOUD / account path). Complements the
+  // p2p fabric — keeps two editors in sync + persisted even when no p2p peer is
+  // reachable, and gives a late joiner current state from the server. Suppressed
+  // while the E2E p2p session is active (encrypted ops must not hit the readable
+  // server) via e2eActive. Remote text applies through the SAME guarded patch as
+  // p2p, so ops from either transport converge with no double-apply.
+  const server = useServerCollab({
+    fileId: id,
+    onRemoteText: applyRemoteP2PText,
+    e2eActive: p2p.active,
+  })
+  const serverOnLocalTextRef = useRef(null)
+  serverOnLocalTextRef.current = server.onLocalText
+
   // Subscribe to save state changes for this file
   useEffect(() => {
     const unsub = onSaveStateChange(id, (state) => setSaveStatus({ ...state }))
@@ -366,6 +381,11 @@ export default function DocsEditor() {
         // WAVE-25: also drive the P2P session when active (no-op for ro peers).
         if (p2pOnLocalTextRef.current) {
           p2pOnLocalTextRef.current(prevCrdtTextRef.current, nextText)
+        }
+        // WAVE37: also drive the server-mediated session (the cloud/account path;
+        // inert while the E2E p2p session is active, no-op for viewers).
+        if (serverOnLocalTextRef.current) {
+          serverOnLocalTextRef.current(prevCrdtTextRef.current, nextText)
         }
         prevCrdtTextRef.current = nextText
       }
