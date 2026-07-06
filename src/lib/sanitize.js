@@ -41,6 +41,47 @@ export function sanitizeRichHtml(html) {
   return DOMPurify.sanitize(html ?? '', RICH_HTML_CONFIG)
 }
 
+// ── WAVE-52: Docs HTML sanitiser (tables) ────────────────────────────────────
+// Docs import (.html / .docx → _html) and HTML/Markdown export flow user- and
+// peer-supplied markup through TipTap. The standard HTML profile already keeps
+// the exact table tags we need — <table>/<thead>/<tbody>/<tr>/<th>/<td> — plus
+// the structural attributes colspan / rowspan / scope, and it strips on*
+// handlers. What it does NOT catch is a dangerous *value* inside an otherwise-
+// allowed `style` attribute (e.g. `<td style="background:url(javascript:…)">`).
+//
+// We keep the allow-list deliberately tight: rather than widen it, we ADD a
+// value-level guard that drops any `style` carrying an executable/exfiltrating
+// construct (url()/expression()/javascript:/@import/behavior/-moz-binding),
+// while preserving the benign inline styles Docs itself emits (line-height,
+// text-align, page-break-*, font-family/size). This tightens sanitisation —
+// it never loosens it — and covers the table-cell style-injection vector.
+const DANGEROUS_CSS = /url\s*\(|expression\s*\(|javascript:|@import|behaviou?r\s*:|-moz-binding|\\/i
+
+let _docHookInstalled = false
+function ensureDocStyleHook() {
+  if (_docHookInstalled) return
+  _docHookInstalled = true
+  DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
+    if (data.attrName === 'style' && DANGEROUS_CSS.test(data.attrValue || '')) {
+      data.keepAttr = false
+    }
+  })
+}
+
+// Same policy surface as RICH_HTML_CONFIG (tables already survive the html
+// profile); the CSS-value guard is added via the hook above.
+export const DOC_HTML_CONFIG = RICH_HTML_CONFIG
+
+/**
+ * Sanitise Docs HTML (import + export). Preserves table structure + colspan/
+ * rowspan/scope; strips scripts, on* handlers, and dangerous inline-style
+ * values (defeats <td style="…javascript:…"> style-injection).
+ */
+export function sanitizeDocHtml(html) {
+  ensureDocStyleHook()
+  return DOMPurify.sanitize(html ?? '', DOC_HTML_CONFIG)
+}
+
 /** Alias — slides surfaces read more clearly as "sanitizeSlideHtml". */
 export const sanitizeSlideHtml = sanitizeRichHtml
 

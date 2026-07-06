@@ -161,7 +161,12 @@
 .tiptap hr { margin: 2rem 0; border: 0; border-top: 1px solid var(--line); }
 
 /* Tables */
-.tiptap table { width: 100%; border-collapse: collapse; margin: 1.25rem 0; font-size: 0.95em; }
+/* WAVE-52: wide tables scroll inside their own wrapper so the page body never
+   scrolls horizontally; keyboard focus inside a cell gets a visible ring. */
+.tiptap .tableWrapper { overflow-x: auto; margin: 1.25rem 0; }
+.tiptap table { width: 100%; border-collapse: collapse; margin: 1.25rem 0; font-size: 0.95em; table-layout: fixed; }
+.tiptap .tableWrapper > table { margin: 0; }
+.tiptap table td:focus-within, .tiptap table th:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
 .tiptap table th {
   background: var(--bg-elev-2);
   font-family: var(--font-sans);

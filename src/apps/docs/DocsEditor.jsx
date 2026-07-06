@@ -14,7 +14,7 @@ import TextAlign from '@tiptap/extension-text-align'
 import Table from '@tiptap/extension-table'
 import TableRow from '@tiptap/extension-table-row'
 import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
+import TableHeaderBase from '@tiptap/extension-table-header'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import CharacterCount from '@tiptap/extension-character-count'
@@ -36,12 +36,22 @@ const Superscript = Mark.create({
   renderHTML() { return ['sup', 0] },
   addKeyboardShortcuts() { return { 'Mod-.': () => this.editor.commands.toggleMark(this.name) } },
 })
+
+// WAVE-52: header cells render with scope="col" so screen readers associate a
+// column heading with the data cells below it (a11y). Extends the stock
+// TableHeader without changing its schema/parse behaviour.
+const TableHeader = TableHeaderBase.extend({
+  renderHTML({ HTMLAttributes }) {
+    return ['th', { ...HTMLAttributes, scope: HTMLAttributes.scope || 'col' }, 0]
+  },
+})
 import { ArrowLeft, Save, Loader2, AlertCircle, History, Users, MessageSquare, Activity, GitBranch, Check, Circle, Search, Type as TypeIcon, ListTree, Share2, Eye } from 'lucide-react'
 import FindReplace from './components/FindReplace'
 import WordCountModal from './components/WordCountModal'
 import DocumentOutline from './components/DocumentOutline'
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
+import { sanitizeDocHtml } from '../../lib/sanitize'
 import { readDraft, clearDraft } from '../../lib/draftStore'
 import DocsToolbar from './DocsToolbar'
 import HistoryPanel from '../../components/HistoryPanel'
@@ -73,10 +83,16 @@ import {
   FootnoteNumberingExtension,
 } from './footnotes.js'
 
-// Imported files may carry _html; use that as editor content
+// Imported files may carry _html; use that as editor content.
+// WAVE-52: _html is user/peer-supplied markup (imported .html/.docx, restored
+// drafts, history snapshots). Sanitise it before handing it to TipTap so no
+// script / on*-handler / dangerous inline-style survives into the document —
+// this is the wave-14 allow-list boundary applied to the Docs import path, and
+// it keeps imported tables safe (colspan/rowspan/scope survive; <td onclick>/
+// <td style="…javascript:…"> are stripped). See lib/sanitize.js.
 function resolveContent(content) {
   if (!content) return { type: 'doc', content: [{ type: 'paragraph' }] }
-  if (content._html) return content._html  // TipTap accepts HTML string
+  if (content._html) return sanitizeDocHtml(content._html)  // TipTap accepts HTML string
   return content
 }
 
@@ -92,8 +108,32 @@ const AUTOSAVE_DELAY_MS = 2000
 // touched. This keeps the caret stable for insertions and deletions outside
 // the user's current cursor region.
 // ---------------------------------------------------------------------------
+// WAVE-52: detect structured block nodes (tables) whose cell layout means the
+// plain-text offset used by the character patch below no longer maps 1:1 to a
+// ProseMirror document position. Applying a text-offset delete/insert across a
+// table boundary can split cells or orphan rows. When such a node is present we
+// skip the fragile in-place patch (the authoritative doc JSON is still saved on
+// every edit, and late-joiner/full-state reconcile keeps peers convergent), so
+// a remote keystroke can never corrupt table structure. Non-table docs keep the
+// caret-stable minimal patch exactly as before.
+function docHasStructuredNodes(editor) {
+  let found = false
+  try {
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'table') { found = true; return false }
+      return true
+    })
+  } catch { /* non-fatal */ }
+  return found
+}
+
 function applyTextPatch(editor, prevText, nextText) {
   if (prevText === nextText) return
+
+  // Tables (and other structured blocks) make the plain-text→doc-position
+  // mapping ambiguous; skip the in-place patch rather than risk corrupting the
+  // node tree. Convergence is preserved by JSON persistence + full-state sync.
+  if (docHasStructuredNodes(editor)) return
 
   // Find common prefix.
   let pre = 0

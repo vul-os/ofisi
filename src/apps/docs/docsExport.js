@@ -4,6 +4,7 @@ import {
   Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun,
 } from 'docx'
 import TurndownService from 'turndown'
+import { sanitizeDocHtml } from '../../lib/sanitize'
 import {
   computeFootnoteOrder, collectFootnoteRefIds, numberFootnotesInHtml,
 } from './footnotes.js'
@@ -12,7 +13,11 @@ import {
 export function exportToHtml(editor, filename) {
   // Bake sequential footnote numbers into the markup (getHTML() alone omits
   // them — they live in an editor decoration, not the document).
-  const body = numberFootnotesInHtml(editor.getHTML())
+  // WAVE-52: run the exported markup through the doc sanitiser so a downloaded
+  // .html file can never carry a script / on*-handler / dangerous cell-style
+  // (defence-in-depth: the editor content is already clean, but export is a
+  // trust boundary — the file is opened outside our sanitised viewer).
+  const body = sanitizeDocHtml(numberFootnotesInHtml(editor.getHTML()))
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -38,10 +43,40 @@ ${body}
 
 // Markdown
 export function exportToMarkdown(editor, filename) {
-  const html = numberFootnotesInHtml(editor.getHTML())
+  const html = sanitizeDocHtml(numberFootnotesInHtml(editor.getHTML()))
   const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' })
+  // GFM table support: turndown drops <table> by default. Add a minimal rule so
+  // exported Markdown carries a pipe-table instead of losing the table entirely.
+  td.addRule('tables', {
+    filter: ['table'],
+    replacement: (_content, node) => htmlTableToMarkdown(node),
+  })
   const md = td.turndown(html)
   saveAs(new Blob([md], { type: 'text/markdown;charset=utf-8' }), `${filename}.md`)
+}
+
+// Convert an HTML <table> DOM node to a GFM pipe-table string. Best-effort:
+// flattens each cell to its text, uses the first row as the header, and ignores
+// colspan/rowspan (Markdown pipe-tables can't express spans).
+function htmlTableToMarkdown(tableNode) {
+  const rows = Array.from(tableNode.querySelectorAll('tr'))
+  if (rows.length === 0) return ''
+  const cellText = (cell) => (cell.textContent || '').replace(/\s+/g, ' ').trim().replace(/\|/g, '\\|')
+  const toCells = (tr) => Array.from(tr.querySelectorAll('th,td')).map(cellText)
+  const header = toCells(rows[0])
+  const width = header.length || 1
+  const pad = (cells) => {
+    const c = cells.slice(0, width)
+    while (c.length < width) c.push('')
+    return c
+  }
+  const lines = []
+  lines.push('| ' + pad(header).join(' | ') + ' |')
+  lines.push('| ' + Array(width).fill('---').join(' | ') + ' |')
+  for (let i = 1; i < rows.length; i++) {
+    lines.push('| ' + pad(toCells(rows[i])).join(' | ') + ' |')
+  }
+  return '\n\n' + lines.join('\n') + '\n\n'
 }
 
 // PDF (browser print)

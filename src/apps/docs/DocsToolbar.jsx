@@ -354,9 +354,22 @@ function OverflowMenu({ editor, title, onInsertToc }) {
 }
 
 // ---------------------------------------------------------------------------
-// TableSubMenu — shown when cursor is inside a table
+// TableSubMenu — contextual table editing, shown only when the caret is inside
+// a table. Groups: row ops, column ops, header toggle, merge/split, delete.
+// Every command routes through the TipTap chain so it participates in undo and
+// (for cell text) the CRDT sync. Structural ops mutate ProseMirror nodes and are
+// transported by the collab layer as a whole-document reconcile, not a text diff.
 // ---------------------------------------------------------------------------
 function TableSubMenu({ editor }) {
+  // TipTap can tell us whether merge / split is currently possible so we can
+  // disable the affordances that would no-op (a11y: don't offer dead actions).
+  const canMerge = editor.can().mergeCells?.() ?? false
+  const canSplit = editor.can().splitCell?.() ?? false
+
+  const Group = ({ label }) => (
+    <p className="px-3 py-1 text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">{label}</p>
+  )
+
   return (
     <Dropdown
       trigger={
@@ -364,23 +377,34 @@ function TableSubMenu({ editor }) {
           className="toolbar-btn text-xs px-2 gap-0.5 flex items-center"
           aria-label="Table options"
           aria-haspopup="menu"
+          title="Table options"
         >
           <Table size={13} aria-hidden="true" />
           <ChevronDown size={10} aria-hidden="true" />
         </button>
       }
+      wide
     >
-      {[
-        ['Add row above',     () => editor.chain().focus().addRowBefore().run()],
-        ['Add row below',     () => editor.chain().focus().addRowAfter().run()],
-        ['Delete row',        () => editor.chain().focus().deleteRow().run()],
-        ['Add column before', () => editor.chain().focus().addColumnBefore().run()],
-        ['Add column after',  () => editor.chain().focus().addColumnAfter().run()],
-        ['Delete column',     () => editor.chain().focus().deleteColumn().run()],
-        ['Delete table',      () => editor.chain().focus().deleteTable().run()],
-      ].map(([lbl, fn]) => (
-        <MenuItem key={lbl} onClick={fn}>{lbl}</MenuItem>
-      ))}
+      <Group label="Rows" />
+      <MenuItem onClick={() => editor.chain().focus().addRowBefore().run()}>Insert row above</MenuItem>
+      <MenuItem onClick={() => editor.chain().focus().addRowAfter().run()}>Insert row below</MenuItem>
+      <MenuItem onClick={() => editor.chain().focus().deleteRow().run()}>Delete row</MenuItem>
+
+      <div className="my-1 border-t border-line" />
+      <Group label="Columns" />
+      <MenuItem onClick={() => editor.chain().focus().addColumnBefore().run()}>Insert column left</MenuItem>
+      <MenuItem onClick={() => editor.chain().focus().addColumnAfter().run()}>Insert column right</MenuItem>
+      <MenuItem onClick={() => editor.chain().focus().deleteColumn().run()}>Delete column</MenuItem>
+
+      <div className="my-1 border-t border-line" />
+      <Group label="Cells" />
+      <MenuItem onClick={() => editor.chain().focus().toggleHeaderRow().run()}>Toggle header row</MenuItem>
+      <MenuItem onClick={() => editor.chain().focus().toggleHeaderColumn().run()}>Toggle header column</MenuItem>
+      <MenuItem disabled={!canMerge} onClick={() => editor.chain().focus().mergeCells().run()}>Merge cells</MenuItem>
+      <MenuItem disabled={!canSplit} onClick={() => editor.chain().focus().splitCell().run()}>Split cell</MenuItem>
+
+      <div className="my-1 border-t border-line" />
+      <MenuItem onClick={() => editor.chain().focus().deleteTable().run()}>Delete table</MenuItem>
     </Dropdown>
   )
 }
