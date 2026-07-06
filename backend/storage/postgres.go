@@ -549,7 +549,7 @@ func (s *PostgresStorage) GetSealedPDF(envelopeID string) ([]byte, error) {
 }
 
 // ============================================================
-// Comments (OFFICE-26) — Postgres stub implementations
+// Comments (OFFICE-26) — Postgres implementations
 // ============================================================
 
 func (s *PostgresStorage) migrateCommentsSchema() {

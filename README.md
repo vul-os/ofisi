@@ -105,11 +105,17 @@ Vulos Office runs **by itself** — no account, no cloud, no other Vulos product
 docker run -d \
   --name vulos-office \
   -p 8080:8080 \
-  -v office-data:/data \
+  -v office-data:/srv/data \
   ghcr.io/vul-os/vulos-office:latest
 ```
 
 Open <http://localhost:8080>.
+
+> Building the image yourself: the `Dockerfile` needs a **parent build context**
+> that also contains the sibling `vulos-apps/` and `vulos-relay/` repos (for the
+> Go `replace` and the SPA `file:` deps). From the directory that holds all three:
+> `docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/vulos-office:latest .`
+> See the `Dockerfile` header and `fly.toml` for the full deploy flow.
 
 ### From source (single binary)
 

@@ -1,0 +1,64 @@
+# fly.toml — Vulos Office (documents app: Docs/Sheets/Slides/PDF+Signing) on Fly.io
+#
+# Vulos Office is a single Go binary that embeds its Vite SPA and serves the API
+# + static app on :8080. It runs standalone; with STORAGE_TYPE=postgres +
+# DATABASE_URL it uses a shared Postgres, otherwise local storage on the mounted
+# volume.
+#
+# ── Deploy ────────────────────────────────────────────────────────────────────
+# The Dockerfile needs a PARENT build context (sibling vulos-apps/ + vulos-relay/
+# for the Go `replace` and the SPA `file:` deps — see Dockerfile header). Because
+# Fly sends the config-file's directory as the build context, build+push the
+# image out-of-band and deploy by image reference rather than letting Fly build:
+#
+#   # from the directory that CONTAINS vulos-office/ vulos-apps/ vulos-relay/
+#   docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/vulos-office:latest .
+#   docker push ghcr.io/vul-os/vulos-office:latest
+#   fly deploy -c vulos-office/fly.toml --image ghcr.io/vul-os/vulos-office:latest
+#
+# (The [build].image below points Fly at that pushed image so a bare `fly deploy`
+# also works once the image is published.)
+
+app            = "vulos-office"
+primary_region = "PLACEHOLDER"   # Fly region code (e.g. "iad", "lhr", "fra")
+
+[build]
+  image = "ghcr.io/vul-os/vulos-office:latest"
+
+# Storage: local by default (data + uploads under /srv/{data,uploads}, since the
+# image's WORKDIR is /srv and the server's data_dir/uploads_dir default to
+# ./data and ./uploads). To use a shared Postgres instead, set DATABASE_URL as a
+# secret — main.go/storage.Resolve select Postgres when DATABASE_URL (or
+# VULOS_DATABASE_URL) is present, overriding the local default:
+#   fly secrets set -c vulos-office/fly.toml DATABASE_URL=postgres://...
+
+# The server writes app data under ./data (i.e. /srv/data, since the image
+# WORKDIR is /srv). Persist that path with the volume. Uploads land in
+# /srv/uploads; add a second mount if you need those to survive redeploys too.
+[[mounts]]
+  source      = "office_data"
+  destination = "/srv/data"
+
+[http_service]
+  internal_port        = 8080          # server.addr default in config
+  force_https          = true
+  auto_stop_machines   = "stop"
+  auto_start_machines  = true
+  min_machines_running = 1
+  processes            = ["app"]
+
+  [http_service.concurrency]
+    type       = "requests"
+    hard_limit = 250
+    soft_limit = 200
+
+  [[http_service.checks]]
+    type         = "http"
+    path         = "/healthz"
+    interval     = "15s"
+    timeout      = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "1gb"
