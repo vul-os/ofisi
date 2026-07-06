@@ -66,6 +66,54 @@ export const TEXT_OP_INSERT = 1
 export const TEXT_OP_DELETE = 2
 
 // ---------------------------------------------------------------------------
+// Ingress validation (WAVE-56 SECURITY — the recurring untrusted-CRDT class)
+//
+// Every remote transport (server SSE relay, E2E p2p, cloud fabric) and every
+// bootstrap/snapshot path funnels a peer-supplied op/node THROUGH apply() /
+// restore() here. A hostile peer (or a compromised relay, or a poisoned
+// persisted op-log replayed to a late joiner) could previously send an op whose
+// `v` was not a valid Unicode code point — String.fromCodePoint then throws
+// RangeError INSIDE apply(), and on the server-SSE path (serverSession's
+// es.onmessage) and the restore() path that throw is UNCAUGHT: it crashes the
+// remote-op handler / editor, and because the op is persisted server-side it
+// re-crashes every future joiner on bootstrap (persistent DoS). Same failure
+// class as the Board laser (non-finite coords) and Sheets chart_op (peer
+// descriptor merged without validation) fixes.
+//
+// Fix: validate/coerce at the ingress boundary and fail CLOSED — a malformed op
+// is dropped (apply returns false), never applied, never throws. Valid code
+// points are integers in [0, 0x10FFFF] excluding the UTF-16 surrogate range
+// (0xD800–0xDFFF), which String.fromCodePoint also rejects.
+// ---------------------------------------------------------------------------
+
+const MAX_CODEPOINT = 0x10ffff
+
+/** True iff v is an integer that String.fromCodePoint accepts (no throw). */
+function isValidCodePoint(v) {
+  return (
+    typeof v === 'number' &&
+    Number.isInteger(v) &&
+    v >= 0 &&
+    v <= MAX_CODEPOINT &&
+    !(v >= 0xd800 && v <= 0xdfff)
+  )
+}
+
+/**
+ * True iff `id` is a well-formed OpID { r: string, c: number }. The ROOT / a
+ * missing parent is validated separately (opidZero handles p == null).
+ */
+function isValidOpId(id) {
+  return (
+    id != null &&
+    typeof id === 'object' &&
+    typeof id.c === 'number' &&
+    Number.isFinite(id.c) &&
+    (id.r === undefined || typeof id.r === 'string')
+  )
+}
+
+// ---------------------------------------------------------------------------
 // TextCRDT
 // ---------------------------------------------------------------------------
 
@@ -118,7 +166,21 @@ export class TextCRDT {
    * Returns true if the op changed the document state.
    */
   apply(op) {
+    // WAVE-56 SECURITY: op arrives from an untrusted peer/relay. Reject any
+    // malformed shape fail-closed (return false) rather than let a bad field
+    // throw inside apply and crash the remote-op handler / a late-joiner
+    // bootstrap. Never trust `op` — validate before touching CRDT state.
+    if (!op || typeof op !== 'object') return false
+
     if (op.k === TEXT_OP_INSERT) {
+      // Insert MUST carry a well-formed OpID and a valid Unicode code point.
+      // A non-finite/negative/out-of-range/non-number `v` would previously
+      // throw RangeError in String.fromCodePoint (the recurring-class DoS).
+      if (!isValidOpId(op.id)) return false
+      if (!isValidCodePoint(op.v)) return false
+      // Parent, when present, must be a well-formed OpID (or absent/zero → ROOT).
+      if (op.p != null && !opidZero(op.p) && !isValidOpId(op.p)) return false
+
       const k = _key(op.id)
       if (this._nodes.has(k)) return false  // already seen
 
@@ -133,6 +195,10 @@ export class TextCRDT {
     }
 
     if (op.k === TEXT_OP_DELETE) {
+      // Delete MUST carry a well-formed target OpID and its own OpID (for the
+      // clock observe). Missing/malformed → drop rather than corrupt/throw.
+      if (!isValidOpId(op.id)) return false
+      if (!isValidOpId(op.t)) return false
       const targetKey = _key(op.t)
       const node = this._nodes.get(targetKey)
       if (!node || node.deleted) return false
@@ -188,7 +254,14 @@ export class TextCRDT {
     if (!snap || !Array.isArray(snap.nodes)) return
 
     // Sort ascending so parents are inserted before children.
-    const sorted = [...snap.nodes].sort((a, b) => opidLess(a.id, b.id) ? -1 : 1)
+    // WAVE-56 SECURITY: a snapshot arrives from an untrusted peer (p2p `snap`,
+    // server `/collab/state` bootstrap, or a persisted-then-replayed op-log).
+    // Skip any malformed node fail-closed — a bad `id`/`v` must not throw and
+    // nuke the whole restore (which would crash every late joiner).
+    const validNodes = [...snap.nodes].filter(
+      (n) => n && typeof n === 'object' && isValidOpId(n.id) && isValidCodePoint(n.v),
+    )
+    const sorted = validNodes.sort((a, b) => opidLess(a.id, b.id) ? -1 : 1)
     for (const n of sorted) {
       const k = _key(n.id)
       const parent = n.p && !opidZero(n.p) ? n.p : ROOT_ID

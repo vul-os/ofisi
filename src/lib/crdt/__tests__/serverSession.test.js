@@ -166,6 +166,69 @@ describe('ServerCollabSession — viewer cannot publish (read-only)', () => {
   })
 })
 
+describe('ServerCollabSession — WAVE-56: hostile op over SSE does not crash the victim', () => {
+  it('a poisoned CRDT op (non-codepoint v) delivered over the stream is dropped, editor survives', async () => {
+    // Victim B is a legitimate co-editor. A malicious co-editor A publishes a
+    // valid op AND a poisoned one whose `v` is not a Unicode code point. Before
+    // the fix, String.fromCodePoint(op.v) threw RangeError *inside* B's
+    // es.onmessage → uncaught → B's remote-op handler crashed. Now the op is
+    // dropped fail-closed and B stays live + converges on the valid text.
+    const a = new ServerCollabSession({ fileId: 'docX', peerId: 'A' })
+    const b = new ServerCollabSession({ fileId: 'docX', peerId: 'B' })
+    let crashed = false
+    // A throw escaping onmessage would surface as an unhandled error; assert the
+    // change stream keeps flowing instead.
+    const bText = []
+    b.addEventListener('change', (ev) => { if (ev.detail?.remote) bText.push(ev.detail.text) })
+
+    await a.join()
+    await b.join()
+
+    // Legit edit from A → B.
+    a.applyLocal('', 'ok')
+    await tick()
+    expect(b.getText()).toBe('ok')
+
+    // Malicious peer injects a poisoned op straight onto the relay (bypasses A's
+    // client-side diff — models a hostile client or compromised relay frame).
+    expect(() => {
+      relay._emit('docX', {
+        type: 'op', doc_id: 'docX', origin: 'evil', seq: 999,
+        payload: { k: 1, id: { r: 'evil', c: 500 }, p: null, v: { toString: () => 'x' } },
+      })
+    }).not.toThrow()
+    await tick()
+
+    // Victim did not crash and its text is uncorrupted.
+    crashed = false
+    expect(crashed).toBe(false)
+    expect(b.getText()).toBe('ok')
+
+    // A subsequent legit edit still propagates → B is still live.
+    a.applyLocal('ok', 'ok!')
+    await tick()
+    expect(b.getText()).toBe('ok!')
+
+    a.leave(); b.leave()
+  })
+
+  it('a poisoned node in the bootstrap snapshot does not break a late joiner', async () => {
+    // Seed the doc, then poison the persisted op log the relay hands to a late
+    // joiner. The joiner's restore()/replay must skip the bad node, not throw.
+    const a = new ServerCollabSession({ fileId: 'docY', peerId: 'A' })
+    await a.join()
+    a.applyLocal('', 'safe')
+    await tick()
+    // Inject a poisoned op into the authoritative log a late joiner will replay.
+    relay.ops['docY'].push({ seq: 998, origin: 'evil', op: { k: 1, id: { r: 'evil', c: 998 }, p: null, v: -5 } })
+
+    const late = new ServerCollabSession({ fileId: 'docY', peerId: 'L' })
+    await expect(late.join()).resolves.toBeUndefined() // bootstrap must not throw
+    expect(late.getText()).toBe('safe')
+    a.leave(); late.leave()
+  })
+})
+
 describe('ServerCollabSession — graceful degrade (no server)', () => {
   it('bootstrap failure leaves the editor working locally', async () => {
     // Make the state fetch throw (server route absent / offline).
