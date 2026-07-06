@@ -244,3 +244,67 @@ describe('WAVE-61 chart persistence merge', () => {
     expect(clampCharts(none)).toBe(none)
   })
 })
+
+// ── WAVE-62: untrusted LOAD paths must clamp a poisoned charts array ──────────
+// The trusted-local mergeCharts path deliberately does NOT re-run makeChart on
+// every keystroke; correctness of that shortcut RELIES on the invariant that
+// every chart ENTERING sheet.charts already passed makeChart — i.e. every
+// untrusted-origin load path (initial useState, api.getFile, XLSX import, AND
+// draft-restore) funnels content through clampCharts. This suite pins the
+// load-path clamp against a maliciously-crafted persisted document: a chart
+// with an OBJECT title (→ "Objects are not valid as a React child" render
+// crash) and NON-FINITE geometry (→ NaN SVG layout) — the exact wave-55 DoS
+// class, reached through the load door instead of the CRDT peer door.
+describe('WAVE-62 load-path clamp neutralises a poisoned saved/draft document', () => {
+  // A poisoned persisted first sheet: charts array an attacker who can write the
+  // file/draft JSON could craft. None of these fields passed makeChart.
+  const poisoned = () => [{
+    name: 'Sheet1', id: 'sheet_1', celldata: [], config: {},
+    charts: [{
+      id: 'evil',
+      type: '__proto__',                        // not in allow-list
+      range: 'A1:B2',
+      title: { toString: () => 'boom' },        // OBJECT title → React-child crash
+      options: { xAxisLabel: {}, legend: 'yes' },
+      x: NaN, y: Infinity, w: -1e9, h: 'nope',  // non-finite geometry → NaN layout
+    }],
+  }]
+
+  it('clampCharts coerces every hostile field to safe plain data', () => {
+    const safe = getCharts(clampCharts(poisoned()))[0]
+    expect(safe.type).toBe('column')                 // unknown type → default
+    expect(typeof safe.title).toBe('string')         // object title → string
+    expect(safe.title).toBe('')                       // ('' — not the object)
+    expect(typeof safe.options.xAxisLabel).toBe('string')
+    expect(Number.isFinite(safe.x) && Number.isFinite(safe.y)).toBe(true)
+    expect(Number.isFinite(safe.w) && Number.isFinite(safe.h)).toBe(true)
+    expect(safe.w).toBeGreaterThanOrEqual(160)
+    expect(safe.h).toBeGreaterThanOrEqual(120)
+    // Whole descriptor is now pure serialisable data — render-safe.
+    expect(JSON.parse(JSON.stringify(safe))).toEqual(safe)
+  })
+
+  it('a title that is NOT a string never survives the load clamp (React-child crash guard)', () => {
+    for (const badTitle of [{}, [], { toString: () => 'x' }, 42, true, null]) {
+      const doc = [{ name: 'Sheet1', id: 's', celldata: [], config: {},
+        charts: [{ id: 'c', type: 'bar', range: 'A1:B2', title: badTitle }] }]
+      const t = getCharts(clampCharts(doc))[0].title
+      expect(typeof t).toBe('string')   // ALWAYS a string → safe as a React child
+    }
+  })
+
+  it('mergeCharts trusts its input — proving clamp MUST happen at load, not merge', () => {
+    // Documents WHY the draft-restore path had to clamp: mergeCharts re-attaches
+    // the in-memory (already-validated) charts verbatim, so if a poisoned array
+    // ever reached `data` unclamped, mergeCharts would faithfully preserve the
+    // poison on the next keystroke. The clamp is the load-boundary's job.
+    const poison = poisoned()
+    const payload = [{ name: 'Sheet1', id: 'sheet_1', celldata: [], config: {} }] // no charts
+    const merged = mergeCharts(payload, chartsBySheetId(poison))
+    // mergeCharts re-attaches the SAME (unvalidated) object — hence load must clamp.
+    expect(getCharts(merged)[0].title).toEqual(poison[0].charts[0].title)
+    // ...whereas clamping the source first yields a render-safe descriptor.
+    const mergedSafe = mergeCharts(payload, chartsBySheetId(clampCharts(poison)))
+    expect(typeof getCharts(mergedSafe)[0].title).toBe('string')
+  })
+})

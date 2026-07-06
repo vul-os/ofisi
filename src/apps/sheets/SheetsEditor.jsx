@@ -643,7 +643,15 @@ export default function SheetsEditor() {
     saveTimer.current = setTimeout(() => doSave(dataRef.current), 1500)
   }
 
-  const handleRestoreDraft  = () => { if (!draft) return; setData(draft.content); if (draft.name) setTitle(draft.name); setDraft(null); markDirty(id) }
+  // WAVE-62 SECURITY: a draft is client-side persisted content (IndexedDB) and
+  // is an UNTRUSTED-ORIGIN load path exactly like the server file — a poisoned
+  // draft (prior XSS, corrupted/legacy record, another tab) could hold a chart
+  // descriptor with a non-string title (→ "Objects are not valid as a React
+  // child" crash) or non-finite geometry (→ NaN SVG layout). Every other load
+  // path (initial useState, api.getFile, XLSX import) runs clampCharts →
+  // makeChart; the restore path must too, or it reopens the wave-55 render-DoS
+  // through the load door. Normalise + clamp fail-closed before it reaches data.
+  const handleRestoreDraft  = () => { if (!draft) return; setData(clampCharts(normalizeSheets(draft.content))); if (draft.name) setTitle(draft.name); setDraft(null); markDirty(id) }
   const handleDiscardDraft  = () => { clearDraft(id); setDraft(null) }
 
   // ── Import CSV ──────────────────────────────────────────────────────────────
