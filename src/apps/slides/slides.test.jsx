@@ -382,6 +382,46 @@ describe('slides toolbar undo/redo and formatting', () => {
     expect(call).toBeDefined()
     expect(call.args[1].fontSize).toBe('32pt')
   })
+
+  // ── wave-48: newly surfaced text-formatting commands ──────────────────────
+  it('font family setMark routes through chain for slides', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().setMark('textStyle', { fontFamily: 'Georgia, serif' }).run()
+    const call = editor._store._calls.find((c) => c.cmd === 'setMark')
+    expect(call).toBeDefined()
+    expect(call.args[1].fontFamily).toBe('Georgia, serif')
+  })
+
+  it('font family "Default" clears the fontFamily attribute', () => {
+    const editor = makeSlideEditor()
+    // The Default entry sets fontFamily to null to unset it.
+    editor.chain().focus().setMark('textStyle', { fontFamily: null }).run()
+    const call = editor._store._calls.find((c) => c.cmd === 'setMark')
+    expect(call).toBeDefined()
+    expect(call.args[1].fontFamily).toBeNull()
+  })
+
+  it('toggleHighlight routes through chain with a colour', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().toggleHighlight({ color: '#fef08a' }).run()
+    const call = editor._store._calls.find((c) => c.cmd === 'toggleHighlight')
+    expect(call).toBeDefined()
+    expect(call.args[0].color).toBe('#fef08a')
+  })
+
+  it('toggleOrderedList routes through chain in slides toolbar', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().toggleOrderedList().run()
+    expect(editor._store._calls.some((c) => c.cmd === 'toggleOrderedList')).toBe(true)
+  })
+
+  it('clear-formatting chains unsetAllMarks + clearNodes', () => {
+    const editor = makeSlideEditor()
+    editor.chain().focus().unsetAllMarks().clearNodes().run()
+    const cmds = editor._store._calls.map((c) => c.cmd)
+    expect(cmds).toContain('unsetAllMarks')
+    expect(cmds).toContain('clearNodes')
+  })
 })
 
 // ── 11. SLIDE_FONT_SIZES constant ────────────────────────────────────────────
@@ -394,5 +434,41 @@ describe('slide font sizes', () => {
     expect(SLIDE_FONT_SIZES.length).toBeGreaterThan(0)
     expect(SLIDE_FONT_SIZES).toContain(24)
     expect(SLIDE_FONT_SIZES).toContain(72)
+  })
+})
+
+// ── 12. wave-48: slide font-family selector values are sanitiser-safe ────────
+
+describe('slide font families', () => {
+  // Kept in sync with SLIDE_FONT_FAMILIES in SlidesEditor.jsx.
+  const SLIDE_FONT_FAMILIES = [
+    { label: 'Default',         value: '' },
+    { label: 'Arial',          value: 'Arial, sans-serif' },
+    { label: 'Georgia',        value: 'Georgia, serif' },
+    { label: 'Times New Roman', value: '"Times New Roman", serif' },
+    { label: 'Courier New',    value: '"Courier New", monospace' },
+    { label: 'Verdana',        value: 'Verdana, sans-serif' },
+    { label: 'Trebuchet MS',   value: '"Trebuchet MS", sans-serif' },
+    { label: 'Impact',         value: 'Impact, sans-serif' },
+  ]
+
+  it('offers a Default (unset) plus real font stacks', () => {
+    expect(SLIDE_FONT_FAMILIES.length).toBeGreaterThan(1)
+    expect(SLIDE_FONT_FAMILIES[0].value).toBe('')
+  })
+
+  it('every non-default value survives sanitizeFontFamily (no CSS-breakout chars)', async () => {
+    const { sanitizeFontFamily } = await import('../../lib/tiptap/fontStyle.js')
+    for (const { value } of SLIDE_FONT_FAMILIES) {
+      if (!value) continue // Default clears the attribute; nothing to sanitise.
+      // A safe stack round-trips unchanged (never null, which would drop it).
+      expect(sanitizeFontFamily(value)).toBe(value)
+    }
+  })
+
+  it('font-family renderHTML emits an inline style for a chosen stack', async () => {
+    const { fontFamilyAttribute } = await import('../../lib/tiptap/fontStyle.js')
+    expect(fontFamilyAttribute.renderHTML({ fontFamily: 'Georgia, serif' }))
+      .toEqual({ style: 'font-family: Georgia, serif' })
   })
 })

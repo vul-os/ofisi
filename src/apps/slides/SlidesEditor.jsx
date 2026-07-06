@@ -8,14 +8,15 @@ import TextAlign from '@tiptap/extension-text-align'
 import Underline from '@tiptap/extension-underline'
 import TextStyle from '@tiptap/extension-text-style'
 import Color from '@tiptap/extension-color'
+import Highlight from '@tiptap/extension-highlight'
 import Placeholder from '@tiptap/extension-placeholder'
 import { FontSize, FontFamily } from '../../lib/tiptap/fontStyle.js'
 import {
   ArrowLeft, Save, Loader2, Play, Plus, Trash2,
   ChevronUp, ChevronDown, Download, EyeOff, MessageSquare,
   Bold, Italic, Underline as UnderlineIcon, Strikethrough, Link as LinkIcon,
-  AlignLeft, AlignCenter, AlignRight, List, Image as ImageIcon,
-  Check, Circle, AlertCircle, StickyNote, Palette, Layout,
+  AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Image as ImageIcon,
+  Check, Circle, AlertCircle, StickyNote, Palette, Layout, Highlighter, RemoveFormatting,
   Copy, FileText, GripVertical, Monitor, Zap, Undo, Redo,
   ChevronDown as ChevronDownIcon, Type as TypeIcon, LayoutGrid, X,
 } from 'lucide-react'
@@ -78,6 +79,47 @@ function SlideLinkButton({ editor }) {
   )
 }
 
+// SlideFontFamilySelector — surfaces the already-wired FontFamily extension in
+// the Slides toolbar (the wave-19 note flagged that the extension existed but
+// had no UI). Mirrors the Docs FontFamilySelector so both editors behave the
+// same. Pure textStyle-mark op — writes only into the slide's content HTML, so
+// the CRDT slide tree is untouched.
+function SlideFontFamilySelector({ editor }) {
+  const currentFamily = editor.getAttributes('textStyle').fontFamily || ''
+  const currentLabel = SLIDE_FONT_FAMILIES.find((f) => f.value === currentFamily)?.label || 'Font'
+  return (
+    <Menu
+      width="w-40"
+      trigger={
+        <button
+          type="button"
+          className="toolbar-btn flex items-center gap-1 px-2 min-w-0 sm:min-w-[76px] text-xs"
+          aria-label={`Font family: ${currentLabel}`}
+          aria-haspopup="menu"
+        >
+          <span className="flex-1 text-left truncate" style={{ fontFamily: currentFamily || undefined }}>
+            {currentLabel}
+          </span>
+          <ChevronDownIcon size={10} className="opacity-60" aria-hidden="true" />
+        </button>
+      }
+    >
+      {SLIDE_FONT_FAMILIES.map(({ label, value }) => (
+        <Menu.Item
+          key={label}
+          active={currentFamily === value}
+          onClick={() => {
+            if (!value) editor.chain().focus().setMark('textStyle', { fontFamily: null }).run()
+            else editor.chain().focus().setMark('textStyle', { fontFamily: value }).run()
+          }}
+        >
+          <span style={{ fontFamily: value || undefined }}>{label}</span>
+        </Menu.Item>
+      ))}
+    </Menu>
+  )
+}
+
 // Reveal.js theme names (kept for backward compatibility with legacy decks).
 const LEGACY_TRANSITIONS = ['none', 'fade', 'slide', 'convex', 'concave', 'zoom']
 
@@ -96,6 +138,20 @@ function newSlide(master = 'content') {
 
 // ── Slide toolbar constants ──────────────────────────────────────────────────
 const SLIDE_FONT_SIZES = [14, 18, 24, 32, 40, 56, 72]
+
+// Font stacks offered in the Slides text toolbar. Kept aligned with the Docs
+// toolbar (DocsToolbar FONT_FAMILIES) so decks and docs share the same set and
+// the sanitiser/exporters treat them identically.
+const SLIDE_FONT_FAMILIES = [
+  { label: 'Default',         value: '' },
+  { label: 'Arial',          value: 'Arial, sans-serif' },
+  { label: 'Georgia',        value: 'Georgia, serif' },
+  { label: 'Times New Roman', value: '"Times New Roman", serif' },
+  { label: 'Courier New',    value: '"Courier New", monospace' },
+  { label: 'Verdana',        value: 'Verdana, sans-serif' },
+  { label: 'Trebuchet MS',   value: '"Trebuchet MS", sans-serif' },
+  { label: 'Impact',         value: 'Impact, sans-serif' },
+]
 
 const SLIDE_HEADINGS = [
   { label: 'Normal', value: 0 },
@@ -186,6 +242,7 @@ export default function SlidesEditor() {
       Underline,
       TextStyle,
       Color,
+      Highlight.configure({ multicolor: true }),
       // Render font size / family on the textStyle mark (base ext is a shell).
       FontSize,
       FontFamily,
@@ -1094,6 +1151,9 @@ export default function SlidesEditor() {
                   ))}
                 </Menu>
 
+                {/* Font family */}
+                <SlideFontFamilySelector editor={editor} />
+
                 {/* Font size */}
                 <Menu
                   width="w-24"
@@ -1164,6 +1224,24 @@ export default function SlidesEditor() {
                     aria-label="Choose text color"
                   />
                 </label>
+                {/* Highlight */}
+                <label
+                  className={[
+                    'toolbar-btn relative cursor-pointer flex items-center',
+                    editor.isActive('highlight') ? 'text-accent' : '',
+                  ].join(' ')}
+                  title="Highlight"
+                  aria-label="Highlight color"
+                >
+                  <Highlighter size={14} aria-hidden="true" />
+                  <input
+                    type="color"
+                    className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                    value={editor.getAttributes('highlight').color || '#fef08a'}
+                    onChange={(e) => editor.chain().focus().toggleHighlight({ color: e.target.value }).run()}
+                    aria-label="Choose highlight color"
+                  />
+                </label>
                 <span className="toolbar-divider" />
                 <Tooltip label="Align left">
                   <IconButton size="sm" active={editor.isActive({ textAlign: 'left' })}
@@ -1188,6 +1266,19 @@ export default function SlidesEditor() {
                   <IconButton size="sm" active={editor.isActive('bulletList')}
                     onClick={() => editor.chain().focus().toggleBulletList().run()} aria-label="Bullet list">
                     <List size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Numbered list">
+                  <IconButton size="sm" active={editor.isActive('orderedList')}
+                    onClick={() => editor.chain().focus().toggleOrderedList().run()} aria-label="Numbered list">
+                    <ListOrdered size={14} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip label="Clear formatting">
+                  <IconButton size="sm"
+                    onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
+                    aria-label="Clear formatting">
+                    <RemoveFormatting size={14} />
                   </IconButton>
                 </Tooltip>
                 <span className="toolbar-divider" />
