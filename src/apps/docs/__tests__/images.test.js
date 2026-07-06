@@ -255,6 +255,101 @@ describe('sanitizer: allows safe <img>, blocks every XSS vector', () => {
   })
 })
 
+// ── 3b. WAVE-58 red-team regressions (sanitizer bypass + collab-ingress gap) ──
+// The wave-57 red-team surfaced three real gaps; each is closed fail-closed and
+// pinned here so it can never silently regress.
+describe('WAVE-58: sanitizer allow-list completeness (bypass attempts)', () => {
+  it('rejects a raster MIME-LIE (data:image/png, but SVG/markup body)', () => {
+    // The allow-list previously trusted the DECLARED prefix, so a
+    // `data:image/png,<svg onload=…>` (comma-form, never a real raster) survived.
+    // A genuine embedded raster is ALWAYS ;base64, — require it.
+    const out = sanitizeDocHtml('<img src="data:image/png,<svg onload=alert(1)/>">')
+    expect(out.toLowerCase()).not.toContain('svg')
+    expect(out.toLowerCase()).not.toContain('onload')
+    expect(out.toLowerCase()).not.toContain('alert')
+    // The lie is dropped entirely (no src survives), not kept.
+    expect(out).not.toContain('data:image/png,')
+  })
+
+  it('rejects a data:image/svg+xml smuggled on href (not just src)', () => {
+    // DOMPurify keeps a bare `href` on <img> WITHOUT scheme-validating it, and
+    // normalises SVG <image href> → <img href>. The wave-57 hook gated src/srcset
+    // only; wave-58 gates href/xlink:href with the same data:-URI policy.
+    const out = sanitizeDocHtml('<img src="https://ok/x.png" href="data:image/svg+xml,<svg onload=alert(1)/>">')
+    expect(out.toLowerCase()).not.toContain('svg')
+    expect(out.toLowerCase()).not.toContain('onload')
+    expect(out).toContain('src="https://ok/x.png"') // safe src retained
+  })
+
+  it('rejects the SVG <image> element carrying a data:svg href', () => {
+    const out = sanitizeDocHtml('<image href="data:image/svg+xml,<svg onload=alert(1)/>"/>')
+    expect(out.toLowerCase()).not.toContain('svg')
+    expect(out.toLowerCase()).not.toContain('onload')
+  })
+
+  it('strips imagesrcset / ping candidate+beacon channels', () => {
+    const out = sanitizeDocHtml('<img src="https://ok/x.png" imagesrcset="data:image/svg+xml,<svg/> 1x" ping="https://evil/track">')
+    expect(out.toLowerCase()).not.toContain('imagesrcset')
+    expect(out.toLowerCase()).not.toContain('ping')
+    expect(out.toLowerCase()).not.toContain('evil')
+    expect(out.toLowerCase()).not.toContain('svg')
+  })
+
+  it('still accepts a legit base64 raster on src', () => {
+    const out = sanitizeDocHtml(`<img src="${PNG_1x1}" alt="ok">`)
+    expect(out).toContain('src="data:image/png;base64,')
+  })
+})
+
+// The SHARPEST finding: the realtime CRDT carries only text, so an image node
+// reaches a peer via persisted document JSON reloaded through setContent(json) —
+// a path that (unlike the _html import branch) NEVER flows through
+// sanitizeDocHtml. A malicious rw collaborator could PUT doc JSON with a poisoned
+// image src. The DocImage node's renderHTML now gates the src, so no ingress path
+// can emit a live poisoned <img>.
+describe('WAVE-58: collab / JSON-reload ingress gate (DocImage renderHTML)', () => {
+  const poisoned = [
+    'javascript:alert(1)',
+    'data:image/svg+xml,<svg onload=alert(1)/>',
+    'data:text/html,<script>alert(1)</script>',
+    'data:image/png,<svg onload=1/>',        // raster MIME-lie
+    'vbscript:msgbox(1)',
+  ]
+
+  it('drops every poisoned src set via setContent(json) (the collab path)', () => {
+    editor = makeEditor()
+    editor.commands.setContent({
+      type: 'doc',
+      content: poisoned.map((src) => ({ type: 'image', attrs: { src } })),
+    })
+    const html = editor.getHTML().toLowerCase()
+    expect(html).not.toContain('javascript:')
+    expect(html).not.toContain('vbscript:')
+    expect(html).not.toContain('svg')
+    expect(html).not.toContain('onload')
+    expect(html).not.toContain('text/html')
+    expect(html).not.toContain('<script')
+    // The nodes survive as (image-less) <img>; the payload does not.
+    expect(html).toContain('<img')
+  })
+
+  it('keeps safe srcs (base64 raster, https, relative) through the same path', () => {
+    editor = makeEditor()
+    editor.commands.setContent({
+      type: 'doc',
+      content: [
+        { type: 'image', attrs: { src: PNG_1x1 } },
+        { type: 'image', attrs: { src: 'https://example.com/x.png' } },
+        { type: 'image', attrs: { src: '/relative/pic.png' } },
+      ],
+    })
+    const html = editor.getHTML()
+    expect(html).toContain('data:image/png;base64,')
+    expect(html).toContain('https://example.com/x.png')
+    expect(html).toContain('/relative/pic.png')
+  })
+})
+
 // ── 4. CRDT round-trip of an image node ──────────────────────────────────────
 describe('CRDT round-trip: image node survives full-state reconcile', () => {
   it('a peer reconstructs the image from the authoritative JSON', () => {

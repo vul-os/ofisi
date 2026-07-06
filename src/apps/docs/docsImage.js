@@ -21,6 +21,7 @@
  */
 
 import Image from '@tiptap/extension-image'
+import { isSafeImageSrc } from '../../lib/sanitize'
 
 // Raster-only allow-list. Same set the sanitiser keeps as SAFE_RASTER_DATA_URI
 // and the mail-ui compose path embeds. SVG excluded on purpose (script carrier).
@@ -139,9 +140,27 @@ export const DocImage = Image.extend({
   // width/align stripped by their no-op renderHTML) so the values actually reach
   // the emitted markup. width → the html `width` attr (allow-listed) + `width`
   // CSS; align → margin/display CSS. All survive sanitizeDocHtml.
+  //
+  // WAVE-58 SECURITY (collab-ingress gate): the realtime CRDT carries only text,
+  // so an image node reaches a peer via the persisted document JSON — reloaded by
+  // resolveContent()/setContent(json), a path that (unlike the _html import
+  // branch) NEVER flows through sanitizeDocHtml. A malicious rw collaborator could
+  // therefore PUT doc JSON with an image node whose src is `javascript:` /
+  // `data:image/svg+xml` / `data:text/html` and it would render into the live
+  // editor DOM unsanitised. We close that hole AT THE NODE: renderHTML refuses to
+  // emit a src that isn't allow-list-safe (same policy as the sanitiser), so no
+  // ingress path — JSON reload, draft/history restore, or a peer op — can produce
+  // a live poisoned <img> src. Fail-closed: an unsafe src is dropped, the node
+  // renders as an (empty) <img> rather than executing/leaking.
   renderHTML({ node, HTMLAttributes }) {
     const { width, align } = node.attrs
-    const { style: baseStyle, ...rest } = HTMLAttributes
+    const { style: baseStyle, src, ...rest } = HTMLAttributes
+    if (src != null && !isSafeImageSrc(src)) {
+      // Drop an unsafe src entirely; keep the (now image-less) node.
+      delete rest.src
+    } else if (src != null) {
+      rest.src = src
+    }
     const parts = []
     if (width) parts.push(`width:${width}`)
     const a = alignStyle(align)

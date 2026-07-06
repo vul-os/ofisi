@@ -140,13 +140,60 @@ export function sanitizeStyleValue(styleValue) {
 // image-less). https?: and relative src are allowed — Docs content is the user's
 // OWN document (unlike hostile inbound mail), so a remote <img> is acceptable;
 // see the privacy note on sanitizeDocHtml() re: the tracking-pixel trade-off.
+//
+// WAVE-58 (hardening): two gaps closed after the wave-57 red-team.
+//   (a) The raster allow-list matched the DECLARED prefix only — `data:image/png,
+//       <svg onload=…>` (a raster MIME LIE carrying markup) slipped through. A
+//       real embedded raster image is ALWAYS base64 (that's what FileReader/
+//       canvas emit); a comma-form `data:image/png,<markup>` is never a genuine
+//       raster and only exists to lie about the MIME. Require `;base64,` so the
+//       allow-list can't be satisfied by a declared-raster prefix in front of
+//       url-encoded script/markup. (Fail-closed: a legit non-base64 raster does
+//       not exist in the wild; if one ever does it degrades to a broken image,
+//       never to an exec.)
+//   (b) The hook gated `src`/`srcset` only. DOMPurify keeps a bare `href` (and
+//       normalises SVG `<image href>` → `<img href>`) WITHOUT scheme-validating
+//       it for <img>, so a script-bearing `data:image/svg+xml`/`data:text/html`
+//       rode in on `href`. `<img href>` is inert in a browser, but it defeats the
+//       "every non-raster data: URI is stripped" invariant and re-serialises to a
+//       live SVG `<image href>` in some converters — so we gate href/xlink:href
+//       with the SAME policy as src (see the attr list in the hook below).
 const DATA_URI = /^\s*data:/i
 const SAFE_RASTER_DATA_URI =
-  /^\s*data:image\/(?:png|jpe?g|gif|webp|bmp|x-icon|vnd\.microsoft\.icon|apng|avif)[;,]/i
+  /^\s*data:image\/(?:png|jpe?g|gif|webp|bmp|x-icon|vnd\.microsoft\.icon|apng|avif);base64,/i
 
 /** True for a data: URI that is NOT an allow-listed raster image (svg/xml/html/…). */
 function isUnsafeDataUri(v) {
   return DATA_URI.test(v) && !SAFE_RASTER_DATA_URI.test(v)
+}
+
+// Content-loading / linkable attributes on an <img> whose value must obey the
+// same data:-URI policy as `src`. `srcset`/`imagesrcset` are separate candidate-
+// list channels we strip wholesale (Docs never emits them). Any of these missing
+// from DOMPurify's per-attribute scheme validation is a bypass — we belt-and-
+// brace them all here.
+const IMG_URI_ATTRS = new Set(['src', 'href', 'xlink:href', 'lowsrc', 'dynsrc'])
+const IMG_STRIP_ATTRS = new Set(['srcset', 'imagesrcset', 'ping'])
+
+/**
+ * Src-policy predicate reused by the DocImage node (see docsImage.js) so the
+ * SAME allow-list gates the collab/JSON-reload ingress path, which never flows
+ * through DOMPurify. Returns true for a src that is safe to render on an <img>:
+ * a relative/http(s) URL or an allow-listed base64 raster data: URI. Any other
+ * data: URI (svg/xml/html/non-base64 raster-lie) and any javascript:/vbscript:/
+ * other exec scheme is rejected fail-closed.
+ */
+const EXEC_SCHEME = /^\s*(?:javascript|vbscript|data\s*:\s*text|data\s*:\s*application|file|blob\s*:\s*javascript)/i
+export function isSafeImageSrc(v) {
+  if (typeof v !== 'string') return false
+  const s = v.trim()
+  if (!s) return false
+  if (DATA_URI.test(s)) return SAFE_RASTER_DATA_URI.test(s)   // only base64 raster data:
+  if (EXEC_SCHEME.test(s)) return false
+  // A scheme we don't explicitly allow? Permit only http(s), protocol-relative,
+  // and same-origin relative refs (no colon-scheme, or an explicit http/https).
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return /^\s*https?:/i.test(s)
+  return true
 }
 
 let _docHookInstalled = false
@@ -170,13 +217,15 @@ function ensureDocStyleHook() {
       }
       return
     }
-    // WAVE-57: reject unsafe data: URIs on any content-loading attribute
-    // (primarily <img src>), and drop srcset outright.
-    if (data.attrName === 'src') {
+    // WAVE-57/58: reject unsafe data: URIs on every content-loading / linkable
+    // attribute (src, and — WAVE-58 — href/xlink:href/lowsrc/dynsrc which
+    // DOMPurify does NOT scheme-validate for <img>), and drop the candidate-list
+    // + ping channels outright.
+    if (IMG_URI_ATTRS.has(data.attrName)) {
       if (isUnsafeDataUri(data.attrValue || '')) data.keepAttr = false
       return
     }
-    if (data.attrName === 'srcset') {
+    if (IMG_STRIP_ATTRS.has(data.attrName)) {
       data.keepAttr = false
     }
   })
