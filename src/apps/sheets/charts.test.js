@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest'
 import {
   makeChart, insertChart, updateChart, deleteChart, getCharts,
   extractChartData, chartValuesSignature, escapeChartText, chartAccessibleSummary,
+  chartsBySheetId, mergeCharts, clampCharts,
 } from './charts.js'
 
 // Build a FortuneSheet-style workbook with the given cell display values.
@@ -158,5 +159,88 @@ describe('delete / update immutability', () => {
     const next = deleteChart(data, 'a')
     expect(getCharts(next).map((c) => c.id)).toEqual(['b'])
     expect(getCharts(data)).toHaveLength(2)      // original untouched
+  })
+})
+
+// ── WAVE-61: chart persistence merge (the data-loss fix core) ────────────────
+// FortuneSheet's onChange re-emits normalised sheet objects that DROP the
+// app-owned `sheet.charts` field. chartsBySheetId snapshots the authoritative
+// charts; mergeCharts re-attaches them to the normalised payload so a local
+// edit never clobbers them.
+describe('WAVE-61 chart persistence merge', () => {
+  // A normalised FortuneSheet payload: a real onChange strips `charts` but keeps
+  // sheet identity (id) + celldata.
+  function normalised(cells = {}, id = 'sheet_1') {
+    const [wbSheet] = wb(cells)
+    return [{ ...wbSheet, id }]  // note: NO `charts` field (as FortuneSheet emits)
+  }
+
+  it('chartsBySheetId indexes the authoritative charts by sheet id', () => {
+    let data = insertChart(wb({ '1_1': 10 }), { id: 'c1', range: 'A1:B2' })
+    data = data.map((s, i) => (i === 0 ? { ...s, id: 'sheet_1' } : s))
+    const map = chartsBySheetId(data)
+    expect(map.get('sheet_1')).toHaveLength(1)
+    expect(map.get('sheet_1')[0].id).toBe('c1')
+  })
+
+  it('mergeCharts re-attaches charts a normalised onChange payload dropped', () => {
+    // Authoritative prior state has a chart on sheet_1.
+    let prev = insertChart(wb({ '1_1': 10 }), { id: 'c1', range: 'A1:B2' })
+    prev = prev.map((s, i) => (i === 0 ? { ...s, id: 'sheet_1' } : s))
+    // FortuneSheet emits a normalised payload with the SAME sheet id but no charts.
+    const payload = normalised({ '1_1': 42 }, 'sheet_1')
+    expect(getCharts(payload)).toHaveLength(0)   // the bug: charts gone
+
+    const merged = mergeCharts(payload, chartsBySheetId(prev))
+    // Charts survive; the fresh cell edit (42) survives too.
+    expect(getCharts(merged)).toHaveLength(1)
+    expect(getCharts(merged)[0].id).toBe('c1')
+    const cell = merged[0].celldata.find((c) => c.r === 1 && c.c === 1)
+    expect(cell.v.v).toBe(42)
+  })
+
+  it('mergeCharts matches by position when the sheet id changed (index #0 fallback)', () => {
+    let prev = insertChart(wb(), { id: 'c1', range: 'A1:B2' })  // no id → positional
+    const payload = normalised({}, undefined) // id undefined
+    const merged = mergeCharts(payload, chartsBySheetId(prev))
+    expect(getCharts(merged)).toHaveLength(1)
+    expect(getCharts(merged)[0].id).toBe('c1')
+  })
+
+  it('mergeCharts is a no-op when there are no authoritative charts', () => {
+    const payload = normalised({ '0_0': 'x' }, 'sheet_1')
+    const merged = mergeCharts(payload, chartsBySheetId(wb({ '0_0': 'x' })))
+    expect(merged).toBe(payload) // empty map → returns the input untouched
+  })
+
+  it('mergeCharts does NOT override charts the payload already carries (authoritative update)', () => {
+    let prev = insertChart(wb(), { id: 'old', range: 'A1:B2' })
+    prev = prev.map((s, i) => (i === 0 ? { ...s, id: 'sheet_1' } : s))
+    // A chart-authoritative payload (e.g. a delete leaving a different set).
+    let payload = insertChart(normalised({}, 'sheet_1'), { id: 'new', range: 'C1:D2' })
+    const merged = mergeCharts(payload, chartsBySheetId(prev))
+    // The payload's own charts win — the previous 'old' chart is NOT re-added.
+    expect(getCharts(merged).map((c) => c.id)).toEqual(['new'])
+  })
+
+  it('clampCharts re-clamps a corrupt local descriptor so render cannot see NaN', () => {
+    // Simulate a corrupt persisted chart (non-finite geometry, bad type).
+    const corrupt = [{ name: 'Sheet1', celldata: [], config: {}, charts: [
+      { id: 'c1', type: 'evil', range: 'A1:B2', title: 't', x: NaN, y: Infinity, w: -1, h: 'x' },
+    ] }]
+    const fixed = clampCharts(corrupt)
+    const c = getCharts(fixed)[0]
+    expect(c.type).toBe('column')
+    expect(Number.isFinite(c.x) && Number.isFinite(c.y)).toBe(true)
+    expect(c.w).toBeGreaterThanOrEqual(160)
+    expect(c.h).toBeGreaterThanOrEqual(120)
+    expect(c.id).toBe('c1')
+  })
+
+  it('clampCharts leaves a well-formed chart intact + is a no-op with no charts', () => {
+    const good = insertChart(wb(), { id: 'c1', type: 'bar', range: 'A1:B2' })
+    expect(getCharts(clampCharts(good))[0]).toEqual(getCharts(good)[0])
+    const none = wb({ '0_0': 'x' })
+    expect(clampCharts(none)).toBe(none)
   })
 })

@@ -29,7 +29,7 @@ import NumberFormatMenu from './NumberFormatMenu.jsx'
 // ingress path can sanitise a peer-supplied chart descriptor fail-closed
 // (WAVE-55: a hostile peer must not be able to inject a non-string title or
 // non-finite geometry that would crash/escape the renderer).
-import { makeChart } from './charts.js'
+import { makeChart, chartsBySheetId, mergeCharts, clampCharts } from './charts.js'
 
 // Side panels — lazily loaded so they don't bloat the initial bundle.
 const PivotPanel              = lazy(() => import('./PivotPanel.jsx'))
@@ -317,7 +317,10 @@ export default function SheetsEditor() {
   const { files, saveFileWithDraft, markDirty } = useFilesStore()
   const [file, setFile] = useState(files.find((f) => f.id === id))
   const [title, setTitle] = useState(file?.name || 'Untitled Sheet')
-  const [data, setData] = useState(() => normalizeSheets(file?.content))
+  // clampCharts re-clamps any persisted chart geometry through makeChart so a
+  // corrupt/legacy local descriptor can never reach render with NaN layout
+  // (WAVE-61 defence-in-depth; the wave-55 peer-ingress clamp is separate).
+  const [data, setData] = useState(() => clampCharts(normalizeSheets(file?.content)))
   const [saveStatus, setSaveStatus] = useState(getSaveState(id))
   const [draft, setDraft] = useState(null)
   const [retryCount, setRetryCount] = useState(0)
@@ -477,7 +480,7 @@ export default function SheetsEditor() {
       api.getFile(id).then((f) => {
         setFile(f)
         setTitle(f.name)
-        setData(normalizeSheets(f.content))
+        setData(clampCharts(normalizeSheets(f.content)))
       }).catch(() => {
         showToast('Could not open this spreadsheet.', 'error')
         navigate('/sheets')
@@ -539,8 +542,27 @@ export default function SheetsEditor() {
     }
   }, [id, saveFileWithDraft])
 
-  const handleChange = (newData) => {
-    setData(newData)
+  const handleChange = (newData, opts = {}) => {
+    // WAVE-61 DATA-LOSS FIX ─────────────────────────────────────────────────
+    // FortuneSheet's <Workbook onChange> re-emits its INTERNAL, normalised
+    // `luckysheetfile` array (see @fortune-sheet/react → onChange(context
+    // .luckysheetfile)). That normalised object DROPS the app-owned `sheet
+    // .charts` overlay field. So a bare `setData(newData)` clobbered every
+    // locally-inserted chart on grid init and on every cell edit — the only
+    // path that re-added a chart was a remote-peer chart_op, which never fires
+    // solo (0 [data-chart-id] cards, 0 charts in the save PUT).
+    //
+    // The charts array is the app's LOCALLY-AUTHORITATIVE source of truth, so
+    // we merge it back onto the normalised payload here (unless this update
+    // already carries authoritative charts, e.g. a chart insert/edit — flagged
+    // via opts.chartsAuthoritative). Functional setData so we always merge
+    // against the CURRENT charts, never a stale closure. This makes charts
+    // survive grid init, cell edits, and round-trips.
+    setData((prev) => {
+      if (!Array.isArray(newData)) return newData
+      if (opts.chartsAuthoritative) return newData
+      return mergeCharts(newData, chartsBySheetId(prev))
+    })
     markDirty(id)
     clearTimeout(saveTimer.current)
     clearTimeout(retryTimer.current)
@@ -569,7 +591,13 @@ export default function SheetsEditor() {
       }
       session.saveLocal()
     }
-    saveTimer.current = setTimeout(() => doSave(newData), AUTOSAVE_DELAY_MS)
+    // Persist the MERGED content (charts included). newData from a plain grid
+    // edit lacks charts; merge them in for the save PUT too so charts reload
+    // with the sheet. A chart-authoritative update already carries them.
+    const toSave = (Array.isArray(newData) && !opts.chartsAuthoritative)
+      ? mergeCharts(newData, chartsBySheetId(dataRef.current))
+      : newData
+    saveTimer.current = setTimeout(() => doSave(toSave), AUTOSAVE_DELAY_MS)
   }
 
   const handleSave = () => {
@@ -587,7 +615,10 @@ export default function SheetsEditor() {
   const handleChartChange = useCallback((nextData) => {
     const prevCharts = Array.isArray(dataRef.current?.[0]?.charts) ? dataRef.current[0].charts : []
     const nextCharts = Array.isArray(nextData?.[0]?.charts) ? nextData[0].charts : []
-    handleChange(nextData)
+    // chartsAuthoritative: nextData already holds the definitive charts array
+    // (an insert/edit/move/delete from the wizard or ChartLayer) — do NOT let
+    // handleChange's merge re-attach the PREVIOUS charts over this one.
+    handleChange(nextData, { chartsAuthoritative: true })
     const session = gridSessionRef.current
     if (session) {
       const prevIds = new Set(prevCharts.map((c) => c.id))
@@ -648,7 +679,7 @@ export default function SheetsEditor() {
       if (res.ok) {
         // Reload file content from server.
         const updated = await api.getFile(id)
-        setData(updated.content || data)
+        setData(clampCharts(normalizeSheets(updated.content)) || data)
         showToast(`Imported “${file.name}”`, 'success')
       } else {
         console.error('XLSX import failed:', await res.text())

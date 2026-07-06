@@ -3,18 +3,17 @@
  * chart-insertion UI. Hermetic harness (vite preview + mocked backend); the
  * @fortune-sheet grid and the ChartWizard dialog run LOCALLY in the page.
  *
- * SCOPE NOTE (important — see the report): the wave-54 *live chart render*
- * (ChartLayer/ChartSvg painting an <svg> over the grid) turns out NOT to be
- * observable in a single-user browser session. `<Workbook onChange={handleChange}>`
- * fires with FortuneSheet-normalised sheet objects that DROP the app's custom
- * `sheet.charts` field, so `setData` clobbers charts on grid init and on the
- * next edit; the only path that re-adds a chart is a *remote peer* chart-op
- * (session 'remoteOp'), which never fires with no fabric peer. A chart seeded in
- * the file content, and a chart inserted through the wizard, both fail to reach
- * ChartLayer (verified: 0 `[data-chart-id]` cards; 0 `charts` in the save PUT).
- * So the SVG-render + injected-glyph assertions cannot be made here without a
- * live second peer. What IS real-browser-testable is the wizard flow below; the
- * SVG escaping itself is covered headless in src/apps/sheets/chartSvg.test.jsx.
+ * SCOPE NOTE (WAVE-61 — the wave-59 gap is now CLOSED): the wave-54 *live chart
+ * render* (ChartLayer/ChartSvg painting an <svg> over the grid) was previously
+ * NOT observable in a single-user session — `<Workbook onChange={handleChange}>`
+ * fired with FortuneSheet-normalised sheet objects that DROPPED the app's custom
+ * `sheet.charts` field, so `setData` clobbered charts on grid init and on the
+ * next edit (verified then: 0 `[data-chart-id]` cards; 0 `charts` in the save
+ * PUT). WAVE-61 makes charts a first-class, locally-authoritative, persisted
+ * part of the sheet model: handleChange now MERGES the app's charts back onto
+ * the normalised payload. So a wizard-inserted chart renders locally and
+ * SURVIVES a subsequent cell edit — asserted live below. The injected-glyph SVG
+ * escaping remains covered headless in src/apps/sheets/chartSvg.test.jsx.
  *
  * How the chart editor is driven here: the toolbar "Insert chart" opens the real
  * ChartWizard; its type picker is a radiogroup and its "Data range" is a plain
@@ -97,6 +96,43 @@ test.describe('Sheets chart wizard (wave-54) — real-browser insert flow', () =
       expect(pageErrors, `no page errors during ${kind} chart insert`).toEqual([])
     })
   }
+
+  // ── WAVE-61: the wave-59 data-loss regression, now a live guard ────────────
+  test('an inserted chart renders AND survives a subsequent cell edit (wave-61)', async ({ officePage: page }) => {
+    await openSheet(page)
+
+    const pageErrors = []
+    page.on('pageerror', (e) => pageErrors.push(e.message))
+
+    // Insert a chart over the seeded A1:B3 data range.
+    await page.getByRole('button', { name: 'Insert chart' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Insert chart' })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('radio', { name: 'Column' }).click()
+    await dialog.locator('#chart-range').fill('A1:B3')
+    await dialog.getByRole('button', { name: 'Insert chart' }).click()
+    await expect(dialog).toBeHidden()
+
+    // The floating chart card renders over the grid (this is the wave-59 gap:
+    // pre-fix there were 0 [data-chart-id] cards).
+    const card = page.locator('[data-chart-id]').first()
+    await expect(card).toBeVisible({ timeout: 10_000 })
+    // It draws a live SVG (the wave-54 render).
+    await expect(card.locator('svg').first()).toBeVisible()
+
+    // Now edit a cell — FortuneSheet fires onChange with a charts-stripped,
+    // normalised payload. Pre-fix this clobbered the chart; the fix merges it
+    // back. The card must STILL be there. Click a cell BELOW the floating chart
+    // (default geometry ~40,40 → 520,340) so the pointer reaches the grid, not
+    // the chart overlay.
+    const overlay = page.locator('.fortune-sheet-overlay, [id^="luckysheet-sheettable"]').first()
+    await overlay.click({ position: { x: 60, y: 380 } })
+    await page.keyboard.type('123')
+    await page.keyboard.press('Enter')
+
+    await expect(page.locator('[data-chart-id]').first()).toBeVisible()
+    expect(pageErrors, 'no page errors during chart insert + edit').toEqual([])
+  })
 
   test('a hostile chart title is captured as plain data and never executes on submit', async ({ officePage: page }) => {
     await openSheet(page)

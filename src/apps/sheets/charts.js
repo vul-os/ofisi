@@ -118,6 +118,66 @@ export function getCharts(data) {
   return Array.isArray(arr) ? arr : []
 }
 
+/**
+ * chartsBySheetId — index the authoritative charts of a workbook by sheet id
+ * (falling back to positional index when a sheet has no id). Charts are an
+ * app-owned overlay field FortuneSheet knows nothing about, so when its
+ * `onChange` re-emits normalised sheet objects it DROPS `sheet.charts`
+ * (WAVE-61 data-loss). We snapshot the charts here, keyed stably, so they can be
+ * re-attached to the normalised sheets in `mergeCharts`.
+ */
+export function chartsBySheetId(data) {
+  const map = new Map()
+  ;(data || []).forEach((sheet, idx) => {
+    if (Array.isArray(sheet?.charts) && sheet.charts.length) {
+      map.set(sheet?.id ?? `#${idx}`, sheet.charts)
+    }
+  })
+  return map
+}
+
+/**
+ * mergeCharts — re-attach an authoritative charts map (see chartsBySheetId)
+ * onto a fresh (normalised) workbook array, matching by sheet id then position.
+ *
+ * This is the WAVE-61 fix core: FortuneSheet's `onChange` payload never carries
+ * `sheet.charts`, so `setData(payload)` would clobber locally-inserted charts on
+ * grid init and on every cell edit. Merging the app's own charts back makes them
+ * a first-class, locally-authoritative, persisted part of the sheet model.
+ *
+ * The charts are the LOCAL USER'S OWN (trusted) — this path deliberately does
+ * NOT re-run them through makeChart on every keystroke (that would be pure
+ * overhead). Well-formedness is enforced where a chart ENTERS the model
+ * (ChartWizard→insertChart/updateChart, and the WAVE-55 chart_op ingress which
+ * still funnels every untrusted peer descriptor through makeChart). To keep a
+ * corrupt local state from crashing render, `clampCharts` below re-clamps if a
+ * chart is ever missing finite geometry.
+ */
+export function mergeCharts(nextData, chartsMap) {
+  if (!chartsMap || chartsMap.size === 0) return nextData
+  return (nextData || []).map((sheet, idx) => {
+    const key = sheet?.id ?? `#${idx}`
+    const preserved = chartsMap.get(key) ?? (idx === 0 ? chartsMap.values().next().value : undefined)
+    // If the normalised sheet already carries charts (rare), keep them; else
+    // re-attach the authoritative ones we snapshotted before normalisation.
+    if (Array.isArray(sheet?.charts) && sheet.charts.length) return sheet
+    if (preserved && preserved.length) return { ...sheet, charts: preserved }
+    return sheet
+  })
+}
+
+/**
+ * clampCharts — defensively re-clamp the charts on the first sheet through
+ * makeChart so a corrupt/legacy local descriptor (e.g. non-finite geometry from
+ * a stale draft) can never reach the SVG renderer with NaN layout. Idempotent on
+ * already-well-formed charts. Used when loading content into the editor.
+ */
+export function clampCharts(data) {
+  const charts = getCharts(data)
+  if (!charts.length) return data
+  return setCharts(data, charts.map((c) => makeChart(c)))
+}
+
 /** Immutably replace the charts array on the first sheet. */
 export function setCharts(data, charts) {
   return (data || []).map((sheet, idx) =>
