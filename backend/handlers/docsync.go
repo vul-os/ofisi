@@ -103,7 +103,15 @@ func (h *DocSyncHandler) Stream(c *gin.Context) {
 		return
 	}
 
-	sub := h.hub.Subscribe([]string{id})
+	sub := h.hub.Subscribe(requesterID(c), []string{id})
+	if sub == nil {
+		// Resource cap hit (too many concurrent streams for this account, or the
+		// process-wide ceiling). Fail closed with 429 rather than open the stream
+		// and let one account exhaust goroutines/memory. The client falls back to
+		// /collab/state polling. Mirrors Talk's wave-38 fix.
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many concurrent collab streams"})
+		return
+	}
 	defer sub.Cancel()
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")

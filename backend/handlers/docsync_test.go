@@ -316,6 +316,41 @@ func TestDocSync_NoCrossDocLeakage(t *testing.T) {
 	}
 }
 
+// --- DoS: per-user connection cap on the SSE stream (wave-38 parity) ------
+
+// TestDocSync_StreamPerUserCap429 proves the Stream handler fails CLOSED with 429
+// once an account is at the hub's per-user connection ceiling (MaxConnsPerUser),
+// rather than opening an unbounded number of goroutine/memory-pinning streams.
+// The hub is pre-filled to the cap for the requesting account (same owner id the
+// handler derives from the session), then a real HTTP GET on /collab/stream must
+// be refused. This is the gap Talk closed in wave-38 and that this hub lacked.
+func TestDocSync_StreamPerUserCap429(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+
+	// Saturate alice's per-user connection budget directly on the hub. The owner
+	// id must match what requesterID(c) derives for the "alice" session.
+	for i := 0; i < realtime.MaxConnsPerUser; i++ {
+		if s := h.hub.Subscribe("alice", []string{"doc1"}); s == nil {
+			t.Fatalf("pre-fill Subscribe refused early at %d", i)
+		}
+	}
+
+	r := docSyncRouter(h, "alice", false)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/documents/doc1/collab/stream", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET stream: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("over-cap stream: expected 429, got %d", resp.StatusCode)
+	}
+}
+
 // --- Dedup: server assigns monotonic seq; op payload carries its id ------
 
 func TestDocSync_MonotonicSeqAndOpIdentityPreserved(t *testing.T) {

@@ -71,6 +71,21 @@ const (
 	// bounding the fan-out work a single client can request.
 	MaxDocsPerConn = 64
 
+	// MaxConnsPerUser caps how many concurrent live stream connections one
+	// authenticated account may hold open. Without it a single account could
+	// open unbounded EventSource connections, each pinning a goroutine, a
+	// buffered frame channel, and hub index entries — a memory/goroutine
+	// exhaustion vector (the wave-38 gap Talk closed). A legitimate client opens
+	// one stream per document tab, so this ceiling is generous for real use while
+	// capping abuse.
+	MaxConnsPerUser = 20
+
+	// MaxTotalSubs is a hard process-wide ceiling on live subscribers, a
+	// last-resort backstop against a flood spread across many accounts. Beyond
+	// it, new subscriptions are refused (the client falls back to /collab/state
+	// polling) rather than exhausting the process.
+	MaxTotalSubs = 50000
+
 	// HeartbeatInterval is how often the hub emits a keep-alive ping to every
 	// live subscriber so idle proxies don't cut the stream and the client can
 	// detect a dead connection.
@@ -80,6 +95,7 @@ const (
 // subscriber is one live connection's view onto the hub.
 type subscriber struct {
 	id      uint64
+	owner   string          // account id that opened this connection (for per-user caps)
 	out     chan []byte     // buffered pre-marshalled frames
 	docs    map[string]bool // doc ids this sub is subscribed to
 	dropped atomic.Bool     // set true when we drop the connection for lag
@@ -91,8 +107,11 @@ type Hub struct {
 	// byDoc[docID] = set of subscribers subscribed to it.
 	byDoc map[string]map[uint64]*subscriber
 	// all subscribers, for heartbeat fan-out.
-	subs   map[uint64]*subscriber
-	nextID uint64
+	subs map[uint64]*subscriber
+	// byOwner[accountID] = count of live connections that account holds, for the
+	// per-user connection cap.
+	byOwner map[string]int
+	nextID  uint64
 
 	stop chan struct{}
 	once sync.Once
@@ -101,9 +120,10 @@ type Hub struct {
 // NewHub builds a Hub and starts its heartbeat loop.
 func NewHub() *Hub {
 	h := &Hub{
-		byDoc: make(map[string]map[uint64]*subscriber),
-		subs:  make(map[uint64]*subscriber),
-		stop:  make(chan struct{}),
+		byDoc:   make(map[string]map[uint64]*subscriber),
+		subs:    make(map[uint64]*subscriber),
+		byOwner: make(map[string]int),
+		stop:    make(chan struct{}),
 	}
 	go h.heartbeatLoop()
 	return h
@@ -123,24 +143,45 @@ type Subscription struct {
 }
 
 // Subscribe registers a new connection for the given (already ACL-checked) doc
-// ids. The caller MUST have verified read access for every id — the hub does
-// not itself enforce authz; it only fans out to whoever it was told to. This
-// mirrors the split elsewhere in the codebase where the handler enforces
-// FileAuthz.require and the store trusts the caller.
-func (h *Hub) Subscribe(docIDs []string) *Subscription {
+// ids, owned by the given account. The caller MUST have verified read access for
+// every id — the hub does not itself enforce authz; it only fans out to whoever
+// it was told to. This mirrors the split elsewhere in the codebase where the
+// handler enforces FileAuthz.require and the store trusts the caller.
+//
+// Subscribe returns nil when a resource bound is exceeded — the per-user
+// connection cap (MaxConnsPerUser) or the process-wide ceiling (MaxTotalSubs).
+// The caller MUST treat a nil result as "refused" and respond fail-closed (429),
+// not open a stream. owner "" is treated as a single shared local identity
+// (self-host mode) and is still subject to the caps. At most MaxDocsPerConn doc
+// ids are honored per connection (excess ids are ignored) so one connection
+// cannot request unbounded fan-out work.
+func (h *Hub) Subscribe(owner string, docIDs []string) *Subscription {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	// Resource caps (fail closed). Refuse rather than let one account, or a
+	// coordinated flood, exhaust goroutines/memory.
+	if len(h.subs) >= MaxTotalSubs {
+		return nil
+	}
+	if h.byOwner[owner] >= MaxConnsPerUser {
+		return nil
+	}
 
 	h.nextID++
 	id := h.nextID
 	sub := &subscriber{
-		id:   id,
-		out:  make(chan []byte, subBuffer),
-		docs: make(map[string]bool, len(docIDs)),
+		id:    id,
+		owner: owner,
+		out:   make(chan []byte, subBuffer),
+		docs:  make(map[string]bool, len(docIDs)),
 	}
 	for _, did := range docIDs {
 		if did == "" {
 			continue
+		}
+		if len(sub.docs) >= MaxDocsPerConn {
+			break
 		}
 		sub.docs[did] = true
 		set := h.byDoc[did]
@@ -151,6 +192,7 @@ func (h *Hub) Subscribe(docIDs []string) *Subscription {
 		set[id] = sub
 	}
 	h.subs[id] = sub
+	h.byOwner[owner]++
 
 	return &Subscription{
 		Frames: sub.out,
@@ -175,6 +217,11 @@ func (h *Hub) unsubscribe(id uint64) {
 		}
 	}
 	delete(h.subs, id)
+	if h.byOwner[sub.owner] <= 1 {
+		delete(h.byOwner, sub.owner)
+	} else {
+		h.byOwner[sub.owner]--
+	}
 	close(sub.out)
 }
 
@@ -243,4 +290,12 @@ func (h *Hub) SubscriberCount(docID string) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.byDoc[docID])
+}
+
+// ConnCountForUser returns how many live connections an account currently holds
+// (test / metrics helper for the per-user connection cap).
+func (h *Hub) ConnCountForUser(owner string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.byOwner[owner]
 }
