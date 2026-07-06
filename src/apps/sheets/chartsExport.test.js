@@ -32,4 +32,24 @@ describe('chart export metadata', () => {
     expect(rows[2][0]).toBe('pie')
     expect(rows[2][2]).toBe('Split')
   })
+
+  // WAVE-55 regression: a chart title/label containing a leading formula trigger
+  // (from cell data or a hostile peer) must be neutralised before it is written
+  // into the exported worksheet, or Excel would evaluate it as a live formula
+  // (CSV/formula injection). escapeChartText prefixes a quote.
+  it('neutralises formula-injection in exported title / axis labels', () => {
+    let data = insertChart(wb(), {
+      id: 'c1', type: 'column', range: 'A1:B3',
+      title: '=HYPERLINK("http://evil","click")',
+      options: { xAxisLabel: '+SUM(1)', yAxisLabel: '@cmd', legend: true, headerRow: true, headerCol: true },
+    })
+    const ws = chartsMetaSheet(data)
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 })
+    // Every free-text field is quoted so it renders as a literal glyph, not a formula.
+    expect(rows[1][2].startsWith("'=")).toBe(true)   // title
+    expect(rows[1][3].startsWith("'+")).toBe(true)   // xAxisLabel
+    expect(rows[1][4].startsWith("'@")).toBe(true)   // yAxisLabel
+    // And the raw formula string is NOT present verbatim as a leading-= cell.
+    expect(rows[1][2].startsWith('=')).toBe(false)
+  })
 })

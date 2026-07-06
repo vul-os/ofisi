@@ -29,6 +29,30 @@ describe('chart model', () => {
     expect(JSON.parse(JSON.stringify(c))).toEqual(c) // serialisable = CRDT-safe
   })
 
+  // WAVE-55: makeChart is the CRDT-ingress sanitiser (SheetsEditor runs every
+  // peer-supplied descriptor through it before merge). Pin the fail-closed
+  // coercion of the fields a hostile peer could weaponise: a non-string title
+  // (→ React-child crash), non-finite geometry (→ NaN layout / render escape),
+  // and non-string axis labels. All must become safe plain data.
+  it('makeChart sanitises a hostile peer descriptor fail-closed (CRDT ingress)', () => {
+    const c = makeChart({
+      id: 'evil', type: '__proto__',
+      title: { toString: () => 'boom' },        // object title → ''
+      options: { xAxisLabel: {}, yAxisLabel: [], legend: 'yes' },
+      x: NaN, y: Infinity, w: -1e9, h: 'nope',
+    })
+    expect(c.type).toBe('column')               // unknown type → default
+    expect(c.title).toBe('')                    // non-string title coerced away
+    expect(c.options.xAxisLabel).toBe('')       // non-string label coerced away
+    expect(c.options.yAxisLabel).toBe('')
+    expect(Number.isFinite(c.x) && Number.isFinite(c.y)).toBe(true)
+    expect(Number.isFinite(c.w) && Number.isFinite(c.h)).toBe(true)
+    expect(c.w).toBeGreaterThanOrEqual(160)     // clamped to sane bounds
+    expect(c.h).toBeGreaterThanOrEqual(120)
+    expect(c.id).toBe('evil')                   // valid string id preserved (LWW key)
+    expect(JSON.parse(JSON.stringify(c))).toEqual(c)  // pure serialisable data
+  })
+
   it('inserts a chart from a selected range onto sheet.charts', () => {
     const data = wb({ '0_0': 'Q', '0_1': 'Sales', '1_0': 'A', '1_1': 10, '2_0': 'B', '2_1': 20 })
     const next = insertChart(data, { type: 'column', range: 'A1:B3', title: 'My chart' })

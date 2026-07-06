@@ -25,6 +25,11 @@ import { Button, IconButton, Tooltip, Topbar, Menu, useToast, useDialogA11y } fr
 import { useSheetKeyboardShortcuts, KeyboardShortcutsHelp, useShortcutsHelp } from './KeyboardShortcuts.jsx'
 import SheetsFindReplace from './SheetsFindReplace.jsx'
 import NumberFormatMenu from './NumberFormatMenu.jsx'
+// makeChart is a tiny pure validator/clamp — imported eagerly so the CRDT
+// ingress path can sanitise a peer-supplied chart descriptor fail-closed
+// (WAVE-55: a hostile peer must not be able to inject a non-string title or
+// non-finite geometry that would crash/escape the renderer).
+import { makeChart } from './charts.js'
 
 // Side panels — lazily loaded so they don't bloat the initial bundle.
 const PivotPanel              = lazy(() => import('./PivotPanel.jsx'))
@@ -404,17 +409,29 @@ export default function SheetsEditor() {
       // (LWW-by-id: last upsert wins, delete removes). Cell ops fall through.
       const detail = ev?.detail
       if (detail && (detail.chart || detail.chartId)) {
+        // WAVE-55 SECURITY: the descriptor arrives from an untrusted peer over
+        // the CRDT fabric. NEVER merge it raw — run it through makeChart so the
+        // type is allow-listed, geometry is finite/clamped, and title/labels are
+        // coerced to plain strings. A hostile peer therefore cannot inject a
+        // non-string title (→ "Objects are not valid as a React child" crash),
+        // non-finite x/y/w/h (→ NaN layout / render escape), or an absurd size
+        // (→ DoS). Fail-closed: a chart with no usable string id is dropped.
+        const safeChart = detail.chart ? makeChart(detail.chart) : null
+        if (detail.chart && (typeof detail.chart.id !== 'string' || !detail.chart.id)) {
+          // No stable id ⇒ cannot LWW-merge deterministically; ignore.
+          return
+        }
         setData((prev) => (prev || []).map((sheet, idx) => {
           if (idx !== 0) return sheet
           const charts = Array.isArray(sheet.charts) ? sheet.charts : []
           if (detail.action === 'delete') {
             return { ...sheet, charts: charts.filter((c) => c.id !== detail.chartId) }
           }
-          if (detail.chart) {
-            const exists = charts.some((c) => c.id === detail.chart.id)
+          if (safeChart) {
+            const exists = charts.some((c) => c.id === safeChart.id)
             const next = exists
-              ? charts.map((c) => (c.id === detail.chart.id ? detail.chart : c))
-              : [...charts, detail.chart]
+              ? charts.map((c) => (c.id === safeChart.id ? safeChart : c))
+              : [...charts, safeChart]
             return { ...sheet, charts: next }
           }
           return sheet

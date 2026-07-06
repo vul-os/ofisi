@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import { saveAs } from 'file-saver'
+import { escapeChartText } from './charts.js'
 
 function fortuneToWorksheet(sheet) {
   const ws = {}
@@ -47,12 +48,18 @@ export function chartsMetaSheet(data) {
   if (!Array.isArray(charts) || charts.length === 0) return null
   const rows = [['type', 'range', 'title', 'xAxisLabel', 'yAxisLabel', 'legend', 'headerRow', 'headerCol']]
   for (const c of charts) {
+    // WAVE-55 SECURITY: title / range / axis labels can originate from cell data
+    // (or a hostile CRDT peer). Run every free-text field through escapeChartText
+    // so a leading =/+/-/@ is neutralised with a quote — otherwise a title like
+    // `=HYPERLINK("http://evil")` or `=cmd|'/c calc'!A1` would be written as a
+    // LIVE FORMULA into the exported worksheet and evaluate when opened in Excel
+    // (CSV/formula injection). type/legend/header* are fixed enums, not free text.
     rows.push([
       String(c.type ?? ''),
-      String(c.range ?? ''),
-      String(c.title ?? ''),
-      String(c.options?.xAxisLabel ?? ''),
-      String(c.options?.yAxisLabel ?? ''),
+      escapeChartText(c.range ?? ''),
+      escapeChartText(c.title ?? ''),
+      escapeChartText(c.options?.xAxisLabel ?? ''),
+      escapeChartText(c.options?.yAxisLabel ?? ''),
       c.options?.legend === false ? 'no' : 'yes',
       c.options?.headerRow === false ? 'no' : 'yes',
       c.options?.headerCol === false ? 'no' : 'yes',

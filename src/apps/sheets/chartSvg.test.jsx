@@ -58,4 +58,34 @@ describe('ChartSvg escaping', () => {
       unmount()
     }
   })
+
+  // WAVE-55 regression: a HOSTILE chart descriptor from a CRDT peer — non-string
+  // title (object), non-finite geometry, unknown/huge type, foreignObject-shaped
+  // string — must render safely once it passes through makeChart (the ingress
+  // sanitiser SheetsEditor now applies). Before the fix a non-string title threw
+  // "Objects are not valid as a React child" (remote-triggered crash / DoS).
+  it('renders a makeChart-sanitised hostile peer descriptor without crashing', () => {
+    const sheet = sheetWith({ '0_0': 'Cat', '0_1': 'V', '1_0': 'a', '1_1': 3 })
+    const hostile = {
+      id: 'evil',
+      type: '__proto__',                       // unknown → falls back to 'column'
+      range: 'A1:B2',
+      title: { toString: () => '<foreignObject><script>window.__pwned=1</script></foreignObject>' },
+      options: { xAxisLabel: {}, yAxisLabel: [], legend: 'yes', headerRow: true, headerCol: true },
+      x: NaN, y: Infinity, w: -1e9, h: 'not-a-number',
+    }
+    const safe = makeChart(hostile)
+    // makeChart coerces/clamps fail-closed.
+    expect(safe.type).toBe('column')
+    expect(typeof safe.title).toBe('string')   // object title coerced to '' (not [object])
+    expect(Number.isFinite(safe.x) && Number.isFinite(safe.y)).toBe(true)
+    expect(Number.isFinite(safe.w) && Number.isFinite(safe.h)).toBe(true)
+
+    const { container } = render(<ChartSvg chart={safe} sheet={sheet} width={360} height={240} />)
+    // No live element was ever created; no foreignObject; no script executed.
+    expect(container.querySelector('svg')).toBeTruthy()
+    expect(container.querySelector('foreignObject')).toBeNull()
+    expect(container.querySelector('script')).toBeNull()
+    expect(window.__pwned).toBeUndefined()
+  })
 })
