@@ -296,6 +296,88 @@
 }
 
 /* ============================================================================
+ * WAVE-45: Comment-anchor highlights — subtle amber underline/tint so the
+ * commented span reads as "annotated" without competing with the text. Uses a
+ * warm marker colour distinct from the sage/persimmon suggestion decorations
+ * and the yellow find highlights.
+ * ========================================================================== */
+.comment-highlight {
+  background-color: color-mix(in srgb, var(--signal-warning) 14%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--signal-warning) 55%, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.comment-highlight:hover {
+  background-color: color-mix(in srgb, var(--signal-warning) 24%, transparent);
+}
+/* Resolved comments, when shown (e.g. during a jump), read fainter. */
+.comment-highlight-resolved {
+  background-color: color-mix(in srgb, var(--ink-faint) 12%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--ink-faint) 40%, transparent);
+}
+/* The active (clicked/focused) comment gets a stronger tint + ring-ish edge. */
+.comment-highlight-active {
+  background-color: color-mix(in srgb, var(--signal-warning) 28%, transparent);
+  border-bottom-color: var(--signal-warning);
+}
+/* Transient flash when jumping from the panel to the anchor. */
+.comment-highlight-flash {
+  animation: comment-flash 1.2s var(--ease-out);
+  border-radius: 2px;
+}
+@keyframes comment-flash {
+  0%   { background-color: color-mix(in srgb, var(--signal-warning) 55%, transparent); }
+  60%  { background-color: color-mix(in srgb, var(--signal-warning) 40%, transparent); }
+  100% { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .comment-highlight-flash { animation: none; outline: 2px solid var(--signal-warning); }
+}
+
+/* ============================================================================
+ * WAVE-45: Footnotes — inline numbered ref + the auto-numbered list at doc end.
+ * The number for both the ref and the list marker is a decoration-supplied
+ * data-fn-num attribute, rendered via ::before so it always reflects body order.
+ * ========================================================================== */
+.tiptap sup.footnote-ref {
+  font-size: 0.7em;
+  line-height: 0;
+  color: var(--accent-press);
+  cursor: default;
+  padding: 0 1px;
+  font-weight: 600;
+}
+.tiptap sup.footnote-ref::before { content: attr(data-fn-num); }
+/* Cold-load fallback (export/print, before the numbering plugin runs). */
+.tiptap sup.footnote-ref:not([data-fn-num])::before { content: "*"; }
+
+.tiptap ol.footnotes-list {
+  list-style: none;
+  padding-left: 0;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  counter-reset: none;
+  font-size: 0.9em;
+  color: var(--ink-muted);
+}
+.tiptap li.footnote-item {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+}
+.tiptap li.footnote-item::before {
+  content: attr(data-fn-num) ".";
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--accent-press);
+  min-width: 1.25rem;
+}
+.tiptap li.footnote-item:not([data-fn-num])::before { content: "•"; }
+.tiptap li.footnote-item > * { margin: 0; }
+
+/* ============================================================================
  * Legacy toolbar classes (kept for any code still referencing them).
  * ========================================================================== */
 .toolbar-btn {

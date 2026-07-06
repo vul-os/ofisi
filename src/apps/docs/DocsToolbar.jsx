@@ -330,9 +330,14 @@ function OverflowMenu({ editor, title, onInsertToc }) {
       </MenuItem>
       <MenuItem
         onClick={() => {
-          // Simple footnote: insert a superscript + a paragraph at end
-          const footnoteNum = '[?]'
-          editor.chain().focus().insertContent(`<sup>${footnoteNum}</sup>`).run()
+          // WAVE-45: real footnote — inserts a numbered inline ref and a
+          // matching entry in the auto-numbered footnotes section at doc end.
+          if (editor.commands.insertFootnote) {
+            editor.chain().focus().insertFootnote().run()
+          } else {
+            // Fallback for editors without the extension (should not happen).
+            editor.chain().focus().insertContent('<sup>[?]</sup>').run()
+          }
         }}
       >
         <Type size={13} /> Footnote

@@ -57,6 +57,21 @@ import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { DocsCursorLayer } from '../../components/RemoteCursors.jsx'
 import { Button, IconButton, Tooltip, Topbar, LoadingState } from '../../components/ui'
 import { Skeleton } from '../../components/ui/LoadingState'
+import { getCommentStore } from '../../lib/crdt/comments'
+import {
+  createCommentDecorationsExtension,
+  COMMENT_PLUGIN_KEY,
+  COMMENT_META,
+  readMappedRanges,
+  decorationCommentId,
+  commentIdAtSelection,
+} from './commentDecorations.js'
+import {
+  FootnoteRef,
+  FootnoteItem,
+  FootnotesList,
+  FootnoteNumberingExtension,
+} from './footnotes.js'
 
 // Imported files may carry _html; use that as editor content
 function resolveContent(content) {
@@ -224,6 +239,12 @@ export default function DocsEditor() {
   const [retryCount, setRetryCount] = useState(0)
   const [showHistory, setShowHistory] = useState(false)
   const [showComments, setShowComments] = useState(false)
+  // WAVE-45: comment-anchor highlighting + click-to-jump.
+  const [comments, setComments] = useState([])          // the live comment list (for decorations)
+  const [activeCommentId, setActiveCommentId] = useState(null) // clicked/focused comment
+  // onActivate is called from inside the ProseMirror plugin (created once); use
+  // a ref so the plugin always sees the latest handler.
+  const activateCommentRef = useRef(null)
   const [showActivity, setShowActivity] = useState(false)
   const [showOutline, setShowOutline] = useState(false)
   const scrollRef = useRef(null)  // canvas scroll container, for outline tracking
@@ -325,6 +346,15 @@ export default function DocsEditor() {
       SuggestionDecorationsExtension,
       // Find/Replace all-match decorations (yellow highlights)
       FindHighlightExtension,
+      // WAVE-45: comment-anchor highlighting + click-to-jump.
+      createCommentDecorationsExtension({
+        onActivate: (cid) => activateCommentRef.current?.(cid),
+      }),
+      // WAVE-45: real footnotes — inline ref + auto-numbered list at doc end.
+      FootnoteRef,
+      FootnoteItem,
+      FootnotesList,
+      FootnoteNumberingExtension,
     ],
     content: resolveContent(file?.content),
     onUpdate: ({ editor: ed }) => {
@@ -584,6 +614,107 @@ export default function DocsEditor() {
     }
   }, [suggestions, editor])
 
+  // ── WAVE-45: Comment-anchor highlighting + click-to-jump ──────────────────
+  // Hydrate the comment list (used only to drive highlights; the CommentsPanel
+  // maintains its own copy of the same CRDT store, so both stay in sync).
+  const refreshCommentHighlights = useCallback(() => {
+    if (!id) return
+    try {
+      const store = getCommentStore(id)
+      setComments(store.list())
+    } catch { /* store may not be ready */ }
+  }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    api.listComments(id)
+      .then((items) => {
+        const store = getCommentStore(id)
+        store.loadFromServer(items || [])
+        setComments(store.list())
+      })
+      .catch(() => {}) // backend may be offline — highlights simply stay empty
+  }, [id])
+
+  // Refresh highlights while the panel is open (it mutates the same store) so
+  // adding/resolving a comment updates the body highlight without a reload.
+  useEffect(() => {
+    if (!showComments) return
+    const t = setInterval(refreshCommentHighlights, 800)
+    return () => clearInterval(t)
+  }, [showComments, refreshCommentHighlights])
+
+  // Push the current comment list + active id into the decoration plugin.
+  useEffect(() => {
+    if (!editor) return
+    try {
+      const tr = editor.state.tr
+      tr.setMeta(COMMENT_META, { comments, activeId: activeCommentId })
+      editor.view.dispatch(tr)
+    } catch { /* editor not ready */ }
+  }, [comments, activeCommentId, editor])
+
+  // Best-effort: after edits move highlights, persist the new [from,to] back
+  // into the store so anchors survive reloads (and mark collapsed ones
+  // orphaned). Debounced via the same save cadence.
+  const remapTimer = useRef(null)
+  useEffect(() => {
+    if (!editor) return
+    const onUpdate = () => {
+      clearTimeout(remapTimer.current)
+      remapTimer.current = setTimeout(() => {
+        try {
+          const pluginState = COMMENT_PLUGIN_KEY.getState(editor.state)
+          if (!pluginState) return
+          const store = getCommentStore(id)
+          const mapped = readMappedRanges(pluginState.decorations, store.list())
+          if (mapped.size > 0) store.remapAnchors(mapped)
+        } catch { /* non-fatal */ }
+      }, 500)
+    }
+    editor.on('update', onUpdate)
+    return () => {
+      editor.off('update', onUpdate)
+      clearTimeout(remapTimer.current)
+    }
+  }, [editor, id])
+
+  // Scroll to + flash a comment's anchor in the body (panel → doc jump).
+  const jumpToComment = useCallback((commentId) => {
+    if (!editor) return
+    setActiveCommentId(commentId)
+    try {
+      const pluginState = COMMENT_PLUGIN_KEY.getState(editor.state)
+      const decos = pluginState?.decorations
+      const match = decos?.find()?.find(
+        (d) => decorationCommentId(d) === commentId,
+      )
+      if (!match) return // orphaned / not in body — panel still highlights it
+      // Move the selection to the anchor so screen readers + caret follow.
+      editor.chain().setTextSelection({ from: match.from, to: match.to }).run()
+      // Scroll the decorated span into view.
+      const el = editor.view.dom.querySelector(`[data-comment-id="${commentId}"]`)
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      // Flash it.
+      const trFlash = editor.state.tr
+      trFlash.setMeta(COMMENT_META, { flash: commentId })
+      editor.view.dispatch(trFlash)
+      setTimeout(() => {
+        try {
+          const trClear = editor.state.tr
+          trClear.setMeta(COMMENT_META, { clearFlash: commentId })
+          editor.view.dispatch(trClear)
+        } catch { /* editor gone */ }
+      }, 1200)
+    } catch { /* non-fatal */ }
+  }, [editor])
+
+  // Doc → panel jump: clicking a highlight opens the panel + focuses the comment.
+  activateCommentRef.current = (commentId) => {
+    setActiveCommentId(commentId)
+    setShowComments(true)
+  }
+
   // ── OFFICE-25: Live cursors ───────────────────────────────────────────────
   // Derive a stable local identity from sessionStorage (mirrors CRDT peerId approach).
   const localCursorIdentity = useRef(null)
@@ -646,6 +777,20 @@ export default function DocsEditor() {
         // Handled by TipTap shortcut, but ensure link popover is triggered
         // if editor has text selected — nothing to override here since TipTap's
         // Link extension binds Cmd+K by default.
+        return
+      }
+      // WAVE-45: Cmd/Ctrl+Alt+M — keyboard affordance for comment highlights.
+      // If the caret sits inside a commented span, focus that comment in the
+      // panel (keyboard equivalent of clicking the highlight). Otherwise open
+      // the panel so the user can add a comment on the current selection.
+      if ((e.key === 'm' || e.key === 'M') && e.altKey) {
+        e.preventDefault()
+        const ed = editorRef.current
+        if (ed) {
+          const cid = commentIdAtSelection(ed)
+          if (cid) { activateCommentRef.current?.(cid); return }
+        }
+        setShowComments(true)
         return
       }
     }
@@ -1025,6 +1170,9 @@ export default function DocsEditor() {
         {showComments && (
           <CommentsPanel
             fileId={id}
+            activeCommentId={activeCommentId}
+            onJump={jumpToComment}
+            onChange={refreshCommentHighlights}
             anchorCtx={editor?.state?.selection
               ? {
                   type: 'text_range',

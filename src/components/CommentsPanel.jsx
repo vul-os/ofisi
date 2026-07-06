@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { X, MessageSquare, CheckCircle, RotateCcw, Trash2, Send, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, MessageSquare, CheckCircle, RotateCcw, Trash2, Send, ChevronDown, ChevronUp, Crosshair } from 'lucide-react'
 import { api } from '../lib/api'
 import { getCommentStore } from '../lib/crdt/comments'
 import { IconButton, Tabs, LoadingState } from './ui'
@@ -132,8 +132,18 @@ function ReplyItem({ reply, fileId, commentId, authorId, onDeleted }) {
   )
 }
 
-function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
+function CommentItem({ item, fileId, authorId, onUpdated, onDeleted, onChange, onJump, isActive }) {
   const [expanded, setExpanded] = useState(true)
+  const rootRef = useRef(null)
+
+  // When this comment becomes active (a highlight was clicked in the body),
+  // scroll it into view within the panel and expand it.
+  useEffect(() => {
+    if (isActive && rootRef.current) {
+      setExpanded(true)
+      rootRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [isActive])
   const [replyDraft, setReplyDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -165,6 +175,7 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
       const store = getCommentStore(fileId)
       store.resolve(item.id)
       onUpdated({ ...item, ...updated })
+      onChange?.()
     } finally {
       setBusy(false)
     }
@@ -177,6 +188,7 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
       const store = getCommentStore(fileId)
       store.reopen(item.id)
       onUpdated({ ...item, ...updated })
+      onChange?.()
     } finally {
       setBusy(false)
     }
@@ -188,6 +200,7 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
     try {
       await api.deleteComment(fileId, item.id)
       onDeleted(item.id)
+      onChange?.()
     } finally {
       setBusy(false)
     }
@@ -202,6 +215,7 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
       const store = getCommentStore(fileId)
       store.editComment(item.id, body)
       onUpdated({ ...item, ...updated })
+      onChange?.()
       setEditing(false)
     } finally {
       setBusy(false)
@@ -211,8 +225,17 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
   const isResolved = item.state === 'resolved'
   const isOwn = item.author_id === authorId
 
+  const canJump = onJump && item.anchor?.type === 'text_range' && !item.anchor?.orphaned
+
   return (
-    <div className={`rounded-md border p-3 space-y-2 transition-colors animate-rise-in ${isResolved ? 'bg-bg-elev2 border-line opacity-70' : 'bg-paper border-line'}`}>
+    <div
+      ref={rootRef}
+      className={[
+        'rounded-md border p-3 space-y-2 transition-colors animate-rise-in',
+        isResolved ? 'bg-bg-elev2 border-line opacity-70' : 'bg-paper border-line',
+        isActive ? 'ring-2 ring-accent border-accent' : '',
+      ].join(' ')}
+    >
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
@@ -221,12 +244,29 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
             {isResolved && (
               <span className="text-2xs bg-success-bg text-success px-1.5 py-0.5 rounded-pill font-medium">Resolved</span>
             )}
+            {item.anchor?.orphaned && (
+              <span className="text-2xs bg-warning-bg text-warning px-1.5 py-0.5 rounded-pill font-medium" title="The commented text was edited or removed; this comment may have moved.">
+                May have moved
+              </span>
+            )}
             <span className="text-2xs text-ink-faint">{formatTs(item.created_at)}</span>
           </div>
           {item.anchor && (
-            <p className="text-2xs text-accent mt-0.5 truncate font-serif italic" title={anchorLabel(item.anchor)}>
-              “{anchorLabel(item.anchor)}”
-            </p>
+            canJump ? (
+              <button
+                onClick={() => onJump(item.id)}
+                title={`Jump to “${anchorLabel(item.anchor)}”`}
+                aria-label={`Jump to commented text: ${anchorLabel(item.anchor)}`}
+                className="group flex items-center gap-1 text-2xs text-accent mt-0.5 max-w-full hover:underline rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
+              >
+                <Crosshair size={10} className="flex-shrink-0 opacity-70 group-hover:opacity-100" aria-hidden />
+                <span className="truncate font-serif italic">“{anchorLabel(item.anchor)}”</span>
+              </button>
+            ) : (
+              <p className="text-2xs text-accent mt-0.5 truncate font-serif italic" title={anchorLabel(item.anchor)}>
+                “{anchorLabel(item.anchor)}”
+              </p>
+            )
           )}
         </div>
         <button
@@ -355,7 +395,7 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted }) {
 // CommentsPanel (main export)
 // ---------------------------------------------------------------------------
 
-export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onClose }) {
+export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onClose, onJump, onChange, activeCommentId }) {
   const [comments, setComments] = useState([])
   const [newBody, setNewBody] = useState('')
   const [loading, setLoading] = useState(true)
@@ -393,6 +433,7 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
       store.addComment(anchor, authorId, body)
       setComments(store.list())
       setNewBody('')
+      onChange?.()
     } catch (err) {
       console.error('createComment failed', err)
     } finally {
@@ -497,6 +538,9 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
             authorId={authorId}
             onUpdated={handleUpdated}
             onDeleted={handleDeleted}
+            onChange={onChange}
+            onJump={onJump}
+            isActive={item.id === activeCommentId}
           />
         ))}
       </div>
