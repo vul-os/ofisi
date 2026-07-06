@@ -31,6 +31,7 @@ const PivotPanel              = lazy(() => import('./PivotPanel.jsx'))
 const FilterPanel             = lazy(() => import('./FilterPanel.jsx'))
 const ConditionalFormatPanel  = lazy(() => import('./ConditionalFormatPanel.jsx'))
 const ChartWizard             = lazy(() => import('./ChartWizard.jsx'))
+const ChartLayer              = lazy(() => import('./ChartLayer.jsx'))
 const NamedRangesPanel        = lazy(() => import('./NamedRangesPanel.jsx'))
 const DataValidationPanel     = lazy(() => import('./DataValidationPanel.jsx'))
 
@@ -324,6 +325,8 @@ export default function SheetsEditor() {
   const [showCondFormat,    setShowCondFormat]    = useState(false)
   const [showNamedRanges,   setShowNamedRanges]   = useState(false)
   const [showChartWizard,   setShowChartWizard]   = useState(false)
+  const [editingChartId,    setEditingChartId]    = useState(null)   // WAVE-54: chart being edited (null = insert)
+  const [selectedChartId,   setSelectedChartId]   = useState(null)   // WAVE-54: floating chart selection
   const [showFindReplace,   setShowFindReplace]   = useState(false)
   const [showDataValidation, setShowDataValidation] = useState(false)
 
@@ -396,7 +399,29 @@ export default function SheetsEditor() {
     gridSessionRef.current = session
     session.requestSnapshot()
 
-    const onRemote = () => {
+    const onRemote = (ev) => {
+      // WAVE-54: a chart op carries a chart payload; merge it into sheet.charts
+      // (LWW-by-id: last upsert wins, delete removes). Cell ops fall through.
+      const detail = ev?.detail
+      if (detail && (detail.chart || detail.chartId)) {
+        setData((prev) => (prev || []).map((sheet, idx) => {
+          if (idx !== 0) return sheet
+          const charts = Array.isArray(sheet.charts) ? sheet.charts : []
+          if (detail.action === 'delete') {
+            return { ...sheet, charts: charts.filter((c) => c.id !== detail.chartId) }
+          }
+          if (detail.chart) {
+            const exists = charts.some((c) => c.id === detail.chart.id)
+            const next = exists
+              ? charts.map((c) => (c.id === detail.chart.id ? detail.chart : c))
+              : [...charts, detail.chart]
+            return { ...sheet, charts: next }
+          }
+          return sheet
+        }))
+        markDirty(id)
+        return
+      }
       const crdtCells = session.cells()
       if (crdtCells.length === 0) return
       setData((prev) => {
@@ -536,6 +561,32 @@ export default function SheetsEditor() {
     setRetryCount(0)
     doSave(dataRef.current)
   }
+
+  // ── Charts (WAVE-54) ──────────────────────────────────────────────────────
+  // A chart edit already produced the new workbook data (charts.js op). We save
+  // it via the normal path AND broadcast a chart_op so live collaborators merge
+  // the same descriptor without waiting for a full re-save round-trip. We diff
+  // the charts array to know which chart to upsert/remove on the fabric.
+  const handleChartChange = useCallback((nextData) => {
+    const prevCharts = Array.isArray(dataRef.current?.[0]?.charts) ? dataRef.current[0].charts : []
+    const nextCharts = Array.isArray(nextData?.[0]?.charts) ? nextData[0].charts : []
+    handleChange(nextData)
+    const session = gridSessionRef.current
+    if (session) {
+      const prevIds = new Set(prevCharts.map((c) => c.id))
+      const nextIds = new Set(nextCharts.map((c) => c.id))
+      for (const c of nextCharts) {
+        const before = prevCharts.find((p) => p.id === c.id)
+        if (!before || JSON.stringify(before) !== JSON.stringify(c)) session.upsertChart(c)
+      }
+      for (const id of prevIds) if (!nextIds.has(id)) session.removeChart(id)
+    }
+  }, [handleChange])
+
+  const handleEditChart = useCallback((chartId) => {
+    setEditingChartId(chartId)
+    setShowChartWizard(true)
+  }, [])
 
   const handleTitleChange = (newTitle) => {
     setTitle(newTitle)
@@ -743,7 +794,7 @@ export default function SheetsEditor() {
                 </IconButton>
               </Tooltip>
               <Tooltip label="Insert chart">
-                <IconButton size="sm" onClick={() => setShowChartWizard(true)}>
+                <IconButton size="sm" onClick={() => { setEditingChartId(null); setShowChartWizard(true) }}>
                   <BarChart2 size={14} />
                 </IconButton>
               </Tooltip>
@@ -788,7 +839,7 @@ export default function SheetsEditor() {
                 <Menu.Item active={showNamedRanges} onClick={togglePanel(setShowNamedRanges)}>
                   <Tag size={14} /> Named ranges
                 </Menu.Item>
-                <Menu.Item onClick={() => setShowChartWizard(true)}>
+                <Menu.Item onClick={() => { setEditingChartId(null); setShowChartWizard(true) }}>
                   <BarChart2 size={14} /> Insert chart
                 </Menu.Item>
                 <Menu.Item onClick={openHelp}>
@@ -896,6 +947,16 @@ export default function SheetsEditor() {
             }}
           />
           <SheetsCursorLayer remoteCursors={remoteCursors} getCellRect={getCellRect} />
+          {/* WAVE-54: floating live charts over the grid */}
+          <Suspense fallback={null}>
+            <ChartLayer
+              data={data}
+              onChange={handleChartChange}
+              selectedId={selectedChartId}
+              onSelect={setSelectedChartId}
+              onEdit={handleEditChart}
+            />
+          </Suspense>
           {showCellComment && (
             <CellCommentPanel
               data={data}
@@ -971,8 +1032,10 @@ export default function SheetsEditor() {
         {showChartWizard && (
           <ChartWizard
             data={data}
-            onClose={() => setShowChartWizard(false)}
-            onChange={(next) => { handleChange(next); setShowChartWizard(false) }}
+            chart={editingChartId ? (data?.[0]?.charts || []).find((c) => c.id === editingChartId) : null}
+            selectionRect={selectionRect}
+            onClose={() => { setShowChartWizard(false); setEditingChartId(null) }}
+            onChange={(next) => { handleChartChange(next); setShowChartWizard(false); setEditingChartId(null) }}
           />
         )}
       </Suspense>

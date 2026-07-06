@@ -261,29 +261,32 @@ describe('Named range validation', () => {
   })
 })
 
-// ─── 6. Chart wizard descriptor builder ──────────────────────────────────────
+// ─── 6. Chart model (WAVE-54 — plain-data descriptor, not FortuneSheet) ───────
 
-describe('Chart wizard descriptor', () => {
-  function buildChartDescriptor({ type, range, title, legendPos }) {
-    return {
-      chart_id:     'chart_test',
-      chartOptions: { chart_type: type, title: { value: title, show: !!title },
-                      legend: { position: legendPos }, rangeConfig: range },
-    }
-  }
+import { makeChart, insertChart, getCharts } from '../apps/sheets/charts.js'
+import { selectionToRange } from '../apps/sheets/ChartWizard.jsx'
 
+describe('Chart model', () => {
   it('builds a chart descriptor with the correct type', () => {
-    const desc = buildChartDescriptor({ type: 'line', range: 'A1:B10', title: 'My Chart', legendPos: 'bottom' })
-    expect(desc.chartOptions.chart_type).toBe('line')
+    const c = makeChart({ type: 'line', range: 'A1:B10', title: 'My Chart' })
+    expect(c.type).toBe('line')
+    expect(c.range).toBe('A1:B10')
+    expect(c.title).toBe('My Chart')
   })
 
-  it('sets title visibility when title is provided', () => {
-    const desc = buildChartDescriptor({ type: 'bar', range: '', title: 'Sales', legendPos: 'top' })
-    expect(desc.chartOptions.title.show).toBe(true)
+  it('falls back to column for an unknown type', () => {
+    expect(makeChart({ type: 'nope' }).type).toBe('column')
   })
 
-  it('hides title when no title is provided', () => {
-    const desc = buildChartDescriptor({ type: 'pie', range: '', title: '', legendPos: 'none' })
-    expect(desc.chartOptions.title.show).toBe(false)
+  it('inserts onto sheet.charts (plain, serialisable data)', () => {
+    const data = insertChart([{ name: 'S', celldata: [] }], { type: 'pie', range: 'A1:A5' })
+    const charts = getCharts(data)
+    expect(charts).toHaveLength(1)
+    expect(JSON.parse(JSON.stringify(charts[0]))).toEqual(charts[0])
+  })
+
+  it('selectionToRange converts a 0-indexed selection rect to A1 text', () => {
+    expect(selectionToRange({ r0: 0, r1: 2, c0: 0, c1: 1 })).toBe('A1:B3')
+    expect(selectionToRange(null)).toBe('')
   })
 })

@@ -30,11 +30,45 @@ function fortuneToWorksheet(sheet) {
   return ws
 }
 
+/**
+ * chartsMetaSheet — WAVE-54 export fidelity.
+ *
+ * HONEST LIMITATION: our charts render as inline SVG driven by a plain-data
+ * descriptor; we deliberately do NOT pull in a heavy library (ExcelJS /
+ * xlsx-populate) to emit native OOXML <c:chart> parts. So charts do NOT round-
+ * trip as *live Excel charts*. What we DO preserve is the chart DEFINITION: each
+ * chart's {type, range, title, options} is written to a hidden-ish "Vulos Charts"
+ * metadata worksheet, so the intent survives the export and the app can restore
+ * live charts on re-import. CSV cannot carry charts at all (it is values-only) —
+ * they are simply omitted there.
+ */
+export function chartsMetaSheet(data) {
+  const charts = data?.[0]?.charts
+  if (!Array.isArray(charts) || charts.length === 0) return null
+  const rows = [['type', 'range', 'title', 'xAxisLabel', 'yAxisLabel', 'legend', 'headerRow', 'headerCol']]
+  for (const c of charts) {
+    rows.push([
+      String(c.type ?? ''),
+      String(c.range ?? ''),
+      String(c.title ?? ''),
+      String(c.options?.xAxisLabel ?? ''),
+      String(c.options?.yAxisLabel ?? ''),
+      c.options?.legend === false ? 'no' : 'yes',
+      c.options?.headerRow === false ? 'no' : 'yes',
+      c.options?.headerCol === false ? 'no' : 'yes',
+    ])
+  }
+  return XLSX.utils.aoa_to_sheet(rows)
+}
+
 export function exportSheetsToXlsx(data, filename) {
   const wb = XLSX.utils.book_new()
   for (const sheet of data) {
     XLSX.utils.book_append_sheet(wb, fortuneToWorksheet(sheet), sheet.name || 'Sheet')
   }
+  // Append the chart-definition metadata sheet when charts exist (see above).
+  const meta = chartsMetaSheet(data)
+  if (meta) XLSX.utils.book_append_sheet(wb, meta, 'Vulos Charts')
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
   saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${filename}.xlsx`)
 }

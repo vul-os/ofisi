@@ -198,6 +198,31 @@ export class GridSession extends EventTarget {
   }
 
   // -------------------------------------------------------------------------
+  // Chart objects (WAVE-54) — plain-data descriptors, LWW-per-chart-id.
+  //
+  // Charts are structured overlay objects, not cells, so they ride a separate
+  // op stream. A chart op carries a Lamport OpID for the same total order the
+  // grid uses; a peer applies the higher OpID. The editor holds the authoritative
+  // charts array in the file content; this stream just makes live-collab edits
+  // (insert/move/edit/delete) propagate immediately over the fabric. Consumers
+  // listen for the same 'remoteOp' event and merge `msg.chart`/`msg.chartId`.
+  // -------------------------------------------------------------------------
+
+  /** Broadcast an upsert of a chart descriptor (plain data). */
+  upsertChart(chart) {
+    if (!chart || typeof chart.id !== 'string') return
+    const id = this._clock.tick()
+    this._broadcast({ type: 'chart_op', session: this._session, opId: id, action: 'upsert', chart })
+  }
+
+  /** Broadcast a chart deletion by id. */
+  removeChart(chartId) {
+    if (typeof chartId !== 'string') return
+    const id = this._clock.tick()
+    this._broadcast({ type: 'chart_op', session: this._session, opId: id, action: 'delete', chartId })
+  }
+
+  // -------------------------------------------------------------------------
   // Query
   // -------------------------------------------------------------------------
 
@@ -282,6 +307,16 @@ export class GridSession extends EventTarget {
         this._persistOp(op)
         this.dispatchEvent(new CustomEvent('remoteOp', { detail: { op } }))
       }
+    } else if (msg.type === 'chart_op') {
+      // Advance clock past the remote op id, then surface a chart event. The
+      // editor owns the charts array; we just relay the intent to merge.
+      if (msg.opId) {
+        const parts = String(msg.opId).split('_')
+        this._clock.observe(parseInt(parts[1], 10) || 0)
+      }
+      this.dispatchEvent(new CustomEvent('remoteOp', {
+        detail: { chart: msg.chart, chartId: msg.chartId, action: msg.action, opId: msg.opId },
+      }))
     } else if (msg.type === 'grid_snapshot_request') {
       // Send our current snapshot to the requester.
       this._broadcast({
