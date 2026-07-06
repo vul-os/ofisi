@@ -26,6 +26,7 @@ import {
 import { api } from '../../lib/api'
 import { Menu, ToolbarButton, UrlPopover } from '../../components/ui'
 import { exportToDocx, exportToPdf, exportToMarkdown, exportToHtml } from './docsExport'
+import { fileToDataUri, isEmbeddableImage } from './docsImage'
 import TableOfContents from './components/TableOfContents'
 
 // ---------------------------------------------------------------------------
@@ -471,20 +472,37 @@ export default function DocsToolbar({ editor, title }) {
   const [showToc, setShowToc] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
   const [imgUrlOpen, setImgUrlOpen] = useState(false)
+  const [imgErr, setImgErr] = useState('')
 
-  const handleImageUpload = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  // WAVE-57: insert a picked/dropped file as a bounded raster base64 data: URI.
+  // Only raster mime types within MAX_INLINE_IMAGE_BYTES embed (SVG is refused —
+  // it can carry script, and the sanitiser rejects <img src=data:image/svg+xml>
+  // anyway; refusing here keeps the two layers consistent). We prefer a server
+  // upload when available (smaller doc payload) but never fall back to an
+  // unchecked readAsDataURL — the embed must go through fileToDataUri's gate.
+  const insertImageFile = async (file) => {
+    setImgErr('')
+    if (!isEmbeddableImage(file)) {
+      try { await fileToDataUri(file) } catch (err) { setImgErr(err.message) }
+      return
+    }
     try {
       const { url } = await api.uploadImage(file)
       editor.chain().focus().setImage({ src: url }).run()
     } catch {
-      const reader = new FileReader()
-      reader.onload = (ev) => {
-        if (ev.target?.result) editor.chain().focus().setImage({ src: ev.target.result }).run()
+      try {
+        const dataUri = await fileToDataUri(file)
+        editor.chain().focus().setImage({ src: dataUri }).run()
+      } catch (err) {
+        setImgErr(err.message)
       }
-      reader.readAsDataURL(file)
     }
+  }
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    await insertImageFile(file)
     e.target.value = ''
   }
 
@@ -731,7 +749,16 @@ export default function DocsToolbar({ editor, title }) {
               label="Image URL"
               placeholder="https://…/image.png"
               submitLabel="Insert"
-              onSubmit={(url) => { editor.chain().focus().setImage({ src: url }).run(); setImgUrlOpen(false) }}
+              onSubmit={(url) => {
+                // Accept only http(s) and raster data: URIs at entry (the
+                // sanitiser is the authoritative boundary, but rejecting here
+                // gives immediate feedback and never inserts a dead/unsafe src).
+                const safe = /^https?:\/\//i.test(url) ||
+                  /^data:image\/(?:png|jpe?g|gif|webp);/i.test(url)
+                if (!safe) { setImgErr('Only https: URLs or raster data: images are allowed'); return }
+                editor.chain().focus().setImage({ src: url }).run()
+                setImgUrlOpen(false)
+              }}
               onClose={() => setImgUrlOpen(false)}
             />
           )}
@@ -795,12 +822,23 @@ export default function DocsToolbar({ editor, title }) {
         <input
           ref={imgInput}
           type="file"
-          accept="image/*"
+          accept="image/png,image/jpeg,image/gif,image/webp"
           className="hidden"
           aria-hidden="true"
           onChange={handleImageUpload}
         />
       </div>
+
+      {/* Image context row — appears when an image node is selected. */}
+      {editor.isActive('image') && <ImageSubMenu editor={editor} />}
+
+      {/* Inline error (image too large / wrong type). */}
+      {imgErr && (
+        <div className="px-3 py-1.5 text-xs text-danger bg-danger/10 border-t border-line" role="alert">
+          {imgErr}
+          <button className="ml-2 underline" onClick={() => setImgErr('')}>dismiss</button>
+        </div>
+      )}
 
       {/* ToC popover — anchored below toolbar */}
       {showToc && (
@@ -808,6 +846,66 @@ export default function DocsToolbar({ editor, title }) {
           <TableOfContents editor={editor} onClose={() => setShowToc(false)} />
         </div>
       )}
+    </div>
+  )
+}
+
+// ── WAVE-57: image context sub-toolbar (resize / align / alt) ────────────────
+// Shown while an image node is selected. Every control routes through
+// updateAttributes('image', …) so the change flows through the same TipTap/CRDT
+// chain as any other edit (the image stays one atomic node — see docsImage.js).
+function ImageSubMenu({ editor }) {
+  const attrs = editor.getAttributes('image')
+  const setAttr = (patch) => editor.chain().focus().updateAttributes('image', patch).run()
+  const align = attrs.align || 'left'
+  return (
+    <div className="flex items-center gap-1 px-3 py-1.5 border-t border-line bg-surface-subtle text-xs">
+      <span className="text-ink-faint mr-1">Image</span>
+      {/* Width presets + custom */}
+      {['25%', '50%', '75%', '100%'].map((w) => (
+        <button
+          key={w}
+          className={`h-6 px-2 rounded border border-line hover:border-line-strong ${attrs.width === w ? 'bg-accent/10 text-accent border-accent' : ''}`}
+          onClick={() => setAttr({ width: w })}
+          title={`Set width ${w}`}
+        >{w}</button>
+      ))}
+      <button
+        className="h-6 px-2 rounded border border-line hover:border-line-strong"
+        onClick={() => setAttr({ width: null })}
+        title="Reset width (original size)"
+      >Auto</button>
+
+      <Sep />
+
+      {/* Alignment */}
+      <button
+        className={`h-6 w-6 grid place-items-center rounded border border-line ${align === 'left' ? 'bg-accent/10 text-accent border-accent' : ''}`}
+        onClick={() => setAttr({ align: 'left' })} title="Align left"
+      ><AlignLeft size={13} /></button>
+      <button
+        className={`h-6 w-6 grid place-items-center rounded border border-line ${align === 'center' ? 'bg-accent/10 text-accent border-accent' : ''}`}
+        onClick={() => setAttr({ align: 'center' })} title="Align center"
+      ><AlignCenter size={13} /></button>
+      <button
+        className={`h-6 w-6 grid place-items-center rounded border border-line ${align === 'right' ? 'bg-accent/10 text-accent border-accent' : ''}`}
+        onClick={() => setAttr({ align: 'right' })} title="Align right"
+      ><AlignRight size={13} /></button>
+
+      <Sep />
+
+      {/* Alt text (a11y) */}
+      <label className="flex items-center gap-1">
+        <span className="text-ink-faint">Alt</span>
+        <input
+          type="text"
+          className="h-6 px-2 w-40 rounded border border-line bg-paper text-xs"
+          placeholder="Describe image"
+          value={attrs.alt || ''}
+          onChange={(e) => setAttr({ alt: e.target.value })}
+          aria-label="Image alt text"
+        />
+      </label>
     </div>
   )
 }

@@ -177,13 +177,27 @@ async function nodeToDocx(node, fnOrder) {
       return [new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } })]
     }
     case 'image': {
-      const src = node.attrs?.src
-      if (src?.startsWith('data:image')) {
+      // WAVE-57: embed only RASTER data: images into the .docx. We reject
+      // svg/other data: types (matching the sanitiser) and skip remote https:
+      // URLs — docx embeds raw bytes and we can't synchronously fetch a remote
+      // image at export time, so a remote <img> is dropped from the DOCX (it
+      // still round-trips through HTML export; see DOCX-fidelity note in memory).
+      const src = node.attrs?.src || ''
+      const m = /^data:(image\/(?:png|jpe?g|gif|webp));base64,(.*)$/is.exec(src)
+      if (m) {
         try {
-          const [header, base64] = src.split(',')
-          const ext = (header.match(/data:(image\/\w+);/)?.[1] || 'image/png').split('/')[1]
-          const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
-          return [new Paragraph({ children: [new ImageRun({ data: buffer, transformation: { width: 400, height: 300 }, type: ext })] })]
+          const ext = m[1].split('/')[1].replace('jpg', 'jpeg')
+          const buffer = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0))
+          // docx needs explicit px dimensions. Derive a width from the node's
+          // width attr when it's an absolute px value; otherwise fall back to a
+          // sensible default. Aspect isn't known without decoding, so height is
+          // proportional to a 4:3 assumption for the default and preserved-ish
+          // for px widths — documented as best-effort fidelity.
+          const pxWidth = /^(\d+)px$/i.exec(node.attrs?.width || '')
+          const width = pxWidth ? Math.min(parseInt(pxWidth[1], 10), 600) : 400
+          const height = Math.round(width * 0.75)
+          const docxType = ext === 'jpeg' ? 'jpg' : ext
+          return [new Paragraph({ children: [new ImageRun({ data: buffer, transformation: { width, height }, type: docxType })] })]
         } catch { return [] }
       }
       return []

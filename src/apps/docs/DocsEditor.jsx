@@ -4,7 +4,7 @@ import { useEditor, EditorContent, Extension, Mark } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
-import Image from '@tiptap/extension-image'
+import { DocImage, fileToDataUri, isEmbeddableImage } from './docsImage.js'
 import Link from '@tiptap/extension-link'
 import TextStyle from '@tiptap/extension-text-style'
 import Color from '@tiptap/extension-color'
@@ -116,11 +116,18 @@ const AUTOSAVE_DELAY_MS = 2000
 // every edit, and late-joiner/full-state reconcile keeps peers convergent), so
 // a remote keystroke can never corrupt table structure. Non-table docs keep the
 // caret-stable minimal patch exactly as before.
+//
+// WAVE-57: an `image` is an atomic (leaf) block node that contributes no text
+// to the plain-text projection the patch diffs against, so a text-offset
+// delete/insert straddling it could clobber the node the same way it can split
+// a table cell. Treat images as structured too — when a doc contains an image we
+// fall back to full-state reconcile (authoritative JSON still saved every edit),
+// keeping the image node stable across the wave-37 CRDT.
 function docHasStructuredNodes(editor) {
   let found = false
   try {
     editor.state.doc.descendants((node) => {
-      if (node.type.name === 'table') { found = true; return false }
+      if (node.type.name === 'table' || node.type.name === 'image') { found = true; return false }
       return true
     })
   } catch { /* non-fatal */ }
@@ -360,7 +367,8 @@ export default function DocsEditor() {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
-      Image.configure({ allowBase64: true }),
+      // WAVE-57: hardened inline-image node (raster-only embeds, width/align/alt).
+      DocImage,
       Link.configure({ openOnClick: false }),
       TextStyle,
       Color,
@@ -397,6 +405,41 @@ export default function DocsEditor() {
       FootnoteNumberingExtension,
     ],
     content: resolveContent(file?.content),
+    // WAVE-57: paste / drop a raster image → embed it as a bounded base64 data:
+    // URI. Goes through isEmbeddableImage + fileToDataUri (raster-only, size-
+    // capped, SVG refused) — the exact same gate as the toolbar picker, so no
+    // insert path can smuggle an SVG/oversized/non-image data: URI into the doc.
+    editorProps: {
+      handlePaste: (view, event) => {
+        const files = Array.from(event.clipboardData?.files || [])
+        const img = files.find(isEmbeddableImage)
+        if (!img) return false
+        event.preventDefault()
+        fileToDataUri(img)
+          .then((src) => view.dispatch(view.state.tr.replaceSelectionWith(
+            view.state.schema.nodes.image.create({ src }),
+          )))
+          .catch(() => {})
+        return true
+      },
+      handleDrop: (view, event) => {
+        const files = Array.from(event.dataTransfer?.files || [])
+        const img = files.find(isEmbeddableImage)
+        if (!img) return false
+        event.preventDefault()
+        const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+        fileToDataUri(img)
+          .then((src) => {
+            const node = view.state.schema.nodes.image.create({ src })
+            const tr = pos != null
+              ? view.state.tr.insert(pos, node)
+              : view.state.tr.replaceSelectionWith(node)
+            view.dispatch(tr)
+          })
+          .catch(() => {})
+        return true
+      },
+    },
     onUpdate: ({ editor: ed }) => {
       // ── OFFICE-27: suggestion mode intercept ──────────────────────────────
       // When suggestion mode is active: undo the edit, compute the diff, and

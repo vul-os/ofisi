@@ -80,6 +80,11 @@ const SAFE_CSS_PROPS = new Set([
   'border-color', 'border-width', 'border-style', 'border-radius',
   'border-collapse', 'border-spacing',
   'width', 'min-width', 'max-width', 'height', 'min-height', 'max-height',
+  // WAVE-57: `display` + `float` are needed to align an inline <img> (a centred
+  // image is `display:block;margin:auto`; left/right can use `float`). Both take
+  // only keyword values — no url()/fetch/exec construct is expressible — so they
+  // are value-safe. (A `position:*` overlay stays OUT of the allow-list.)
+  'display', 'float', 'clear', 'object-fit',
   'page-break-before', 'page-break-after', 'page-break-inside',
   'break-before', 'break-after', 'break-inside',
   'list-style-type', 'list-style-position',
@@ -117,6 +122,33 @@ export function sanitizeStyleValue(styleValue) {
   return kept.join(';')
 }
 
+// ── WAVE-57: <img> src policy (inline images in Docs) ────────────────────────
+// Docs gained image insert (data:-URI base64 raster + https? URLs). DOMPurify's
+// html profile already keeps <img src alt width height> and strips on* handlers
+// + javascript:/vbscript: src — but it does NOT reject two live hazards:
+//   1. Script-bearing / XML data: URIs on <img src> — data:image/svg+xml (an
+//      SVG can carry <script>/on* and, though inert in a browser's *secure*
+//      image mode, that reliance is fragile — reject it), data:image/svg,
+//      data:text/html, application/xml, text/xml. We keep ONLY raster data:
+//      images (png/jpeg/gif/webp/apng/avif/bmp/x-icon) and drop every other
+//      data: URI. Mirrors vulos-mail-ui wave-42/sanitize's SAFE_RASTER_DATA_URI.
+//   2. `srcset` — a second content-loading channel that bypasses the `src`
+//      check entirely and can smuggle a remote/exfil fetch or an unsafe data:
+//      candidate. Docs never emits srcset (TipTap Image renders src only), so we
+//      strip it unconditionally rather than parse+re-validate each candidate.
+// Non-raster/non-image data: on src ⇒ drop the whole src (element survives, just
+// image-less). https?: and relative src are allowed — Docs content is the user's
+// OWN document (unlike hostile inbound mail), so a remote <img> is acceptable;
+// see the privacy note on sanitizeDocHtml() re: the tracking-pixel trade-off.
+const DATA_URI = /^\s*data:/i
+const SAFE_RASTER_DATA_URI =
+  /^\s*data:image\/(?:png|jpe?g|gif|webp|bmp|x-icon|vnd\.microsoft\.icon|apng|avif)[;,]/i
+
+/** True for a data: URI that is NOT an allow-listed raster image (svg/xml/html/…). */
+function isUnsafeDataUri(v) {
+  return DATA_URI.test(v) && !SAFE_RASTER_DATA_URI.test(v)
+}
+
 let _docHookInstalled = false
 function ensureDocStyleHook() {
   if (_docHookInstalled) return
@@ -129,11 +161,22 @@ function ensureDocStyleHook() {
   // discards the element's benign styling).
   DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
     if (!_docStyleGuardActive) return
-    if (data.attrName !== 'style') return
-    const safe = sanitizeStyleValue(data.attrValue || '')
-    if (safe) {
-      data.attrValue = safe
-    } else {
+    if (data.attrName === 'style') {
+      const safe = sanitizeStyleValue(data.attrValue || '')
+      if (safe) {
+        data.attrValue = safe
+      } else {
+        data.keepAttr = false
+      }
+      return
+    }
+    // WAVE-57: reject unsafe data: URIs on any content-loading attribute
+    // (primarily <img src>), and drop srcset outright.
+    if (data.attrName === 'src') {
+      if (isUnsafeDataUri(data.attrValue || '')) data.keepAttr = false
+      return
+    }
+    if (data.attrName === 'srcset') {
       data.keepAttr = false
     }
   })
@@ -152,6 +195,18 @@ export const DOC_HTML_CONFIG = RICH_HTML_CONFIG
  * rowspan/scope; strips scripts, on* handlers, and reduces every inline `style`
  * to an allow-list of benign properties (defeats <td style="…javascript:…">
  * style-injection, `position:fixed` overlays, and fetch-function exfiltration).
+ *
+ * WAVE-57 (inline images): keeps <img src alt width height> but the src is
+ * gated — javascript:/vbscript: (DOMPurify default) and every non-raster data:
+ * URI (data:image/svg+xml, data:text/html, …) are stripped, and `srcset` is
+ * dropped outright. Only raster data: images and http(s)/relative URLs survive.
+ *
+ * Privacy note: a remote https: <img> in a Doc will fetch on render (a tracking
+ * pixel could see the reader's IP/UA). This is DELIBERATELY allowed — unlike an
+ * inbound email, a Doc is the user's OWN content (they inserted the URL), so
+ * there is no untrusted-sender beacon threat; blocking it would break the
+ * legitimate "insert image from URL" feature. The XSS surface (script exec) is
+ * closed regardless; only the network-fetch privacy trade-off is accepted here.
  */
 export function sanitizeDocHtml(html) {
   ensureDocStyleHook()
