@@ -8,7 +8,13 @@ function fortuneToWorksheet(sheet) {
   for (const { r, c, v } of cells) {
     if (!v) continue
     const raw = v.v !== undefined ? v.v : v.m
-    ws[XLSX.utils.encode_cell({ r, c })] = { v: raw, t: typeof raw === 'number' ? 'n' : 's' }
+    const cell = { v: raw, t: typeof raw === 'number' ? 'n' : 's' }
+    // Carry the cell's number-format code (Fortune Sheet ct.fa) into the xlsx
+    // `z` field so currency/percent/date presets round-trip to Excel. 'General'
+    // is the default and needs no explicit format.
+    const fa = v.ct?.fa
+    if (fa && fa !== 'General') cell.z = fa
+    ws[XLSX.utils.encode_cell({ r, c })] = cell
     if (r > maxR) maxR = r
     if (c > maxC) maxC = c
   }

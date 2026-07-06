@@ -5,7 +5,7 @@ import '@fortune-sheet/react/dist/index.css'
 import {
   ArrowLeft, Save, Loader2, Download, Upload, AlertCircle, MessageSquare,
   Check, Circle, ChevronDown, BarChart2, Filter, Table2, Tag, Sliders, Keyboard, Search,
-  Lock, MessageSquarePlus, X, MoreHorizontal,
+  Lock, MessageSquarePlus, X, MoreHorizontal, ListChecks,
 } from 'lucide-react'
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
@@ -24,6 +24,7 @@ import { getCollabIdentity, identityColor, deriveStatusPill, countLivePeers } fr
 import { Button, IconButton, Tooltip, Topbar, Menu, useToast, useDialogA11y } from '../../components/ui'
 import { useSheetKeyboardShortcuts, KeyboardShortcutsHelp, useShortcutsHelp } from './KeyboardShortcuts.jsx'
 import SheetsFindReplace from './SheetsFindReplace.jsx'
+import NumberFormatMenu from './NumberFormatMenu.jsx'
 
 // Side panels — lazily loaded so they don't bloat the initial bundle.
 const PivotPanel              = lazy(() => import('./PivotPanel.jsx'))
@@ -31,6 +32,7 @@ const FilterPanel             = lazy(() => import('./FilterPanel.jsx'))
 const ConditionalFormatPanel  = lazy(() => import('./ConditionalFormatPanel.jsx'))
 const ChartWizard             = lazy(() => import('./ChartWizard.jsx'))
 const NamedRangesPanel        = lazy(() => import('./NamedRangesPanel.jsx'))
+const DataValidationPanel     = lazy(() => import('./DataValidationPanel.jsx'))
 
 const RETRY_DELAY_MS  = 4000
 const AUTOSAVE_DELAY_MS = 3000
@@ -323,8 +325,10 @@ export default function SheetsEditor() {
   const [showNamedRanges,   setShowNamedRanges]   = useState(false)
   const [showChartWizard,   setShowChartWizard]   = useState(false)
   const [showFindReplace,   setShowFindReplace]   = useState(false)
+  const [showDataValidation, setShowDataValidation] = useState(false)
 
   const [activeCell,      setActiveCell]      = useState({ row: 0, col: 0 })
+  const [selectionRect,   setSelectionRect]   = useState(null) // {r0,r1,c0,c1} 0-indexed inclusive
   const [showCellComment, setShowCellComment] = useState(false)
 
   const saveTimer   = useRef(null)
@@ -618,6 +622,7 @@ export default function SheetsEditor() {
   const closeAllPanels = () => {
     setShowPivot(false); setShowFilter(false)
     setShowCondFormat(false); setShowNamedRanges(false)
+    setShowDataValidation(false)
   }
   const togglePanel = (setter) => () => {
     setter((v) => {
@@ -700,7 +705,18 @@ export default function SheetsEditor() {
 
             {/* Secondary tools — inline on ≥lg, collapsed into "More" below lg */}
             <div className="hidden lg:flex items-center gap-1">
+              <NumberFormatMenu
+                selection={selectionRect}
+                activeCell={activeCell}
+                data={data}
+                onChange={(next) => handleChange(next)}
+              />
               <FreezePanel workbookRef={workbookRef} />
+              <Tooltip label="Data validation (Data → Data validation)">
+                <IconButton size="sm" active={showDataValidation} onClick={togglePanel(setShowDataValidation)}>
+                  <ListChecks size={14} />
+                </IconButton>
+              </Tooltip>
               <Tooltip label="Cell comment">
                 <IconButton size="sm" active={showCellComment} onClick={() => setShowCellComment((v) => !v)}>
                   <MessageSquarePlus size={14} />
@@ -754,6 +770,9 @@ export default function SheetsEditor() {
                   </IconButton>
                 }
               >
+                <Menu.Item active={showDataValidation} onClick={togglePanel(setShowDataValidation)}>
+                  <ListChecks size={14} /> Data validation
+                </Menu.Item>
                 <Menu.Item active={showCellComment} onClick={() => setShowCellComment((v) => !v)}>
                   <MessageSquarePlus size={14} /> Cell comment
                 </Menu.Item>
@@ -864,6 +883,15 @@ export default function SheetsEditor() {
                 if (selection?.row_focus !== undefined) {
                   setActiveCell({ row: selection.row_focus, col: selection.column_focus })
                 }
+                // Record the full selection rectangle so number-format /
+                // validation can act on multi-cell ranges. Fortune Sheet gives
+                // `row`/`column` as [start, end] pairs on the selection.
+                if (Array.isArray(selection?.row) && Array.isArray(selection?.column)) {
+                  setSelectionRect({
+                    r0: selection.row[0], r1: selection.row[1],
+                    c0: selection.column[0], c1: selection.column[1],
+                  })
+                }
               },
             }}
           />
@@ -915,6 +943,14 @@ export default function SheetsEditor() {
             <NamedRangesPanel
               data={data}
               onClose={() => setShowNamedRanges(false)}
+              onChange={(next) => { handleChange(next) }}
+            />
+          )}
+          {showDataValidation && (
+            <DataValidationPanel
+              data={data}
+              activeCell={activeCell}
+              onClose={() => setShowDataValidation(false)}
               onChange={(next) => { handleChange(next) }}
             />
           )}
