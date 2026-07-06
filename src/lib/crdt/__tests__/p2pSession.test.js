@@ -61,8 +61,39 @@ async function mkSession({ inviteLink, peerId, bus, fileId }) {
   return P2PCollabSession.fromInvite({ inviteLink, peerId, fileId, fabric })
 }
 
-// Give the async seal/open microtasks time to settle after a synchronous edit.
-const settle = () => new Promise((r) => setTimeout(r, 20))
+// Every applyLocal() fans out into async, fire-and-forget seal→send→open→apply
+// pipelines (real WebCrypto AEAD per op frame). A fixed setTimeout is a race: it
+// passes in isolation but under full-suite PARALLEL load the CPU is saturated
+// and the crypto microtasks miss a short fixed window → the peer reads stale
+// text and the assertion flakes. So instead of guessing a delay we poll until
+// the ACTUAL settle condition holds (or a generous ceiling elapses), which is
+// deterministic regardless of scheduling pressure.
+
+// Yield once so already-queued microtasks (and any pending 0ms timers) flush.
+const tick = () => new Promise((r) => setTimeout(r, 0))
+
+/**
+ * Wait until `predicate()` returns truthy, polling across macrotasks. Resolves
+ * as soon as the condition is met (fast in isolation, robust under load). If it
+ * never holds within `timeoutMs` we stop waiting and let the assertion that
+ * follows report the real value — we never hang the suite.
+ */
+async function waitFor(predicate, { timeoutMs = 2000, stepMs = 5 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    let ok = false
+    try { ok = !!predicate() } catch { ok = false }
+    if (ok) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((r) => setTimeout(r, stepMs))
+  }
+}
+
+// Back-compat "settle" for the few negative/no-op assertions that have no
+// positive convergence condition to await: flush pending work deterministically
+// by draining the timer/microtask queue a few times rather than sleeping once.
+const settle = async () => { for (let i = 0; i < 4; i++) await tick() }
 
 describe('two P2P sessions converge over a fake transport', () => {
   it('rw + rw peers converge on the same text', async () => {
@@ -75,9 +106,9 @@ describe('two P2P sessions converge over a fake transport', () => {
     await b.join()
 
     a.applyLocal('', 'Hello')
-    await settle()
+    await waitFor(() => b.getText() === 'Hello')
     b.applyLocal('Hello', 'Hello World')
-    await settle()
+    await waitFor(() => a.getText() === 'Hello World' && a.getText() === b.getText())
 
     expect(a.getText()).toBe(b.getText())
     expect(a.getText()).toBe('Hello World')
@@ -91,8 +122,10 @@ describe('two P2P sessions converge over a fake transport', () => {
     const a = await mkSession({ inviteLink: link, peerId: 'A', bus, fileId: 'd' })
     await a.join()
     a.applyLocal('', 'topsecret')
-    await settle()
+    // 'topsecret' → 9 op frames once every seal resolves and hits the wire.
+    await waitFor(() => a.fabric.sent.length >= 9)
     // The transport recorded the raw frames — none may contain the plaintext.
+    expect(a.fabric.sent.length).toBeGreaterThan(0)
     for (const frame of a.fabric.sent) {
       expect(frame).not.toContain('topsecret')
     }
@@ -112,7 +145,7 @@ describe('read-only enforcement (ro peer ops rejected by rw peer)', () => {
 
     // Editor writes → viewer (ro) can READ it.
     editor.applyLocal('', 'Shared')
-    await settle()
+    await waitFor(() => viewer.getText() === 'Shared')
     expect(viewer.getText()).toBe('Shared')
 
     // Viewer is ro: applyLocal is a no-op and emits nothing.
@@ -136,7 +169,7 @@ describe('read-only enforcement (ro peer ops rejected by rw peer)', () => {
     await viewer.join()
 
     editor.applyLocal('', 'Base')
-    await settle()
+    await waitFor(() => editor.getText() === 'Base' && viewer.getText() === 'Base')
 
     // Simulate a patched/malicious ro client that bypasses the applyLocal guard
     // and directly broadcasts an op frame. It has encKey (so the frame decrypts)
@@ -145,6 +178,7 @@ describe('read-only enforcement (ro peer ops rejected by rw peer)', () => {
       { type: 'op', op: viewer._crdt.localInsert(0, 'X') },
       { authoritative: false },
     )
+    // Drain so the (rejected) frame is fully delivered + processed by the editor.
     await settle()
 
     // The rw editor rejected the non-authoritative op → document unchanged.
@@ -170,7 +204,7 @@ describe('P2PCollabSession.create() factory (sharer side)', () => {
     await viewer.join()
 
     owner.applyLocal('', 'Owner text')
-    await settle()
+    await waitFor(() => viewer.getText() === 'Owner text')
     expect(viewer.getText()).toBe('Owner text')
     expect(viewer.readOnly).toBe(true)
     expect(viewer.applyLocal('Owner text', 'nope')).toEqual([])
@@ -190,7 +224,7 @@ describe('offline-buffer-then-sync', () => {
     await b.join()
 
     a.applyLocal('', 'Online edit')
-    await settle()
+    await waitFor(() => b.getText() === 'Online edit')
     expect(b.getText()).toBe('Online edit')
 
     // B goes offline; A keeps editing locally (edits buffer in A's CRDT).
@@ -198,6 +232,7 @@ describe('offline-buffer-then-sync', () => {
     bus.unregister(b.fabric)
 
     a.applyLocal('Online edit', 'Online edit + offline addition')
+    // Let A finish applying/broadcasting; B is offline so it drops the frames.
     await settle()
     // B, offline, has NOT yet seen the addition.
     expect(b.getText()).toBe('Online edit')
@@ -206,8 +241,7 @@ describe('offline-buffer-then-sync', () => {
     b.fabric.online = true
     bus.register(b.fabric)
     await b.resync()             // snap-req → A serves snapshot → B converges
-    await settle()
-    await settle()
+    await waitFor(() => b.getText() === 'Online edit + offline addition')
     expect(b.getText()).toBe('Online edit + offline addition')
 
     a.leave(); b.leave()
