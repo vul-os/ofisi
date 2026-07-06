@@ -56,6 +56,54 @@ test.describe('Sheets E2E', () => {
   })
 })
 
+test.describe('Sheets WAVE41 — data validation + number formats (E2E)', () => {
+  test('applies a number-format preset to the selection from the toolbar menu', async ({ officePage: page }) => {
+    await seedFiles(page)
+    await page.goto('/sheets/sh1')
+    await expect(page.getByLabel('Sheet title')).toHaveValue('Budget', { timeout: 20_000 })
+
+    // The Fortune-Sheet grid renders in the real browser (the whole point of E2E).
+    const overlay = page.locator('.fortune-sheet-overlay, [id^="luckysheet-sheettable"]').first()
+    await expect(overlay).toBeVisible({ timeout: 20_000 })
+
+    // Type a number into a cell, then open the number-format menu and apply a
+    // currency preset to the selection. The menu is a radio list (real component).
+    await overlay.click({ position: { x: 60, y: 40 } })
+    await page.keyboard.type('1200.5')
+    await page.keyboard.press('Enter')
+
+    await page.getByRole('button', { name: 'Number format' }).first().click()
+    const menu = page.getByRole('menu', { name: 'Number format presets' })
+    await expect(menu).toBeVisible()
+    // The current-format radio state is exposed for a11y (starts on Automatic).
+    await expect(menu.getByRole('menuitemradio', { name: 'Automatic' })).toHaveAttribute('aria-checked', 'true')
+    await menu.getByRole('menuitemradio', { name: /Currency \(\$\)/ }).click()
+
+    // Menu closes after applying; editor still live (no throw on the canvas path).
+    await expect(menu).toBeHidden()
+    await expect(page.getByRole('status').first()).toBeVisible()
+  })
+
+  test('the data-validation toolbar action is wired against the live grid', async ({ officePage: page }) => {
+    await seedFiles(page)
+    await page.goto('/sheets/sh1')
+    await expect(page.getByLabel('Sheet title')).toHaveValue('Budget', { timeout: 20_000 })
+    await expect(page.locator('.fortune-sheet-overlay, [id^="luckysheet-sheettable"]').first())
+      .toBeVisible({ timeout: 20_000 })
+
+    // Smoke: the Data-validation toolbar control is present and clickable against
+    // the real canvas without throwing. The full add-rule form flow (which does
+    // not depend on the canvas) is covered at the RTL/MSW integration level in
+    // src/__tests__/msw/sheetsWave41.integration.test.jsx — see the report note on
+    // the SheetsEditor togglePanel/closeAllPanels self-close race that makes the
+    // panel unreliable to open E2E once the grid initializes.
+    const dv = page.getByRole('button', { name: /^Data validation/ }).first()
+    await expect(dv).toBeVisible()
+    await dv.click()
+    await expect(page.getByRole('status').first()).toBeVisible()
+  })
+})
+
 test.describe('Slides E2E', () => {
   test('opens a deck, adds a slide, toggles presenter view, shows presence', async ({ officePage: page }) => {
     await seedFiles(page)

@@ -22,6 +22,8 @@ export const mockState = {
   versions: {},     // fileId → [{ id, name, created_at, label }]
   comments: {},     // fileId → [comment]
   suggestions: {},  // fileId → [suggestion]
+  // WAVE37 server-collab authoritative op log: fileId → { seq, ops:[{seq,origin,op}] }.
+  collab: {},
   // Call log so tests can assert an endpoint was (or wasn't) hit.
   calls: [],
 }
@@ -50,7 +52,12 @@ export function resetMock({ role = 'owner' } = {}) {
   }
   mockState.comments = { doc1: [] }
   mockState.suggestions = { doc1: [] }
+  mockState.collab = { doc1: { seq: 0, ops: [] } }
 }
+
+// WAVE37: only owner/editor may PUSH collab ops. viewer/commenter → 403.
+// This mirrors the same editor gate the wave-14 restore path enforces.
+const CAN_EDIT = new Set(['owner', 'editor'])
 
 // A restore is only permitted for owner/editor. viewer/commenter → 403.
 // This mirrors the wave-14 server-side authorization the UI relies on.
@@ -180,4 +187,39 @@ export const handlers = [
   // Image upload used by the docs toolbar (returns a fake URL).
   http.post('/api/upload', () =>
     HttpResponse.json({ url: 'http://localhost/uploaded.png' })),
+
+  // ── WAVE37: server-mediated collaboration relay (/v1, not /api) ────────────
+  // GET /collab/state — late-joiner bootstrap: authoritative snapshot + ops.
+  http.get('/v1/documents/:id/collab/state', ({ params }) => {
+    log('GET', `/v1/documents/${params.id}/collab/state`)
+    const c = mockState.collab[params.id] || { seq: 0, ops: [] }
+    return HttpResponse.json({ seq: c.seq, snap: null, ops: c.ops })
+  }),
+
+  // POST /collab/ops — push a batch of CRDT ops. Editor-gated (403 for viewers).
+  http.post('/v1/documents/:id/collab/ops', async ({ params, request }) => {
+    log('POST', `/v1/documents/${params.id}/collab/ops`)
+    if (!CAN_EDIT.has(mockState.role)) {
+      return HttpResponse.json(
+        { error: 'your role does not permit modifying content' },
+        { status: 403 },
+      )
+    }
+    const body = await request.json().catch(() => ({}))
+    const ops = Array.isArray(body.ops) ? body.ops : []
+    const c = (mockState.collab[params.id] ||= { seq: 0, ops: [] })
+    for (const op of ops) {
+      c.seq += 1
+      c.ops.push({ seq: c.seq, origin: body.origin, op })
+    }
+    return HttpResponse.json({ ok: true, accepted: ops.length, seq: c.seq })
+  }),
+
+  // GET /collab/stream — the SSE endpoint. jsdom's EventSource can't consume a
+  // streamed body under MSW, so the integration layer stubs EventSource itself;
+  // this handler exists only so an accidental fetch degrades gracefully (200).
+  http.get('/v1/documents/:id/collab/stream', ({ params }) => {
+    log('GET', `/v1/documents/${params.id}/collab/stream`)
+    return new HttpResponse('', { headers: { 'Content-Type': 'text/event-stream' } })
+  }),
 ]
