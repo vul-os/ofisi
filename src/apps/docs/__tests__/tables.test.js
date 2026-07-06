@@ -195,6 +195,123 @@ describe('sanitizer keeps tables but strips injection (wave-14 allow-list)', () 
   })
 })
 
+// ── 2b. WAVE-53 hardening: style allow-list (fail-closed) ────────────────────
+// The wave-52 guard was a blocklist regex; it let `position:*` overlays and the
+// fetch-capable CSS image()/src() functions through. Replaced with a property
+// allow-list. These tests lock the fail-closed contract in place.
+describe('WAVE-53: style allow-list blocks non-url exfil + clickjacking, keeps legit styles', () => {
+  const styleOf = (out) => (out.match(/style="([^"]*)"/) || [, ''])[1]
+
+  it('drops position:fixed / position:absolute (clickjacking overlay)', () => {
+    for (const pos of ['fixed', 'absolute']) {
+      const out = sanitizeDocHtml(`<div style="position:${pos};inset:0;z-index:99999">x</div>`)
+      expect(out).not.toMatch(/position\s*:/i)
+      expect(out).not.toMatch(/z-index/i)
+      expect(out).toContain('x') // content preserved
+    }
+  })
+
+  it('drops CSS fetch functions that carry NO literal url() token', () => {
+    // image() and src() are valid CSS <image> functions that fetch a resource
+    // yet contain no `url(` — a url()-only blocklist misses them.
+    for (const val of [
+      'background:image(https://evil/x)',
+      'background:src(https://evil/x)',
+      'background:-webkit-image-set("https://evil/x" 1x)',
+      'background:image-set(url(https://evil/x) 1x)',
+      'background:cross-fade(url(https://evil/x))',
+    ]) {
+      const out = sanitizeDocHtml(`<div style="${val}">x</div>`)
+      expect(styleOf(out)).toBe('') // whole (single) declaration dropped
+      expect(out).not.toMatch(/evil/)
+    }
+  })
+
+  it('drops mask-image / filter:url / clip-path url references', () => {
+    for (const val of [
+      'mask-image:url(https://evil/x)',
+      'filter:url(https://evil/x#f)',
+      'clip-path:url(https://evil/x)',
+    ]) {
+      const out = sanitizeDocHtml(`<div style="${val}">x</div>`)
+      expect(out).not.toMatch(/evil/)
+    }
+  })
+
+  it('drops external + relative url() on background/list-style/cursor', () => {
+    for (const val of [
+      'background-image:url(https://evil/pixel.png)',
+      'background:url(/local.png)',
+      'list-style-image:url(https://evil/x)',
+      'cursor:url(https://evil/x),auto',
+    ]) {
+      const out = sanitizeDocHtml(`<div style="${val}">x</div>`)
+      expect(out).not.toMatch(/url\(/i)
+    }
+  })
+
+  it('drops CSS-comment obfuscated url() forms too (fail-closed)', () => {
+    for (const val of [
+      'background:u/**/rl(https://evil/x)',
+      'background:url/**/(https://evil/x)',
+    ]) {
+      const out = sanitizeDocHtml(`<div style="${val}">x</div>`)
+      expect(styleOf(out)).toBe('')
+      expect(out).not.toMatch(/evil/)
+    }
+  })
+
+  it('a dangerous declaration does NOT nuke the benign ones alongside it', () => {
+    const out = sanitizeDocHtml(
+      '<table><tr><td style="text-align:center;color:#333;background:url(https://evil/x)">x</td></tr></table>'
+    )
+    const s = styleOf(out)
+    expect(s).toContain('text-align:center')
+    expect(s).toContain('color:#333')
+    expect(s).not.toMatch(/url\(/i)
+    expect(s).not.toMatch(/evil/)
+  })
+
+  it('drops unknown/unsafe properties but keeps every property Docs legitimately emits', () => {
+    // The exact style surface StarterKit + Color/Highlight/FontSize/FontFamily/
+    // TextAlign/Table/page-break import path emit. All must survive untouched.
+    const legit =
+      'color:#111;background-color:#ffff00;font-family:Georgia;font-size:14px;' +
+      'font-weight:700;font-style:italic;line-height:1.5;text-align:justify;' +
+      'text-decoration:underline;text-indent:2em;vertical-align:top;' +
+      'margin-left:24px;padding:4px;border:1px solid #ccc;border-collapse:collapse;' +
+      'width:120px;min-width:80px;page-break-after:always'
+    const out = sanitizeDocHtml(`<table><tr><td style="${legit}">cell</td></tr></table>`)
+    const s = styleOf(out)
+    for (const prop of [
+      'color:#111', 'background-color:#ffff00', 'font-family:Georgia',
+      'font-size:14px', 'font-weight:700', 'font-style:italic', 'line-height:1.5',
+      'text-align:justify', 'text-decoration:underline', 'text-indent:2em',
+      'vertical-align:top', 'margin-left:24px', 'padding:4px',
+      'border:1px solid #ccc', 'border-collapse:collapse', 'width:120px',
+      'min-width:80px', 'page-break-after:always',
+    ]) {
+      expect(s).toContain(prop)
+    }
+    // And an unsafe property mixed in is still dropped.
+    const out2 = sanitizeDocHtml('<div style="color:red;position:fixed">x</div>')
+    expect(styleOf(out2)).toContain('color:red')
+    expect(styleOf(out2)).not.toMatch(/position/i)
+  })
+
+  it('still strips the classic executable style values (regression from wave-52)', () => {
+    for (const val of [
+      'background:url(javascript:alert(1))',
+      'width:expression(alert(1))',
+      'behavior:url(x.htc)',
+      '-moz-binding:url(x.xml)',
+    ]) {
+      const out = sanitizeDocHtml(`<div style="${val}">x</div>`)
+      expect(out).not.toMatch(/javascript:|expression\(|behavior|moz-binding/i)
+    }
+  })
+})
+
 // ── 3. CRDT round-trip of a table's cell text ────────────────────────────────
 describe('CRDT round-trip: table cell text converges across peers', () => {
   it('two peers converge on the same cell-text after exchanging ops', () => {
