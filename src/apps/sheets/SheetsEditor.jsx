@@ -618,15 +618,15 @@ export default function SheetsEditor() {
   })()
   const StatusIcon = statusInfo?.icon
 
-  // Only one side panel open at a time (except comments).
-  const closeAllPanels = () => {
-    setShowPivot(false); setShowFilter(false)
-    setShowCondFormat(false); setShowNamedRanges(false)
-    setShowDataValidation(false)
-  }
+  // Only one side panel open at a time (except comments). Close the OTHER
+  // panels — never the one being toggled: closing self inside this setter's own
+  // functional update raced the `return !v` and left the panel stuck closed
+  // after the Fortune-Sheet grid re-initialized (data-validation wouldn't open).
+  const panelSetters = [setShowPivot, setShowFilter, setShowCondFormat, setShowNamedRanges, setShowDataValidation]
+  const closeAllPanels = () => { for (const s of panelSetters) s(false) }
   const togglePanel = (setter) => () => {
     setter((v) => {
-      if (!v) closeAllPanels()
+      if (!v) { for (const s of panelSetters) if (s !== setter) s(false) }
       return !v
     })
   }
