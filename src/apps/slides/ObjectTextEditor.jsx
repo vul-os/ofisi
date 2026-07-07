@@ -24,7 +24,7 @@ import Highlight from '@tiptap/extension-highlight'
 import { FontSize, FontFamily } from '../../lib/tiptap/fontStyle.js'
 import { sanitizeSlideHtml } from '../../lib/sanitize'
 
-export default function ObjectTextEditor({ obj, stageRect, onCommit, onClose, onEditorReady }) {
+export default function ObjectTextEditor({ obj, onCommit, onClose, onEditorReady }) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
@@ -55,8 +55,6 @@ export default function ObjectTextEditor({ obj, stageRect, onCommit, onClose, on
     if (!editor) return
     onCommit?.(sanitizeSlideHtml(editor.getHTML()))
   }
-
-  if (!stageRect) return null
 
   return (
     <div

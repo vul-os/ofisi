@@ -1568,7 +1568,6 @@ export default function SlidesEditor() {
                       <ObjectTextEditor
                         key={editingObject.id}
                         obj={editingObject}
-                        stageRect
                         onEditorReady={setObjectEditor}
                         onCommit={commitObjectText}
                         onClose={() => { setEditingObjectId(null); setObjectEditor(null) }}
