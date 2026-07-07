@@ -23,9 +23,28 @@ import { useEffect, useRef, useCallback } from 'react'
 // Shared DOMPurify config — see src/lib/sanitize.js.
 import { sanitizeSlideHtml as sanitize } from '../../lib/sanitize'
 
+// Serialise a value for embedding inside an inline <script> block. JSON.stringify
+// ALONE is NOT safe here: it escapes quotes/backslashes but leaves `<`, `>` and
+// `&` literal, so a field value containing `</script>` (e.g. an untrusted slide
+// title/notes/background set by a hostile CRDT peer or a malicious import) closes
+// the <script> element during HTML parsing and injects live markup — a same-origin
+// XSS in the presenter window. Escaping `<`/`>`/`&` (plus the JS line/paragraph
+// separators U+2028/U+2029, which are raw newlines inside a JS string literal) to
+// \uXXXX makes the payload inert while remaining valid JSON the browser parses
+// back to the original characters. Fail-closed for EVERY field regardless of any
+// per-field sanitisation.
+function scriptSafeJson(value) {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+}
+
 // The presenter window HTML is injected as a blob URL so we stay same-origin.
-function buildPresenterHTML(slides, activeIdx, themeId) {
-  const slidesJson = JSON.stringify(slides.map((s) => ({
+export function buildPresenterHTML(slides, activeIdx, themeId) {
+  const slidesJson = scriptSafeJson(slides.map((s) => ({
     id: s.id,
     title: s.title || '',
     content: sanitize(s.content || ''),

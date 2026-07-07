@@ -80,9 +80,29 @@ export function exportSheetsToXlsx(data, filename) {
   saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${filename}.xlsx`)
 }
 
-export function exportSheetsToCsv(data, filename) {
-  const sheet = data[0]
-  if (!sheet) return
+// Serialise ONE cell value into a CSV field.
+//
+// SECURITY (formula / CSV injection): a cell value is untrusted — a hostile CRDT
+// peer can set any cell to an arbitrary STRING (grid_op), and imports carry
+// attacker text too. A string that a spreadsheet re-parses as a formula/command
+// when the exported .csv is opened (leading `= + - @`, or a TAB / CR that Excel
+// also treats as a formula lead-in) is neutralised with a leading apostrophe —
+// the same guard escapeChartText/pivotText already apply on their surfaces.
+// NUMERIC cells are emitted verbatim: they are typed `number` here (FortuneSheet
+// stores computed values as numbers), can never carry a payload, and prefixing a
+// legitimate negative number like `-5` would corrupt the data — so the guard is
+// scoped to string cells only.
+export function csvField(cell) {
+  if (typeof cell === 'number') return String(cell)
+  let s = String(cell ?? '')
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+/** Build the CSV text for the first sheet (pure — no side effects, testable). */
+export function buildCsv(data) {
+  const sheet = data?.[0]
+  if (!sheet) return ''
   const cells = sheet.celldata || []
   let maxR = 0, maxC = 0
   for (const { r, c } of cells) { if (r > maxR) maxR = r; if (c > maxC) maxC = c }
@@ -91,11 +111,11 @@ export function exportSheetsToCsv(data, filename) {
     if (!v) continue
     grid[r][c] = v.v !== undefined ? v.v : (v.m ?? '')
   }
-  const csv = grid.map((row) =>
-    row.map((cell) => {
-      const s = String(cell)
-      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s
-    }).join(',')
-  ).join('\n')
+  return grid.map((row) => row.map(csvField).join(',')).join('\n')
+}
+
+export function exportSheetsToCsv(data, filename) {
+  if (!data?.[0]) return
+  const csv = buildCsv(data)
   saveAs(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `${filename}.csv`)
 }
