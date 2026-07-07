@@ -210,6 +210,50 @@ go in `meta` as a discreet inline line — **never** a banner.
 
 Use `<Tooltip>`.  300 ms hover delay so the chrome doesn't flicker.
 
+### 6.8 Save / sync status — `<SaveStatus>`
+
+Use `<SaveStatus status=…>` for the editor save indicator (Docs / Sheets /
+Slides share it).  It renders a crafted "breathing" dot (`.save-dot` ladder in
+`index.css`: saved / saving / error / offline) + a quiet label, wrapped in a
+`role="status"` live region.  `status ∈ 'saved'|'saving'|'dirty'|'error'|
+'offline'`.  Pass `text` to override (e.g. "Retrying 2/3").  Never a banner.
+
+### 6.9 Presence — `<Avatar>` / `<AvatarStack>`
+
+Collaborator chips ride the shared `.avatar-chip` shape (ringed against the
+chrome).  `<Avatar name color size>`; `<AvatarStack people max>` overlaps chips
+and shows a `+N` overflow.  Hue is deterministic per name (`hueFor`) unless the
+collab layer supplies a `color`.  The live-cursor name flag is `.rc-flag`
+(shared by the Docs + Sheets cursor layers) — a crisp sans caplet, not serif.
+
+### 6.10 Empty states — `<EmptyState>`
+
+Use `<EmptyState icon title hint action size>` for every "nothing here yet"
+surface (panels use `size="sm"`, full surfaces `size="lg"`).  Haloed icon +
+serif headline + muted hint.  Do NOT hand-roll `<p className="italic">No X.</p>`.
+
+### 6.11 Toolbars — `.toolbar-surface` + `<ToolbarButton>`
+
+Every editor toolbar sits on `.toolbar-surface` (elevated band, hairline
+bottom border) so the suite reads as one product.  Buttons are `<ToolbarButton>`
+(the tactile `.toolbar-btn` ladder: hover tint → active accent-tint + inset
+ring → pressed micro-nudge).  Group with `.toolbar-divider`.  Contextual
+sub-toolbars (image tools, table tools) use `bg-bg-elev2` + `animate-slide-in-left`.
+
+### 6.12 Launcher previews — `<DocThumb>`
+
+Recent-file cards and the create-file picker use `<DocThumb type=…>` — a crafted
+per-type SVG mock (ruled doc / grid / slide stage / PDF page) tinted with the
+app hue.  Reads as a real thumbnail with no server render.  Loading uses
+`<Skeleton>` grids, not spinners.
+
+### 6.13 Premium canvas surfaces
+
+The document/slide "paper" rests on a faint lit surface, not flat black:
+`.doc-desk` (top-lit wash behind the Docs paper) and `.slide-stage` (accent
+spotlight behind the deck).  Keep them extremely subtle — the content is the
+protagonist.  All these effects collapse under `prefers-reduced-motion`.
+
 ---
 
 ## 7. Do / Don't
