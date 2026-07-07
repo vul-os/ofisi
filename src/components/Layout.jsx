@@ -209,7 +209,7 @@ function Shell({ children }) {
             onClick={closeMobile}
             aria-hidden
           />
-          <div className="absolute left-0 top-0 bottom-0 animate-slide-in-right">
+          <div className="absolute left-0 top-0 bottom-0 animate-drawer-in">
             <Sidebar collapsed={false} className="h-full shadow-e3">
               <SidebarContent collapsed={false} onNavigate={closeMobile} onNewFile={openNew} />
               <div className="px-3 pb-3 pt-1">

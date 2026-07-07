@@ -1290,10 +1290,11 @@ export default function SlidesEditor() {
                 </label>
               </div>
 
-              {/* Slide canvas */}
-              <div className="flex-1 overflow-auto px-3 sm:px-6 py-4 sm:py-8 bg-bg">
+              {/* Slide canvas — a lit "stage": the deck rests on a subtle
+                  spotlight so the slide reads as the protagonist. */}
+              <div className="slide-stage flex-1 overflow-auto px-3 sm:px-6 py-4 sm:py-10 bg-bg">
                 <article
-                  className="paper-grain mx-auto bg-paper border border-line rounded-lg shadow-e1 px-12 py-10 animate-fade-in"
+                  className="paper-grain mx-auto bg-paper border border-line rounded-lg shadow-e3 px-12 py-10 animate-scale-in"
                   style={{ maxWidth: '900px', minHeight: '420px' }}
                 >
                   <EditorContent editor={editor} className="tiptap" />

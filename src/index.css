@@ -251,7 +251,8 @@
   .animate-rise-in,
   .animate-scale-in,
   .animate-slide-in-right,
-  .animate-slide-in-left {
+  .animate-slide-in-left,
+  .animate-drawer-in {
     animation-duration: 1ms;   /* effectively instant, but still "runs" so `both` fill applies */
   }
 }
@@ -545,6 +546,33 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .rc-flag { animation: none; }
+}
+
+/* ============================================================================
+ * Doc desk — the surface the document "paper" rests on. A faint top-lit wash
+ * so the paper card reads as sitting on a desk rather than floating on flat
+ * black. Kept extremely subtle (the document is the protagonist).
+ * ========================================================================== */
+.doc-desk {
+  background:
+    radial-gradient(100% 60% at 50% -5%,
+      color-mix(in srgb, var(--ink) 4%, transparent),
+      transparent 55%),
+    var(--bg);
+}
+
+/* ============================================================================
+ * Slide stage — a soft spotlight behind the deck so the slide reads as the
+ * protagonist on a lit stage rather than a flat card on a flat page. Pure
+ * radial gradient, no asset; sits behind the paper article (which owns z-index
+ * via its own stacking).
+ * ========================================================================== */
+.slide-stage {
+  background:
+    radial-gradient(120% 80% at 50% 0%,
+      color-mix(in srgb, var(--accent) 6%, transparent),
+      transparent 60%),
+    var(--bg);
 }
 
 /* ============================================================================

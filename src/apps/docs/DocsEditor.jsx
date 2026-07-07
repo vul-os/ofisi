@@ -1176,7 +1176,7 @@ export default function DocsEditor() {
             - subtle 1-px line on the page edge, no heavy shadow
             - .paper-grain adds a near-imperceptible letterpress tooth
         */}
-        <div ref={scrollRef} className="flex-1 overflow-auto px-6 py-10 relative">
+        <div ref={scrollRef} className="doc-desk flex-1 overflow-auto px-6 py-10 relative">
           {/* Find/Replace floating bar */}
           {findMode && (
             <FindReplace
@@ -1186,7 +1186,7 @@ export default function DocsEditor() {
             />
           )}
           <article
-            className="paper-grain mx-auto bg-paper border border-line rounded-lg shadow-e1 px-14 py-16"
+            className="paper-grain mx-auto bg-paper border border-line rounded-lg shadow-e2 px-14 py-16"
             style={{ maxWidth: '760px' }}
           >
             <div className="tiptap-cursor-host relative animate-fade-in">

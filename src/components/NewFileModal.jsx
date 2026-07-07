@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FileText, Table2, Presentation, Loader2 } from 'lucide-react'
 import { useFilesStore } from '../store/filesStore'
-import { Button, Input, Modal } from './ui'
+import { Button, Input, Modal, DocThumb } from './ui'
 
 // ─── Template definitions ─────────────────────────────────────────────────────
 const TYPES = [
@@ -83,25 +83,26 @@ export default function NewFileModal({ onClose, defaultType, lockType }) {
           {!lockType && (
             <div className="space-y-3">
               <div className="grid grid-cols-3 gap-2">
-                {TYPES.map(({ type, label, icon: Icon, iconCn, bgCn, borderActive, bgActive }) => {
+                {TYPES.map(({ type, label, borderActive, bgActive }) => {
                   const active = selectedType === type
                   return (
                     <button
                       key={type}
                       type="button"
+                      aria-pressed={active}
                       onClick={() => setSelectedType(type)}
                       className={[
-                        'flex flex-col items-center gap-2.5 p-3.5 rounded-lg border-2',
-                        'transition-[border-color,background] duration-fast ease-out',
+                        'group flex flex-col items-center gap-2.5 p-2.5 rounded-lg border-2',
+                        'transition-[border-color,background,transform] duration-fast ease-out',
                         'focus-visible:outline-none focus-visible:shadow-focus',
                         active
                           ? `${borderActive} ${bgActive}`
-                          : 'border-line hover:border-line-strong bg-paper',
+                          : 'border-line hover:border-line-strong bg-paper hover:-translate-y-0.5',
                       ].join(' ')}
                     >
-                      <div className={`w-10 h-10 rounded-md ${bgCn} flex items-center justify-center`}>
-                        <Icon size={20} className={iconCn} />
-                      </div>
+                      <span className="w-full h-16 rounded-md overflow-hidden border border-line">
+                        <DocThumb type={type} className="h-full" />
+                      </span>
                       <span className="text-xs font-semibold text-ink tracking-tightish">{label}</span>
                     </button>
                   )

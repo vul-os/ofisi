@@ -168,6 +168,12 @@ export default {
           '0%':   { opacity: 0, transform: 'translateX(-8px)' },
           '100%': { opacity: 1, transform: 'translateX(0)' },
         },
+        // Full off-canvas drawer slide (left rail on mobile) — travels its own
+        // width, not the 8px nudge the panel keyframes use.
+        'drawer-in': {
+          '0%':   { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(0)' },
+        },
       },
       animation: {
         'fade-in':        'fade-in var(--duration-base) var(--ease-out) both',
@@ -175,6 +181,7 @@ export default {
         'scale-in':       'scale-in var(--duration-base) var(--ease-spring) both',
         'slide-in-right': 'slide-in-right var(--duration-base) var(--ease-out) both',
         'slide-in-left':  'slide-in-left var(--duration-base) var(--ease-out) both',
+        'drawer-in':      'drawer-in var(--duration-base) var(--ease-spring) both',
       },
     },
   },
