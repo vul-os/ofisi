@@ -1,16 +1,35 @@
-import * as XLSX from 'xlsx'
 import { marked } from 'marked'
 import mammoth from 'mammoth'
-import JSZip from 'jszip'
 import { api } from './api'
 import { useFilesStore } from '../store/filesStore'
+import { assertFileSize, ImportError } from './importBounds'
+import { workbookToSheets } from '../apps/sheets/sheetsImport'
+import { csvToSheet } from '../apps/sheets/csvImport'
+import { odtToHtml } from '../apps/docs/odtImport'
+import { pptxToSlides, odpToSlides } from '../apps/slides/slidesImport'
+import { sanitizeObjects } from '../apps/slides/slideObjects'
 
-// Map file extension → app type
+// ── Format detection / routing ────────────────────────────────────────────────
+// Every supported inbound format maps to exactly one app. The unified Open flow
+// (file-picker + drag-drop) calls detectType() to pick the importer + route.
+export const SUPPORTED_EXTS = [
+  'md', 'txt', 'doc', 'docx', 'rtf', 'html', 'htm', 'odt',   // docs
+  'xlsx', 'xls', 'csv', 'tsv', 'ods',                        // sheets
+  'pptx', 'ppt', 'odp',                                      // slides
+  'pdf',                                                     // pdf
+]
+
+// Extensions we can genuinely OPEN with real fidelity (used by the Open dialog's
+// accept filter). Legacy binary .doc/.xls/.ppt are intentionally excluded — see
+// the deferred note; they fall through to a plain-text/no-op path if forced.
+export const OPENABLE_ACCEPT =
+  '.md,.txt,.docx,.rtf,.html,.htm,.odt,.xlsx,.xls,.csv,.tsv,.ods,.pptx,.odp,.pdf'
+
 export function detectType(filename) {
-  const ext = filename.split('.').pop().toLowerCase()
-  if (['md', 'txt', 'doc', 'docx', 'rtf', 'html', 'htm'].includes(ext)) return 'doc'
-  if (['xlsx', 'xls', 'csv', 'tsv'].includes(ext)) return 'sheet'
-  if (['pptx', 'ppt'].includes(ext)) return 'slide'
+  const ext = (filename.split('.').pop() || '').toLowerCase()
+  if (['md', 'txt', 'doc', 'docx', 'rtf', 'html', 'htm', 'odt'].includes(ext)) return 'doc'
+  if (['xlsx', 'xls', 'csv', 'tsv', 'ods'].includes(ext)) return 'sheet'
+  if (['pptx', 'ppt', 'odp'].includes(ext)) return 'slide'
   if (ext === 'pdf') return 'pdf'
   return null
 }
@@ -22,7 +41,17 @@ export function typeToRoute(type) {
   return null
 }
 
-// ── Converters ──────────────────────────────────────────────────────────────
+/** Human-facing "we can't open this" message for an unsupported extension. */
+export function unsupportedMessage(filename) {
+  const ext = (filename.split('.').pop() || '').toLowerCase()
+  if (['doc', 'xls', 'ppt'].includes(ext)) {
+    return `Legacy binary .${ext} files aren't supported yet — please re-save as ` +
+      `.${ext}x (or ODF) and try again.`
+  }
+  return `Cannot open .${ext} files.`
+}
+
+// ── Low-level readers ─────────────────────────────────────────────────────────
 
 async function fileToText(file) {
   return new Promise((resolve, reject) => {
@@ -42,395 +71,144 @@ async function fileToArrayBuffer(file) {
   })
 }
 
-async function convertToDocContent(file) {
-  const ext = file.name.split('.').pop().toLowerCase()
+// ── Docs ──────────────────────────────────────────────────────────────────────
+// All doc importers return `{ type:'doc', _html }` — and `_html` is UNTRUSTED.
+// DocsEditor.resolveContent runs it through sanitizeDocHtml before it reaches
+// TipTap (the trust boundary), so no script / on*-handler / javascript: href /
+// non-raster data: image / dangerous inline-style survives the import.
 
-  if (ext === 'md') {
-    const text = await fileToText(file)
-    const html = await marked.parse(text)
-    // Wrap in TipTap doc structure via HTML
-    return { type: 'doc', _html: html, content: [{ type: 'paragraph' }] }
-  }
+// mammoth options: extract embedded images to INLINE base64 data: URIs (its
+// default convertImage is images.dataUri). Crucially this means NO network fetch
+// on import — an <img src="http://tracker"> in the source .docx is not created
+// by mammoth (it only emits data: URIs for embedded binary parts). Remote refs
+// in the source are dropped rather than fetched.
+const MAMMOTH_OPTS = {
+  convertImage: mammoth.images.imgElement((image) =>
+    image.readAsBase64String().then((b64) => ({ src: `data:${image.contentType};base64,${b64}` }))
+  ),
+}
 
-  if (ext === 'txt') {
-    const text = await fileToText(file)
-    const paragraphs = text.split(/\n\n+/).map(para => ({
-      type: 'paragraph',
-      content: para.trim()
-        ? [{ type: 'text', text: para.replace(/\n/g, ' ').trim() }]
-        : [],
-    }))
-    return { type: 'doc', content: paragraphs.length ? paragraphs : [{ type: 'paragraph' }] }
-  }
+async function docFromText(text) {
+  const paragraphs = String(text).split(/\n\n+/).map((para) => ({
+    type: 'paragraph',
+    content: para.trim() ? [{ type: 'text', text: para.replace(/\n/g, ' ').trim() }] : [],
+  }))
+  return { type: 'doc', content: paragraphs.length ? paragraphs : [{ type: 'paragraph' }] }
+}
 
-  if (ext === 'html' || ext === 'htm') {
-    const text = await fileToText(file)
-    return { type: 'doc', _html: text, content: [{ type: 'paragraph' }] }
-  }
-
+async function convertDocFromBuffer(ext, buf, text) {
+  if (ext === 'md') return { type: 'doc', _html: await marked.parse(text), content: [{ type: 'paragraph' }] }
+  if (ext === 'html' || ext === 'htm') return { type: 'doc', _html: text, content: [{ type: 'paragraph' }] }
+  if (ext === 'txt') return docFromText(text)
   if (ext === 'docx') {
-    const buf = await fileToArrayBuffer(file)
-    const result = await mammoth.convertToHtml({ arrayBuffer: buf })
+    assertFileSize(buf.byteLength, 'document')
+    const result = await mammoth.convertToHtml({ arrayBuffer: buf }, MAMMOTH_OPTS)
     return { type: 'doc', _html: result.value || '<p></p>', content: [{ type: 'paragraph' }] }
   }
-
-  // rtf / doc / other — render as plain text fallback
-  try {
-    const text = await fileToText(file)
-    const paragraphs = text.split(/\n\n+/).filter(Boolean).map(p => ({
-      type: 'paragraph',
-      content: [{ type: 'text', text: p.replace(/\n/g, ' ').trim() }],
-    }))
-    return { type: 'doc', content: paragraphs.length ? paragraphs : [{ type: 'paragraph' }] }
-  } catch {
-    return { type: 'doc', content: [{ type: 'paragraph' }] }
+  if (ext === 'odt') {
+    const html = await odtToHtml(buf, 'document.odt')
+    return { type: 'doc', _html: html, content: [{ type: 'paragraph' }] }
   }
+  // rtf / legacy .doc / unknown → plain-text best-effort.
+  return docFromText(text)
 }
+
+async function convertToDocContent(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase()
+  // Binary formats need the ArrayBuffer; text formats need the decoded text.
+  if (['docx', 'odt'].includes(ext)) {
+    return convertDocFromBuffer(ext, await fileToArrayBuffer(file))
+  }
+  const text = await fileToText(file)
+  return convertDocFromBuffer(ext, null, text)
+}
+
+// ── Sheets ──────────────────────────────────────────────────────────────────
 
 async function convertToSheetContent(file) {
-  const ext = file.name.split('.').pop().toLowerCase()
-  const buf = await fileToArrayBuffer(file)
-
+  const ext = (file.name.split('.').pop() || '').toLowerCase()
   if (ext === 'csv' || ext === 'tsv') {
-    const text = new TextDecoder().decode(buf)
-    const sep = ext === 'tsv' ? '\t' : ','
-    return csvToFortune(text, sep)
+    const text = await fileToText(file)
+    const base = file.name.replace(/\.[^.]+$/, '')
+    return [csvToSheet(text, base || 'Sheet1', ext === 'tsv' ? '\t' : ',')]
   }
-
-  // xlsx / xls
-  const wb = XLSX.read(buf, { type: 'array' })
-  return wb.SheetNames.map(name => {
-    const ws = wb.Sheets[name]
-    if (!ws['!ref']) return { name, celldata: [], config: {} }
-    const range = XLSX.utils.decode_range(ws['!ref'])
-    const celldata = []
-    for (let r = range.s.r; r <= range.e.r; r++) {
-      for (let c = range.s.c; c <= range.e.c; c++) {
-        const addr = XLSX.utils.encode_cell({ r, c })
-        const cell = ws[addr]
-        if (!cell) continue
-        const v = cell.v ?? ''
-        const m = cell.w || String(v)
-        const f = cell.f ? `=${cell.f}` : undefined
-        celldata.push({ r, c, v: { v, m, ...(f ? { f } : {}) } })
-      }
-    }
-    // Preserve merged cells (!merges array → Fortune Sheet mc config)
-    const merges = ws['!merges'] || []
-    const mc = {}
-    for (const merge of merges) {
-      // merge: { s: {r,c}, e: {r,c} }
-      const key = `${merge.s.r}_${merge.s.c}`
-      mc[key] = {
-        r: merge.s.r,
-        c: merge.s.c,
-        rs: merge.e.r - merge.s.r + 1,
-        cs: merge.e.c - merge.s.c + 1,
-      }
-    }
-    const config = merges.length ? { merge: mc } : {}
-    return { name, celldata, config }
-  })
-}
-
-function csvToFortune(text, sep = ',') {
-  // Handle quoted fields
-  const rows = text.trim().split(/\r?\n/)
-  const celldata = []
-  rows.forEach((row, r) => {
-    const cells = parseCSVRow(row, sep)
-    cells.forEach((val, c) => {
-      const v = val.trim()
-      if (!v) return
-      const num = Number(v)
-      const value = !isNaN(v) && v !== '' ? num : v
-      celldata.push({ r, c, v: { v: value, m: v } })
-    })
-  })
-  return [{ name: 'Sheet1', celldata, config: {} }]
-}
-
-function parseCSVRow(row, sep) {
-  const cells = []
-  let cur = ''
-  let inQuote = false
-  for (let i = 0; i < row.length; i++) {
-    const ch = row[i]
-    if (ch === '"') {
-      if (inQuote && row[i + 1] === '"') { cur += '"'; i++ }
-      else inQuote = !inQuote
-    } else if (ch === sep && !inQuote) {
-      cells.push(cur); cur = ''
-    } else {
-      cur += ch
-    }
-  }
-  cells.push(cur)
-  return cells
-}
-
-// ── PPTX converter ───────────────────────────────────────────────────────────
-
-/**
- * Extract all text runs (<a:t>) from a slide XML string grouped by shape (<p:sp>).
- * Returns an array of text-block arrays: [[run, run, ...], [run, run, ...], ...]
- * Each inner array corresponds to one shape's paragraph runs.
- */
-function extractTextBlocksFromSlideXml(xmlText) {
-  // Collect all <p:sp> shapes that have text bodies (<p:txBody>)
-  const shapes = []
-  // Match each <p:sp>...</p:sp> block
-  const spRegex = /<p:sp[\s>][\s\S]*?<\/p:sp>/g
-  let spMatch
-  while ((spMatch = spRegex.exec(xmlText)) !== null) {
-    const spXml = spMatch[0]
-    // Only process shapes that have a text body
-    if (!spXml.includes('<p:txBody>') && !spXml.includes('<p:txBody ')) continue
-    // Collect all paragraphs <a:p> from this shape
-    const paragraphs = []
-    const pRegex = /<a:p[\s>][\s\S]*?<\/a:p>/g
-    let pMatch
-    while ((pMatch = pRegex.exec(spXml)) !== null) {
-      const pXml = pMatch[0]
-      // Collect all text runs <a:t> from this paragraph
-      const runs = []
-      const tRegex = /<a:t[^>]*>([\s\S]*?)<\/a:t>/g
-      let tMatch
-      while ((tMatch = tRegex.exec(pXml)) !== null) {
-        // Decode basic XML entities
-        const text = tMatch[1]
-          .replace(/&amp;/g, '&')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/&quot;/g, '"')
-          .replace(/&apos;/g, "'")
-        runs.push(text)
-      }
-      const combined = runs.join('').trim()
-      if (combined) paragraphs.push(combined)
-    }
-    if (paragraphs.length) shapes.push(paragraphs)
-  }
-  return shapes
-}
-
-/**
- * Build a slide object (matching SlidesEditor's model) from a slide XML string.
- * Shape 0 → title, all remaining shapes → content (HTML list if multiple lines).
- */
-function buildSlideFromXml(xmlText) {
-  const shapes = extractTextBlocksFromSlideXml(xmlText)
-  let title = ''
-  const bodyLines = []
-
-  shapes.forEach((paragraphs, shapeIdx) => {
-    if (shapeIdx === 0) {
-      // First shape = title (join multi-paragraph runs)
-      title = paragraphs.join(' ')
-    } else {
-      paragraphs.forEach((p) => bodyLines.push(p))
-    }
-  })
-
-  // Build TipTap-compatible HTML content
-  let content = '<p></p>'
-  if (bodyLines.length === 1) {
-    content = `<p>${bodyLines[0]}</p>`
-  } else if (bodyLines.length > 1) {
-    const items = bodyLines.map((line) => `<li><p>${line}</p></li>`).join('')
-    content = `<ul>${items}</ul>`
-  }
-
-  return {
-    id: crypto.randomUUID(),
-    title,
-    content,
-    notes: '',
-    background: '',
-    master: 'content',
-    transition: 'none',
-    animations: [],
-  }
-}
-
-/**
- * Convert a .pptx File object to the slides content model:
- * { themeId, theme, transition, slides: [{ id, title, content, notes, ... }], masters, customTheme }
- */
-async function convertToPptxContent(file) {
+  // xlsx / xls / ods
   const buf = await fileToArrayBuffer(file)
-  const zip = await JSZip.loadAsync(buf)
-
-  // Find all slide XML files in order: ppt/slides/slide1.xml, slide2.xml, ...
-  const slideEntries = Object.keys(zip.files)
-    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
-    .sort((a, b) => {
-      const numA = parseInt(a.match(/slide(\d+)\.xml/)[1], 10)
-      const numB = parseInt(b.match(/slide(\d+)\.xml/)[1], 10)
-      return numA - numB
-    })
-
-  if (slideEntries.length === 0) {
-    // No slides found — return a single blank slide
-    return {
-      themeId: 'obsidian',
-      theme: 'black',
-      transition: 'slide',
-      slides: [{
-        id: crypto.randomUUID(),
-        title: '',
-        content: '<p></p>',
-        notes: '',
-        background: '',
-        master: 'content',
-        transition: 'none',
-        animations: [],
-      }],
-      masters: null,
-      customTheme: null,
-    }
-  }
-
-  const slides = await Promise.all(
-    slideEntries.map(async (entryName) => {
-      const xmlText = await zip.files[entryName].async('string')
-      return buildSlideFromXml(xmlText)
-    })
-  )
-
-  return {
-    themeId: 'obsidian',
-    theme: 'black',
-    transition: 'slide',
-    slides,
-    masters: null,
-    customTheme: null,
-  }
+  return workbookToSheets(buf, file.name)
 }
 
-// ── Import from File object (drag & drop / file picker) ──────────────────────
+// ── Slides ────────────────────────────────────────────────────────────────────
+// Imported decks carry positioned objects[]; sanitize every object at import
+// (script/CSS/href + geometry clamp) so nothing untrusted is ever persisted raw.
+async function convertToSlideContent(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase()
+  const buf = await fileToArrayBuffer(file)
+  const deck = ext === 'odp' ? await odpToSlides(buf, file.name) : await pptxToSlides(buf, file.name)
+  deck.slides = deck.slides.map((s) => ({ ...s, objects: sanitizeObjects(s.objects || []) }))
+  return deck
+}
+
+// ── PDF ────────────────────────────────────────────────────────────────────────
+async function stashPdf(file, name) {
+  const buf = await fileToArrayBuffer(file)
+  assertFileSize(buf.byteLength, name)
+  sessionStorage.setItem('pendingPDF', JSON.stringify({
+    name,
+    data: btoa(String.fromCharCode(...new Uint8Array(buf).slice(0, 10 * 1024 * 1024))),
+  }))
+}
+
+// ── Public: import a File (picker / drag-drop) ──────────────────────────────────
 
 export async function importFile(file, navigate) {
+  assertFileSize(file.size, file.name)
   const type = detectType(file.name)
-  const baseName = file.name.replace(/\.[^.]+$/, '')
 
   if (type === 'pdf') {
-    const buf = await fileToArrayBuffer(file)
-    sessionStorage.setItem('pendingPDF', JSON.stringify({
-      name: file.name,
-      data: btoa(String.fromCharCode(...new Uint8Array(buf).slice(0, 10 * 1024 * 1024))),
-    }))
+    await stashPdf(file, file.name)
     navigate('/pdf-editor')
     return
   }
+  if (!type) throw new ImportError(unsupportedMessage(file.name))
 
-  if (!type) {
-    throw new Error(`Cannot import .${file.name.split('.').pop()} files.`)
-  }
-
+  const baseName = file.name.replace(/\.[^.]+$/, '')
   let content
-  if (type === 'doc') {
-    content = await convertToDocContent(file)
-  } else if (type === 'sheet') {
-    content = await convertToSheetContent(file)
-  } else if (type === 'slide') {
-    content = await convertToPptxContent(file)
-  }
+  if (type === 'doc') content = await convertToDocContent(file)
+  else if (type === 'sheet') content = await convertToSheetContent(file)
+  else if (type === 'slide') content = await convertToSlideContent(file)
 
   const created = await api.createFile(baseName, type, content)
-  useFilesStore.setState({ files: [created, ...useFilesStore.getState().files.filter(f => f.id !== created.id)] })
+  useFilesStore.setState({ files: [created, ...useFilesStore.getState().files.filter((f) => f.id !== created.id)] })
   navigate(`/${typeToRoute(type)}/${created.id}`)
 }
 
-// ── Import from a backend-served URL (local file scan) ────────────────────────
+// ── Public: import a backend-served local file (local scan) ─────────────────────
+// Wraps the fetched bytes in a File so it flows through the SAME importers +
+// bounds as a drag-dropped file — one code path, one trust boundary.
 
 export async function importFromUrl(localFile, navigate) {
   const { name, path, appType } = localFile
   const baseName = name.replace(/\.[^.]+$/, '')
-  const ext = name.split('.').pop().toLowerCase()
   const url = api.localFileUrl(path)
 
   if (appType === 'pdf') {
-    // Pass URL directly to PDF editor via sessionStorage
     sessionStorage.setItem('pendingPDF', JSON.stringify({ name, url }))
     navigate('/pdf-editor')
     return
   }
 
-  // Fetch the file from the backend
   const res = await fetch(url, { credentials: 'include' })
   if (!res.ok) throw new Error('Failed to fetch file')
+  const buf = await res.arrayBuffer()
+  const pseudoFile = new File([buf], name)
 
   let content
-  if (appType === 'slide') {
-    const buf = await res.arrayBuffer()
-    // Wrap the ArrayBuffer in a minimal File-like object for convertToPptxContent
-    const blob = new Blob([buf])
-    const pseudoFile = new File([blob], name)
-    content = await convertToPptxContent(pseudoFile)
-  } else if (appType === 'doc') {
-    if (ext === 'md') {
-      const text = await res.text()
-      const html = await marked.parse(text)
-      content = { type: 'doc', _html: html, content: [{ type: 'paragraph' }] }
-    } else if (ext === 'txt') {
-      const text = await res.text()
-      const paragraphs = text.split(/\n\n+/).filter(Boolean).map(p => ({
-        type: 'paragraph',
-        content: [{ type: 'text', text: p.replace(/\n/g, ' ').trim() }],
-      }))
-      content = { type: 'doc', content: paragraphs.length ? paragraphs : [{ type: 'paragraph' }] }
-    } else if (ext === 'html' || ext === 'htm') {
-      const text = await res.text()
-      content = { type: 'doc', _html: text, content: [{ type: 'paragraph' }] }
-    } else if (ext === 'docx') {
-      const buf = await res.arrayBuffer()
-      const result = await mammoth.convertToHtml({ arrayBuffer: buf })
-      content = { type: 'doc', _html: result.value || '<p></p>', content: [{ type: 'paragraph' }] }
-    } else {
-      // rtf / doc / other — plain text fallback
-      const text = await res.text()
-      const paragraphs = text.split(/\n\n+/).filter(Boolean).map(p => ({
-        type: 'paragraph',
-        content: [{ type: 'text', text: p.replace(/\n/g, ' ').trim() }],
-      }))
-      content = { type: 'doc', content: paragraphs.length ? paragraphs : [{ type: 'paragraph' }] }
-    }
-  } else {
-    // sheet
-    const buf = await res.arrayBuffer()
-    if (ext === 'csv' || ext === 'tsv') {
-      const text = new TextDecoder().decode(buf)
-      content = csvToFortune(text, ext === 'tsv' ? '\t' : ',')
-    } else {
-      const wb = XLSX.read(buf, { type: 'array' })
-      content = wb.SheetNames.map(sname => {
-        const ws = wb.Sheets[sname]
-        if (!ws['!ref']) return { name: sname, celldata: [], config: {} }
-        const range = XLSX.utils.decode_range(ws['!ref'])
-        const celldata = []
-        for (let r = range.s.r; r <= range.e.r; r++) {
-          for (let c = range.s.c; c <= range.e.c; c++) {
-            const cell = ws[XLSX.utils.encode_cell({ r, c })]
-            if (!cell) continue
-            const v = cell.v ?? ''
-            celldata.push({ r, c, v: { v, m: cell.w || String(v), ...(cell.f ? { f: `=${cell.f}` } : {}) } })
-          }
-        }
-        // Preserve merged cells (!merges → Fortune Sheet mc config)
-        const merges = ws['!merges'] || []
-        const mc = {}
-        for (const merge of merges) {
-          const key = `${merge.s.r}_${merge.s.c}`
-          mc[key] = { r: merge.s.r, c: merge.s.c, rs: merge.e.r - merge.s.r + 1, cs: merge.e.c - merge.s.c + 1 }
-        }
-        const config = merges.length ? { merge: mc } : {}
-        return { name: sname, celldata, config }
-      })
-    }
-  }
+  if (appType === 'doc') content = await convertToDocContent(pseudoFile)
+  else if (appType === 'sheet') content = await convertToSheetContent(pseudoFile)
+  else if (appType === 'slide') content = await convertToSlideContent(pseudoFile)
+  else throw new ImportError(unsupportedMessage(name))
 
   const created = await api.createFile(baseName, appType, content)
-  useFilesStore.setState({ files: [created, ...useFilesStore.getState().files.filter(f => f.id !== created.id)] })
+  useFilesStore.setState({ files: [created, ...useFilesStore.getState().files.filter((f) => f.id !== created.id)] })
   navigate(`/${typeToRoute(appType)}/${created.id}`)
 }

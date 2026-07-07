@@ -26,6 +26,7 @@ import {
 import { api } from '../../lib/api'
 import { Menu, ToolbarButton, UrlPopover } from '../../components/ui'
 import { exportToDocx, exportToPdf, exportToMarkdown, exportToHtml } from './docsExport'
+import { exportToOdt } from './odtExport'
 import { fileToDataUri, isEmbeddableImage } from './docsImage'
 import TableOfContents from './components/TableOfContents'
 
@@ -838,6 +839,10 @@ export default function DocsToolbar({
             <MenuItem onClick={() => exportToDocx(editor, title, { pageSetup, headerFooter })}>
               <span className="text-2xs font-bold tracking-eyebrow text-accent w-9">DOCX</span>
               Word document
+            </MenuItem>
+            <MenuItem onClick={() => exportToOdt(editor, title)}>
+              <span className="text-2xs font-bold tracking-eyebrow text-success w-9">ODT</span>
+              OpenDocument text
             </MenuItem>
             <MenuItem onClick={() => exportToPdf(title)}>
               <span className="text-2xs font-bold tracking-eyebrow text-danger w-9">PDF</span>

@@ -8,6 +8,40 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Office interop (import + export fidelity)
+
+- **Unified Open flow**: drag-and-drop + file-picker on every app home detects the
+  format (.docx/.xlsx/.pptx/.odt/.ods/.odp/.md/.txt/.html/.csv/.pdf) and routes to
+  the right app + importer, with progress/error/unsupported states.
+- **Sheets**: comprehensive `.xlsx` / `.xls` / `.ods` import (values, formulas as
+  inert data, number formats, merged cells, multi-sheet, column widths + row
+  heights) via SheetJS; client-side (no server round-trip). New `.ods` export
+  (alongside `.xlsx` / `.csv`).
+- **Docs**: `.odt` import (best-effort ODF→semantic HTML: headings, bold/italic/
+  underline, lists, tables, links, embedded raster images) and `.odt` export
+  (best-effort). Existing `.docx` import (mammoth) now flows embedded images to
+  inline data: URIs with no network fetch.
+- **Slides**: `.pptx` / `.odp` import into the positioned-object model (text
+  boxes, images, positions/sizes from EMU/ODF geometry, bold/italic runs, pptx
+  speaker notes). Best-effort fidelity (see notes).
+- **Security (import = untrusted-input boundary)**: new `lib/importBounds.js` —
+  compressed-size gate, zip-bomb caps (entry count + declared/actual decompressed
+  size), zip-slip entry-name rejection, XXE-safe XML parsing (DOCTYPE/ENTITY
+  stripped), and per-sheet cell/sheet caps. Every imported document flows through
+  its app sanitiser (`sanitizeDocHtml` / `sanitizeObjects` / CSV formula-injection
+  guard) before render; embedded images are extracted (never fetched) and remote
+  refs dropped.
+
+### Deferred
+
+- Legacy **binary** `.doc` / `.xls` / `.ppt` (OLE2) are not supported — users are
+  asked to re-save as the modern zip/ODF variant.
+- `.pptx` / `.odp` import fidelity is content-level, not rendering-faithful:
+  theme colours/fonts, gradients, tables, charts, SmartArt, animations,
+  transitions, masters/layouts and vector auto-shapes are dropped/approximated.
+- `.odt` import drops character styling beyond bold/italic/underline (colour,
+  font, size, precise spacing, columns, footnotes, change-tracking).
+
 ---
 
 ## [0.2.0] — 2026-07-07

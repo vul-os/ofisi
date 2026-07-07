@@ -119,3 +119,22 @@ export function exportSheetsToCsv(data, filename) {
   const csv = buildCsv(data)
   saveAs(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `${filename}.csv`)
 }
+
+/**
+ * exportSheetsToOds — write the workbook as OpenDocument Spreadsheet (.ods).
+ * SheetJS emits ODS natively (`bookType: 'ods'`), so the SAME fortuneToWorksheet
+ * mapping (values, number formats via `z`, merged cells, multiple sheets) is
+ * reused — round-trips cleanly with the xlsx path. Formula-injection is not a
+ * concern for the binary ODS body (cells are typed, not re-parsed as text like a
+ * CSV); the chart-metadata sheet still runs through escapeChartText.
+ */
+export function exportSheetsToOds(data, filename) {
+  const wb = XLSX.utils.book_new()
+  for (const sheet of data) {
+    XLSX.utils.book_append_sheet(wb, fortuneToWorksheet(sheet), sheet.name || 'Sheet')
+  }
+  const meta = chartsMetaSheet(data)
+  if (meta) XLSX.utils.book_append_sheet(wb, meta, 'Vulos Charts')
+  const buf = XLSX.write(wb, { bookType: 'ods', type: 'array' })
+  saveAs(new Blob([buf], { type: 'application/vnd.oasis.opendocument.spreadsheet' }), `${filename}.ods`)
+}

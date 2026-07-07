@@ -8,7 +8,7 @@ import {
 import { useFilesStore } from '../store/filesStore'
 import { useLocalFilesStore } from '../store/localFilesStore'
 import NewFileModal from './NewFileModal'
-import { importFromUrl, importFile } from '../lib/importFile'
+import { importFromUrl, importFile, detectType } from '../lib/importFile'
 import { Button, IconButton, Input, Card, Tooltip, useToast, DocThumb, Skeleton } from './ui'
 
 // ─── Token-aligned config ─────────────────────────────────────────────────────
@@ -19,8 +19,8 @@ const CONFIG = {
     iconCn: 'text-accent',       bgCn: 'bg-accent-tint',
     route: 'docs', emptyMsg: 'No documents yet',
     localExts: ['.doc', '.docx', '.txt', '.md', '.rtf', '.odt'],
-    extLabel: 'docx, doc, txt, md',
-    importExts: '.doc,.docx,.txt,.md,.rtf,.html',
+    extLabel: 'docx, odt, txt, md, html',
+    importExts: '.docx,.txt,.md,.rtf,.html,.htm,.odt',
     canCreate: true,
   },
   sheet: {
@@ -29,8 +29,8 @@ const CONFIG = {
     iconCn: 'text-success',      bgCn: 'bg-success-bg',
     route: 'sheets', emptyMsg: 'No spreadsheets yet',
     localExts: ['.xls', '.xlsx', '.csv', '.ods'],
-    extLabel: 'xlsx, xls, csv',
-    importExts: '.xls,.xlsx,.csv,.tsv',
+    extLabel: 'xlsx, xls, ods, csv',
+    importExts: '.xlsx,.xls,.csv,.tsv,.ods',
     canCreate: true,
   },
   slide: {
@@ -39,8 +39,8 @@ const CONFIG = {
     iconCn: 'text-warning',      bgCn: 'bg-warning-bg',
     route: 'slides', emptyMsg: 'No presentations yet',
     localExts: ['.ppt', '.pptx', '.odp'],
-    extLabel: 'pptx, ppt',
-    importExts: '.pptx,.ppt',
+    extLabel: 'pptx, odp',
+    importExts: '.pptx,.odp',
     canCreate: true,
   },
   pdf: {
@@ -84,20 +84,45 @@ export default function AppHome({ type }) {
   const [renaming, setRenaming] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [importing, setImporting] = useState(null)
+  const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef(null)
 
-  const handleImportFile = async (e) => {
-    const file = e.target.files[0]
+  // Unified Open: route ANY dropped/picked office file to its app + importer via
+  // detectType (a .xlsx dropped on the Docs home still opens in Sheets). Errors
+  // (unsupported ext, oversize, zip-bomb, parse failure) surface as a toast.
+  const openImportedFile = async (file) => {
     if (!file) return
-    e.target.value = ''
     setImporting('__file__')
     try {
+      if (!detectType(file.name)) {
+        throw new Error(`Cannot open .${(file.name.split('.').pop() || '').toLowerCase()} files.`)
+      }
       await importFile(file, navigate)
     } catch (err) {
       showToast(`Could not open ${file.name}: ${err.message}`, 'error')
     } finally {
       setImporting(null)
     }
+  }
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files[0]
+    e.target.value = ''
+    await openImportedFile(file)
+  }
+
+  const onDragOver = (e) => { e.preventDefault(); if (!dragActive) setDragActive(true) }
+  const onDragLeave = (e) => {
+    // Only clear when the pointer actually leaves the drop container (not on a
+    // child-element boundary crossing).
+    if (e.currentTarget.contains(e.relatedTarget)) return
+    setDragActive(false)
+  }
+  const onDrop = async (e) => {
+    e.preventDefault()
+    setDragActive(false)
+    const file = e.dataTransfer?.files?.[0]
+    if (file) await openImportedFile(file)
   }
 
   useEffect(() => { fetchFiles() }, [])
@@ -128,7 +153,22 @@ export default function AppHome({ type }) {
   }
 
   return (
-    <div className="flex-1 overflow-auto bg-bg">
+    <div
+      className="flex-1 overflow-auto bg-bg relative"
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {/* ── Drag-and-drop overlay (unified Open) ── */}
+      {dragActive && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-accent-tint/80 backdrop-blur-sm border-2 border-dashed border-accent m-3 rounded-xl pointer-events-none">
+          <div className="text-center">
+            <Upload size={32} className="text-accent mx-auto mb-2" />
+            <p className="font-serif text-lg text-ink">Drop to open</p>
+            <p className="text-sm text-ink-muted">docx, xlsx, pptx, odt, ods, odp, pdf and more</p>
+          </div>
+        </div>
+      )}
       {/* ── Topbar ── */}
       <div className="sticky top-0 z-10 flex items-center gap-3 px-5 h-11 bg-paper border-b border-line">
         {/* App icon */}

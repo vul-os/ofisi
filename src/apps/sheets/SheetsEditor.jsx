@@ -10,8 +10,9 @@ import {
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
 import { readDraft, clearDraft } from '../../lib/draftStore'
-import { exportSheetsToXlsx, exportSheetsToCsv } from './sheetsExport'
+import { exportSheetsToXlsx, exportSheetsToCsv, exportSheetsToOds } from './sheetsExport'
 import { importCSVFile } from './csvImport'
+import { workbookToSheets } from './sheetsImport'
 import { GridSession, getGridReplicaId } from '../../lib/crdt/grid.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
@@ -853,26 +854,37 @@ export default function SheetsEditor() {
     e.target.value = ''
   }
 
-  // ── Import XLSX (server-side) ───────────────────────────────────────────────
+  // ── Import XLSX / XLS / ODS (client-side, bounded) ─────────────────────────
+  // Parsed via the shared bounded importer (workbookToSheets): size gate + cell/
+  // sheet caps + zip-bomb bounds (via SheetJS's own hardened parser), preserving
+  // values, formulas (as inert data), number formats, merges, and column widths.
+  // Imported sheets are APPENDED (never destroy the open workbook); a name clash
+  // is de-duplicated so Fortune-Sheet keeps distinct sheet ids.
   const handleImportXLSX = async (e) => {
     const file = e.target.files?.[0]
-    if (!file || !id) return
-    const form = new FormData()
-    form.append('file', file)
+    if (!file) return
     try {
-      const res = await fetch(`/api/sheets/${id}/import`, { method: 'POST', body: form })
-      if (res.ok) {
-        // Reload file content from server.
-        const updated = await api.getFile(id)
-        setData(loadContent(updated.content) || data)
-        showToast(`Imported “${file.name}”`, 'success')
-      } else {
-        console.error('XLSX import failed:', await res.text())
-        showToast('Could not import spreadsheet — the server rejected the file.', 'error')
-      }
+      const buf = await file.arrayBuffer()
+      const imported = workbookToSheets(buf, file.name)
+      setData((prev) => {
+        const used = new Set(prev.map((s) => s.name))
+        const appended = imported.map((s) => {
+          let name = s.name || 'Sheet'
+          let n = 1
+          while (used.has(name)) name = `${s.name} (${++n})`
+          used.add(name)
+          return { ...s, name }
+        })
+        const next = [...prev, ...appended]
+        markDirty(id)
+        clearTimeout(saveTimer.current)
+        saveTimer.current = setTimeout(() => doSave(next), AUTOSAVE_DELAY_MS)
+        return next
+      })
+      showToast(`Imported “${file.name}”`, 'success')
     } catch (err) {
-      console.error('XLSX import error:', err)
-      showToast('Could not import spreadsheet — check your connection and try again.', 'error')
+      console.error('Spreadsheet import failed:', err)
+      showToast(`Could not import “${file.name}” — ${err.message}`, 'error')
     }
     e.target.value = ''
   }
@@ -931,9 +943,9 @@ export default function SheetsEditor() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg">
       {/* Hidden file inputs for import */}
-      <input ref={importInputRef} type="file" className="hidden" accept=".csv,.xlsx" onChange={(e) => {
-        const name = e.target.files?.[0]?.name || ''
-        if (name.endsWith('.xlsx')) handleImportXLSX(e)
+      <input ref={importInputRef} type="file" className="hidden" accept=".csv,.tsv,.xlsx,.xls,.ods" onChange={(e) => {
+        const name = (e.target.files?.[0]?.name || '').toLowerCase()
+        if (/\.(xlsx|xls|ods)$/.test(name)) handleImportXLSX(e)
         else handleImportCSV(e)
       }} />
 
@@ -1103,9 +1115,13 @@ export default function SheetsEditor() {
                 <span className="text-2xs font-bold tracking-eyebrow text-ink-faint w-10">CSV</span>
                 CSV file
               </Menu.Item>
-              <Menu.Item onClick={() => { if (importInputRef.current) { importInputRef.current.accept = '.xlsx'; importInputRef.current.click() } }}>
+              <Menu.Item onClick={() => { if (importInputRef.current) { importInputRef.current.accept = '.xlsx,.xls'; importInputRef.current.click() } }}>
                 <span className="text-2xs font-bold tracking-eyebrow text-accent w-10">XLSX</span>
                 Excel workbook
+              </Menu.Item>
+              <Menu.Item onClick={() => { if (importInputRef.current) { importInputRef.current.accept = '.ods'; importInputRef.current.click() } }}>
+                <span className="text-2xs font-bold tracking-eyebrow text-success w-10">ODS</span>
+                OpenDocument sheet
               </Menu.Item>
             </Menu>
 
@@ -1122,6 +1138,10 @@ export default function SheetsEditor() {
               <Menu.Item onClick={() => exportSheetsToXlsx(data, title)}>
                 <span className="text-2xs font-bold tracking-eyebrow text-accent w-10">XLSX</span>
                 Excel workbook
+              </Menu.Item>
+              <Menu.Item onClick={() => exportSheetsToOds(data, title)}>
+                <span className="text-2xs font-bold tracking-eyebrow text-success w-10">ODS</span>
+                OpenDocument sheet
               </Menu.Item>
               <Menu.Item onClick={() => exportSheetsToCsv(data, title)}>
                 <span className="text-2xs font-bold tracking-eyebrow text-ink-faint w-10">CSV</span>
