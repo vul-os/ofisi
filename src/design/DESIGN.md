@@ -14,80 +14,94 @@ or extend a token instead.
 
 ## 1. Direction
 
+The suite is **dark-first** and aligned with the vulos-cloud landing surface: a
+near-black, restrained, IDE / terminal aesthetic. No rainbow, no glow. Dark is
+the DEFAULT canvas; a clean light theme is opt-in via the app toggle.
+
 We are drawing from:
 
 - **Linear** — information density without clutter; quiet active states; keyboard polish.
-- **Mercury** (Banking UI) — warm neutrals, calm motion, restrained chrome.
+- **vulos-cloud / IDE chrome** — near-black surfaces, hairline 1px borders, one deliberate accent.
 - **Tana / Bear** — document-first; the editing surface is the protagonist.
-- **Vercel** — typographic discipline; uppercase eyebrows; tight tracking on chrome.
+- **Vercel** — typographic discipline; uppercase mono eyebrows; tight tracking on chrome.
 
 We are explicitly **avoiding**:
 
 - shadcn defaults, Material Design, default Tailwind UI starters.
-- Glassmorphism, neumorphism, heavy gradients, bright purple-on-white.
-- Inter as the only typeface, generic react-icons sets, Bootstrap blue (`#3b82f6`).
+- Glassmorphism, neumorphism, heavy gradients, bloom / glow shadows.
+- Slate-blue dark modes (`#0f172a`), generic react-icons sets, Bootstrap blue (`#3b82f6`).
 
 ---
 
 ## 2. Colour
 
+The system is **near-black dark by default** (an IDE baseline), with an opt-in
+light theme. All values live in [`tokens.css`](./tokens.css); the table below
+is a summary — `tokens.css` is authoritative.
+
 ### 2.1 Palette
 
-| Token        | Light                  | Dark                  | Purpose                                           |
-| ------------ | ---------------------- | --------------------- | ------------------------------------------------- |
-| `bg`         | `#fbf9f5` (oat-50)     | `#131110`             | App background                                    |
-| `paper`      | `#ffffff`              | `#1c1a17`             | Document surface, cards                           |
-| `clay`       | `#f5f1ea` (oat-100)    | `#25221d`             | Sidebar, sunken panels                            |
-| `ink`        | `#1a1916`              | `#f1ece2`             | Primary text                                      |
-| `ink-muted`  | `#4d4940`              | `#c8c0b0`             | Secondary text                                    |
-| `ink-faint`  | `#8e8470`              | `#8e8674`             | Metadata, eyebrows, placeholders                  |
-| `line`       | `#ece5da`              | `#2a2622`             | Hairline dividers, default borders                |
-| `line-strong`| `#d8cebd`              | `#3a352e`             | Input borders, hover-emphasised dividers          |
-| `accent`     | `#0f6a6c` (teal-600)   | `#3fad9b` (teal-400)  | The one accent. Primary buttons, focus, links.    |
-| `accent-tint`| `#effaf8`              | `rgba(63,173,155,.10)`| Hover background on toolbars, comment anchors     |
-| `success`    | `#4f7a4d` (sage)       | same                  | "Saved", resolved comments, accepted suggestion   |
-| `warning`    | `#c08436` (honey)      | same                  | "Restore draft" banners, soft validations         |
-| `danger`     | `#b8453a` (persimmon)  | same                  | Save errors, destructive actions                  |
-| `info`       | `#4a6b8a` (dusty navy) | same                  | The ONLY blue we use — neutral info states / badges |
+| Token           | Dark (default)          | Light (opt-in)         | Purpose                                       |
+| --------------- | ----------------------- | ---------------------- | --------------------------------------------- |
+| `bg`            | `#0c0c0c`               | `#ffffff`              | Base app canvas                               |
+| `bg-elev-1` / `paper` | `#111111`         | `#ffffff`              | Panels, cards, primary surface                |
+| `bg-elev-2`     | `#1a1a1a`               | `#f7f7f7`              | Rails, headers, elevated chrome               |
+| `bg-sunk`       | `#090909`               | `#eeeeee`              | Deepest sunk wells                            |
+| `ink`           | `#e5e5e5`               | `#1a1a1a`              | Primary text                                  |
+| `ink-muted`     | `#cccccc`               | `#444444`              | Secondary text                               |
+| `ink-faint`     | `#888888`               | `#777777`              | Metadata, eyebrows, placeholders              |
+| `line`          | `#1a1a1a`               | `#e8e8e8`              | Hairline dividers, default borders            |
+| `line-strong`   | `#222222`               | `#dcdcdc`              | Input borders, hover-emphasised dividers      |
+| `accent`        | `#0f6a6c` (teal-600)    | `#0f6a6c` (teal-600)   | The one accent. Primary buttons, focus, links |
+| `accent-press`  | `#2dd4bf` (teal-300)    | `#0a4548`              | Bright active text/icon on dark               |
+| `accent-tint`   | `#0e1f1f`               | `#e6f2f1`              | Selected / hover tint on toolbars & anchors   |
+| `brand`         | `#C96AFF` (Vulos purple)| same                   | Occasional brand accent only — never a 2nd UI accent |
 
 ### 2.2 The accent rule
 
-**There is exactly one accent: deep teal.**  We picked it over terracotta to
-read calm + trustworthy on a Docs/Signing surface.  Do not introduce a second
-accent.  When you need a new category colour (e.g. for an app icon), use one
-of the existing signal hues (`warning`, `danger`, `success`, `info`), or stay
-in the warm-neutral scale.
+**There is exactly one UI accent: deep teal (`#0f6a6c`).**  It reads calm +
+trustworthy on a Docs/Signing surface and is committed across office + cloud.
+Do not introduce a second UI accent.  **Vulos purple (`#C96AFF`)** exists as an
+occasional *brand* mark only (and doubles as the neutral `info` signal); it is
+never a general-purpose interactive accent.  When you need a new category colour
+(e.g. an app icon), use a signal hue or one of the per-app icon tints below.
 
-### 2.3 Signal colours are warm
+### 2.3 Signal + per-app colours
 
-We do not use generic `green-500` / `red-500` / `blue-500`.  Our signal
-palette skews warm — **sage**, **persimmon**, **honey**, **dusty navy** — to
-sit comfortably alongside the oat neutrals.
+Signal colours are the cloud semantic set: `warning` amber (`#f59e0b`), `error`
+rose (`#f43f5e`), `success` teal (`#2dd4bf`), `info` purple (`#C96AFF`) — each
+with a low-alpha `-bg` companion so backgrounds never shout.  Each app carries
+one low-saturation icon tint so Docs / Sheets / Slides / PDF / Talk are
+findable at a glance (`--app-docs` blue, `--app-sheets` green, `--app-slides`
+amber, `--app-pdf` red, `--app-talk` teal) — these colour the icon *stroke* in
+the rail and the Home card chip, never a row background.
 
 ---
 
 ## 3. Typography
 
-### 3.1 The pair
+### 3.1 The trio
 
 | Role     | Token         | Stack                                                                                  |
 | -------- | ------------- | -------------------------------------------------------------------------------------- |
-| Chrome   | `--font-sans` | `ui-sans-serif`, then OS-native grotesques (SF Pro, Segoe UI Variable, Inter Display) |
+| Chrome   | `--font-sans` | **Inter** (webfont), then `system-ui`, SF Pro, Segoe UI                                |
 | Document | `--font-serif`| `ui-serif`, then OS-native serifs (Iowan Old Style, Charter, Source Serif Pro, Cambria)|
-| Code     | `--font-mono` | `ui-monospace`, JetBrains Mono, SF Mono, Menlo                                         |
+| Micro-UI | `--font-mono` | `ui-monospace`, SF Mono, Cascadia Code, Fira Code, JetBrains Mono, Menlo                |
 
-We deliberately **do not ship Inter as a webfont**.  `ui-sans-serif` gives a
-characterful, OS-native grotesque on every modern platform and keeps the
-bundle tiny.  This is the same approach Vercel's new editorial sites use.
+Chrome ships **Inter** as a webfont (imported at the top of `tokens.css`) to
+match the vulos-cloud landing exactly across every OS. The **mono** face carries
+the IDE feel: section eyebrows, `kbd` chips, and micro-UI labels (`.mono-label`)
+render in mono with wide tracking. Serif stays reserved for document bodies.
 
-**Optional upgrade**: if a brand needs strict cross-OS consistency, self-host
-`Inter Display` + `Source Serif Pro` and override the two CSS variables in
+**Optional swap**: to change the chrome face, override `--font-sans` in
 `tokens.css` — no other change is needed.
 
 ### 3.2 Where each font goes
 
-- **Sans (chrome)**: the entire app shell, toolbars, sidebars, buttons,
-  metadata, comment author names, table headers, code.
+- **Sans / Inter (chrome)**: the entire app shell, toolbars, sidebars, buttons,
+  metadata, comment author names, table headers.
+- **Mono (micro-UI)**: uppercase section eyebrows (`.mono-label`), keyboard
+  hints, and terminal-flavoured labels.
 - **Serif (document)**: TipTap document body (`.tiptap p`, `.tiptap blockquote`,
   task list bodies), comment anchor quotes (`"…"`), SignView display
   headlines (`Welcome back.`, `Signed.`, `<Signer name>`).
@@ -99,12 +113,10 @@ you want an editorial moment (e.g. "Signed." on the post-submit page).
 ### 3.3 Scale and tracking
 
 The scale is `--text-2xs` (11px) → `--text-3xl` (36px), minor-third ratio
-anchored at 14 px.  All chrome uses **tracking-tightish** (`-0.014em`);
-uppercase eyebrows use **tracking-eyebrow** (`0.08em`).
+anchored at 14 px.  Chrome uses the token-backed `tracking-tight` (`-0.014em`);
+uppercase mono eyebrows use `tracking-wider` (`0.12em`) for the IDE feel.
 
-Do not use Tailwind's default `tracking-tight` / `tracking-wider` — use the
-token-backed `tracking-tightish` / `tracking-eyebrow` so refinement stays
-consistent.
+Reach for the token-backed tracking utilities so refinement stays consistent.
 
 ---
 
@@ -128,8 +140,9 @@ Generous whitespace beats density — give every section room.
 
 ### 4.3 Elevation
 
-Three steps only.  All shadows have a warm tint (`rgba(36, 28, 16, …)` in
-light mode) and ride low — the UI should look **printed**, not floating.
+Three steps only.  Shadows are deep and neutral (`rgba(0,0,0,…)` on the
+near-black dark canvas; a soft `rgba(20,20,20,…)` in light mode) with **no
+bloom** — the UI should look printed/inset, not floating.
 
 | Token        | Use                                                       |
 | ------------ | --------------------------------------------------------- |
@@ -147,7 +160,7 @@ feel "raised", it should be by a border + e1, not by a giant drop.
 
 | Token              | Value                                  | Use                                |
 | ------------------ | -------------------------------------- | ---------------------------------- |
-| `duration-fast`    | 120 ms                                 | Hover / focus colour transitions   |
+| `duration-fast`    | 150 ms                                 | Hover / focus colour transitions   |
 | `duration-base`    | 200 ms                                 | Default opens, tab switches        |
 | `duration-slow`    | 320 ms                                 | Modals, page reveals, scrolls      |
 | `ease-out`         | `cubic-bezier(.22, .61, .36, 1)`        | Default UI ease                    |
@@ -190,8 +203,8 @@ backgrounds — that's the Tailwind-UI cliché.
 
 ### 6.4 Modals
 
-Use `<Modal>`.  Backdrop is `rgba(26, 25, 22, 0.36)` (warm ink at 36 %), with
-a 2 px blur.  Open animation is `scale-in` with `ease-spring`.
+Use `<Modal>`.  Backdrop is a near-black ink scrim with a 2 px blur.  Open
+animation is `scale-in` with `ease-spring`.
 
 ### 6.5 Sidebar
 
@@ -263,7 +276,7 @@ protagonist.  All these effects collapse under `prefers-reduced-motion`.
 - Reach for tokens (`bg-paper`, `text-ink`, `border-line`, `bg-accent`).
 - Pair sans chrome with serif document bodies.
 - Use one accent button per surface.
-- Use the `tracking-eyebrow` + uppercase 11-px label for section headings.
+- Use the mono `tracking-wider` + uppercase 11-px `.mono-label` for section headings.
 - Animate panel mounts with the provided keyframes.
 - Use `paper-grain` on hero / signer-facing surfaces for letterpress tooth.
 - Force `data-theme="light"` on public-facing surfaces (e.g. SignView) so a
@@ -274,28 +287,31 @@ protagonist.  All these effects collapse under `prefers-reduced-motion`.
 - Don't write `bg-indigo-500`, `text-gray-700`, `border-gray-200`.  These
   bypass the token layer.  Use semantic tokens.
 - Don't use `shadow-2xl` or `shadow-lg`.  Use `e1` / `e2` / `e3`.
-- Don't use emerald / red-500 for success / error.  Use `success` / `danger`.
-- Don't introduce a second accent — extend a category colour instead.
-- Don't add Inter back as a webfont.  If you need a specific look, override
-  the two CSS variables in `tokens.css`.
+- Don't use emerald / red-500 for success / error.  Use `success` / `error`.
+- Don't introduce a second UI accent — `brand` purple is a mark, not a control.
+- Don't swap Inter for a different chrome face inline.  Override `--font-sans`
+  in `tokens.css` if a look is needed.
 - Don't introduce framer-motion / motion-one / react-spring without a
   cross-team review — CSS keyframes + Tailwind transitions cover 95 % of
   what we need.
 
 ---
 
-## 8. Dark mode
+## 8. Theme model — dark by default
 
-Dark mode is **first-class**, not an inversion.
+Dark is the **default** canvas (the IDE baseline); light is a first-class
+opt-in, not a grudging inversion.
 
-- Triggered by `[data-theme="dark"]` on `<html>` OR by OS preference if no
-  explicit override.
-- Surfaces use warm-dark coffee tones (`#131110` base, `#1c1a17` paper),
-  not slate (`#0f172a`).
-- The accent shifts from `teal-600` (light) to `teal-400` (dark) for legibility.
-- Signal backgrounds get a 14 % alpha overlay so they don't shout.
-- `.paper-grain` reduces its opacity and switches to screen-blend in dark
-  mode so the texture remains subtle.
+- The `:root` default IS the dark theme (near-black `#0c0c0c` base, `#111111`
+  paper), matching vulos-cloud — **not** slate (`#0f172a`). `[data-theme="dark"]`
+  is an explicit alias of the default so the cycler has a concrete target.
+- `[data-theme="light"]` opts into the clean white/grey light theme (same teal
+  accent, per-app tints darkened for AA contrast on white).
+- The teal accent (`#0f6a6c`) is committed across both themes; on dark, active
+  text/icons brighten to `accent-press` (`teal-300 #2dd4bf`) for legibility.
+- Signal backgrounds ride a low (10–14 %) alpha overlay so they don't shout.
+- `.paper-grain` reduces its opacity / switches blend in dark so the texture
+  stays subtle.
 
 The `useTheme()` hook (in `components/ui/useTheme.js`) provides explicit
 light / dark / system cycling, persisted to `localStorage['vulos.theme']`.

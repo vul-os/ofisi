@@ -9,7 +9,7 @@
 Docs · Sheets · Slides · PDF Signing
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-informational)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0-informational)](CHANGELOG.md)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -58,13 +58,14 @@ Products never import each other — Vulos Workspace *links/embeds* them across 
 
 | Surface | Description |
 |---------|-------------|
-| **Docs** | Rich-text editing via TipTap — headings, tables, task lists, links, images, comments |
-| **Sheets** | Full spreadsheet grid via Fortune Sheet — formulas, formatting, multi-sheet, charts, pivots |
-| **Slides** | Presentation editor powered by Reveal.js — theme, transition, and present from the browser |
-| **Signing** | View, annotate, and sign PDFs; multi-party signing envelopes with a cryptographic audit trail |
-| **Import / Export** | `.docx`, `.xlsx`, `.csv`, `.pptx`, `.pdf`, Markdown, and from URL |
-| **Storage** | Local files + SQLite by default; optional PostgreSQL for multi-user |
-| **Auth** | Optional password / JWT login — off by default for local use |
+| **Docs** | Rich-text editing via TipTap — headings, tables, inline images (resize/align/alt), footnotes, task lists, links; anchored **comments**, **suggestions** (track-changes with accept/reject), **version history** with restore, find/replace, live document outline + word count |
+| **Sheets** | Full spreadsheet grid via Fortune Sheet — formulas, number formats, conditional formatting, **data validation**, **charts** (column/bar/line/area/pie), **filters**, **pivot tables**, **named ranges**, freeze panes |
+| **Slides** | Presentation editor powered by Reveal.js — **themes**, editable **master slides**, per-slide **transitions**, entrance animations, **presenter view** (notes + timer in a second window), template gallery, present from the browser |
+| **Signing** | View, **annotate** (text/draw/shapes), and **sign** PDFs (draw/type/upload); multi-party signing envelopes (sequential or parallel) with a public signer page and a cryptographic audit trail; page reorder/rotate/insert/extract |
+| **Real-time collab** | CRDT co-editing over three transports: always-on **server-mediated (SSE, ACL-gated)**, low-latency **cloud P2P fabric**, and **E2E-encrypted P2P** via invite link. Live presence + remote cursors |
+| **Import / Export** | Docs `.docx` / Markdown / HTML / PDF · Sheets `.xlsx` / `.csv` · Slides `.pptx` / PDF · PDF signing; import from URL |
+| **Storage** | Local files + SQLite by default; optional PostgreSQL (schema `office`) for multi-user; optional S3-compatible object store |
+| **Auth** | Optional password / JWT login — off by default for local use; per-file ACLs when multi-user |
 | **Single binary** | The Go server embeds the whole frontend — one file to deploy |
 | **PWA-ready** | Installable as a desktop / mobile app via web manifest |
 | **Observability** | Prometheus metrics at `/metrics` and optional OpenTelemetry traces |
@@ -178,6 +179,55 @@ The boundary between Office's core and any external control plane is a small set
 | `seam.Usage` | `NoopUsage` — discards metering (Prometheus still exported) |
 
 The cloud adapter lives in a **separate package** and is selected *only* when `VULOS_CP_BASE_URL` is set. With it unset (the default), none of it runs. See [SELFHOST.md](SELFHOST.md) for the full seam contract.
+
+---
+
+## Real-time collaboration
+
+Co-editing is **CRDT-based**. Every surface diffs local edits into commutative
+CRDT ops (a RGA text CRDT for Docs — mirroring the Go `backend/crdt/text.go` —
+plus LWW grid, fractional-index tree, and comment/suggestion CRDTs). Ops fan out
+over **three complementary transports**, and because the CRDT apply is
+idempotent, ops arriving from more than one transport converge with no
+double-apply:
+
+| Transport | When | Notes |
+|-----------|------|-------|
+| **Server-mediated (SSE)** | Always-on account path | Ops stream over SSE, are ACL-gated, and persisted authoritatively — a doc converges and stays saved even with **zero peers**, and a late joiner catches up from the server. |
+| **Cloud P2P fabric** | When peers can connect | Low-latency WebRTC + relay-fallback over the Vulos peer fabric (plaintext). |
+| **E2E-encrypted P2P** | "Collaborate via link" | Ops sealed with AES-256-GCM; the room key is HKDF-derived and carried in the URL **fragment** (never sent to the server). While active, the server path is **suppressed** so encrypted ops never traverse a readable relay. |
+
+Live **presence** (avatar stack + peer count) and **remote cursors/selections**
+render on top of whichever transport is active.
+
+---
+
+## Security model
+
+- **HTML sanitisation is centralised** in `src/lib/sanitize.js` — one audited
+  DOMPurify policy for every surface that renders user- or peer-supplied markup
+  (Docs import/export, Slides, search highlights). Scripts, `<iframe>`, `<object>`,
+  form controls, and all inline `on*` handlers are stripped.
+- **Inline `style` is allow-listed**, not blocklisted: only benign Docs
+  properties survive (colour, font, spacing, borders, table sizing). Positioning
+  overlays, `content:`, `behavior:`, and any fetch/exec function (`url()`,
+  `image()`, `expression()`, `@import`, …) are dropped fail-closed.
+- **Inline images are raster-only**: `<img src>` accepts http(s)/relative URLs or
+  base64 raster data: URIs; every non-raster data: URI (`data:image/svg+xml`,
+  `data:text/html`, …), `srcset`, and script-bearing MIME-lie is rejected. The
+  same `isSafeImageSrc` predicate also gates the **collab/JSON-reload ingress
+  path** so a hostile peer op can't smuggle an unsafe `src`.
+- **CRDT ingress is fail-closed**: remote text ops are validated (codepoint
+  bounds, no UTF-16 surrogates) before apply and dropped on failure — never
+  throw — so a malformed/oversized op can't crash or DoS the editor on bootstrap.
+- **Export is injection-safe**: Sheets/chart export neutralises spreadsheet
+  formula-injection (`=`/`+`/`-`/`@` cell prefixes) and escapes cell data before
+  it reaches SVG.
+- **Per-file ACLs** (`backend/fileacl/`) gate read/write/admin on the server
+  collab + persistence paths when multi-user auth is enabled.
+
+See [SECURITY.md](SECURITY.md), [THREAT-MODEL.md](THREAT-MODEL.md), and
+[SECURITY-TESTING.md](SECURITY-TESTING.md) for the full model.
 
 ---
 

@@ -10,6 +10,100 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.0] — 2026-07-07
+
+The **structured-content + real-time collaboration + redesign** release. Docs,
+Sheets, and Slides gained their major editing features; live co-editing now runs
+over three transports; and the whole suite was rebuilt on a token-driven,
+near-black design system. A dedicated security wave hardened the collab and
+sanitiser ingress paths.
+
+### Added — Real-time collaboration (three transports)
+
+- **Server-mediated collab (SSE)** — new `ServerCollabSession` (`src/lib/crdt/
+  serverSession.js`, `src/apps/docs/useServerCollab.js`): ops stream over SSE
+  (`GET …/collab/stream`), are pushed via `POST …/collab/ops`, ACL-gated, and
+  persisted authoritatively. A document converges and stays saved with **zero
+  peers**, and a late joiner bootstraps from the server. Degrades to local-only
+  autosave when the endpoint is absent.
+- **Cloud P2P fabric** — `DocsCollabSession`/`GridSession`/`TreeSession` fan CRDT
+  ops over the Vulos peer fabric (WebRTC + relay fallback) for low-latency
+  co-editing.
+- **E2E-encrypted P2P** ("Collaborate via link") — `P2PCollabSession` seals ops
+  with AES-256-GCM; the HKDF-derived room key rides the URL fragment (never sent
+  to the server), and the server path is suppressed while it is active so
+  encrypted ops never hit a readable relay.
+- **Presence + remote cursors** — live avatar stack, peer count, and remote
+  caret/selection layers across Docs, Sheets, and Slides.
+- All transports share one idempotent/commutative CRDT base (RGA text mirroring
+  `backend/crdt/text.go`, plus LWW grid, fractional-index tree, HLC
+  comment/suggestion stores) so cross-transport ops converge without
+  double-apply.
+
+### Added — Docs structured content
+
+- **Tables** (resizable columns, header scope), **inline images** (raster-only,
+  base64 or http(s), resize / align / alt), and real **footnotes** (auto-numbered
+  inline refs + a re-derived footnote list, baked into HTML/DOCX/Markdown export).
+- **Comments** — anchored text-range comments with threading and resolve/reopen.
+- **Suggestions** — track-changes mode with insert/delete proposals and an
+  accept/reject workflow.
+- **Version history** — named snapshots with restore, plus an activity feed.
+- **Find/replace**, a live **document outline / ToC**, and a **word-count** modal.
+- **Export** — DOCX (images + tables + footnotes preserved), Markdown (GFM
+  pipe-tables), HTML (sanitised), and PDF.
+
+### Added — Sheets
+
+- **Charts** (column / bar / line / area / pie) rendered as live SVG, persisted
+  locally and round-tripped through a "Vulos Charts" metadata sheet on XLSX export.
+- **Data validation** (list / checkbox / date / number / text / custom),
+  **number formats** (currency / percent / date / accounting, XLSX-roundtripped),
+  and **conditional formatting**.
+- **Filters** (named views), **pivot tables** (SUM/AVG/COUNT/MAX/MIN into a new
+  sheet), and **named ranges**.
+- **CSV** and **XLSX** import/export (cells, merges, number formats, chart metadata).
+
+### Added — Slides
+
+- **Themes** (preset gallery), editable **master slides** (title/content/section
+  layouts), per-slide **transitions** and entrance animations.
+- **Presenter view** — a second window with current/next slide, speaker notes,
+  timer, and progress, synced via BroadcastChannel.
+- **Template gallery** (pitch / project plan / lesson plan / quarterly review)
+  and **PPTX** export (via pptxgenjs) alongside PDF.
+
+### Changed — UI/UX redesign
+
+- Rebuilt on a **token-first, near-black design system** (`src/design/tokens.css`)
+  aligned with the vulos-cloud landing: IDE aesthetic, one deep-teal accent,
+  Inter chrome + mono micro-UI, hairline borders, deep no-bloom elevation. Dark
+  is the default canvas; a clean light theme is opt-in.
+- New shared primitives: `SaveStatus` (breathing save dot), `Avatar`/`AvatarStack`
+  (deterministic presence chips), `EmptyState`, `DocThumb` (per-type launcher
+  thumbnails), plus a `.toolbar-surface` / `<ToolbarButton>` toolbar language and
+  premium `.doc-desk` / `.slide-stage` canvas surfaces. `docs/DESIGN.md` updated
+  to the near-black token model.
+
+### Security
+
+- **CRDT DoS fail-close** — remote text ops are validated (codepoint bounds, no
+  UTF-16 surrogates) before apply and dropped on failure instead of throwing, so
+  a malformed/oversized op can't crash or DoS the editor on bootstrap.
+- **Sanitiser hardening** — centralised DOMPurify policy in `src/lib/sanitize.js`;
+  inline `style` moved from a brittle blocklist to a **property allow-list**
+  (positioning overlays, `content:`, fetch/exec functions all dropped fail-closed).
+- **Image src policy + collab ingress** — `<img>` restricted to raster data: URIs
+  (require `;base64,`; reject SVG/XML/HTML and the raster MIME-lie form) and
+  http(s)/relative URLs; `srcset`/`href`/`xlink:href` channels closed. The same
+  `isSafeImageSrc` predicate gates the collab/JSON-reload ingress path so a
+  hostile peer op can't smuggle an unsafe `src`.
+- **Chart export injection** — spreadsheet formula-injection prefixes
+  (`=`/`+`/`-`/`@`) neutralised and cell data escaped before SVG render; charts
+  clamped to finite geometry on draft-restore.
+
+---
+
 ## [0.1.0] — 2026-06-29
 
 ### Added — Standalone, server-honest Settings + admin surface
