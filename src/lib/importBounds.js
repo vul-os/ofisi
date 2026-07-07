@@ -112,28 +112,92 @@ export async function safeLoadZip(arrayBuffer, filename = 'file') {
 }
 
 /**
- * entryText — read one zip entry as a string, re-checking the ACTUAL inflated
- * length against the single-entry cap (defence-in-depth if the declared size in
- * the central directory lied). Returns '' for a missing entry.
+ * inflateEntryBounded — decompress ONE zip entry with a HARD memory cap that is
+ * enforced *while* inflating, aborting the moment the running output exceeds the
+ * budget — never after fully decompressing.
+ *
+ * Why streaming and not `f.async('uint8array')`: JSZip's `async` accumulates
+ * every inflated chunk and only concatenates at the end, so a `f.async()` call
+ * followed by a `buf.length > cap` check reads the ENTIRE bomb into memory before
+ * the check can fire (OOM). Worse, JSZip's zip-bomb accounting (and ours in
+ * safeLoadZip) trusts the central directory's *declared* uncompressedSize — a
+ * hostile archive can declare 100 bytes while the deflate stream actually
+ * inflates to gigabytes (a "lying central directory"), sailing past every
+ * declared-size gate. The only sound defence is to bound the ACTUAL inflate.
+ *
+ * JSZip inflates via a pako worker pipeline that emits 16 KB output chunks and
+ * honours `pause()` between async ticks, so we accumulate chunks and, the instant
+ * the running total exceeds the cap, pause the pipeline and reject — the giant
+ * contiguous buffer is never allocated and no further input is inflated.
+ *
+ * A per-archive cumulative budget (`zip.__inflatedRemaining`, seeded to
+ * MAX_TOTAL_UNCOMPRESSED) is decremented across every entry read, so a bomb split
+ * across MANY lying entries (each individually under the single-entry cap) still
+ * cannot exceed the total-decompressed ceiling.
+ */
+function inflateEntryBounded(zip, name, perEntryCap = MAX_SINGLE_ENTRY) {
+  const f = zip.files[name]
+  if (!f) return Promise.resolve(null)
+  const remaining = typeof zip.__inflatedRemaining === 'number'
+    ? zip.__inflatedRemaining
+    : MAX_TOTAL_UNCOMPRESSED
+  const cap = Math.min(perEntryCap, remaining)
+  return new Promise((resolve, reject) => {
+    let stream
+    try {
+      stream = f.internalStream('uint8array')
+    } catch (e) {
+      reject(new ImportError(`entry "${name}" could not be read: ${e.message}`))
+      return
+    }
+    const chunks = []
+    let total = 0
+    let settled = false
+    const fail = (msg) => {
+      if (settled) return
+      settled = true
+      try { stream.pause() } catch { /* best-effort */ }
+      reject(new ImportError(msg))
+    }
+    stream.on('data', (chunk) => {
+      if (settled) return
+      total += chunk.length
+      if (total > cap) {
+        // Abort mid-inflate: over the (per-entry ∩ per-archive) budget.
+        fail(`entry "${name}" exceeds the decompressed-size limit (possible zip-bomb).`)
+        return
+      }
+      chunks.push(chunk)
+    })
+    stream.on('error', (e) => fail(`entry "${name}" could not be decompressed: ${(e && e.message) || e}`))
+    stream.on('end', () => {
+      if (settled) return
+      settled = true
+      zip.__inflatedRemaining = remaining - total
+      const out = new Uint8Array(total)
+      let i = 0
+      for (const c of chunks) { out.set(c, i); i += c.length }
+      resolve(out)
+    })
+    stream.resume()
+  })
+}
+
+/**
+ * entryText — read one zip entry as a string, enforcing the single-entry +
+ * per-archive decompressed caps *during* inflation (see inflateEntryBounded).
+ * Returns '' for a missing entry.
  */
 export async function entryText(zip, name) {
-  const f = zip.files[name]
-  if (!f) return ''
-  const buf = await f.async('uint8array')
-  if (buf.length > MAX_SINGLE_ENTRY) {
-    throw new ImportError(`entry "${name}" exceeds the decompressed-size limit.`)
-  }
+  const buf = await inflateEntryBounded(zip, name)
+  if (buf === null) return ''
   return new TextDecoder('utf-8').decode(buf)
 }
 
 /** Read one zip entry as a base64 data: URI with the given MIME — bounded. */
 export async function entryDataUri(zip, name, mime) {
-  const f = zip.files[name]
-  if (!f) return ''
-  const buf = await f.async('uint8array')
-  if (buf.length > MAX_SINGLE_ENTRY) {
-    throw new ImportError(`entry "${name}" exceeds the decompressed-size limit.`)
-  }
+  const buf = await inflateEntryBounded(zip, name)
+  if (buf === null) return ''
   // Chunked base64 to avoid a call-stack blow-up on large arrays.
   let bin = ''
   const CHUNK = 0x8000
@@ -175,4 +239,4 @@ export function parseXmlSafe(xml, label = 'xml') {
   return doc
 }
 
-export { isUnsafeEntryName }
+export { isUnsafeEntryName, inflateEntryBounded }
