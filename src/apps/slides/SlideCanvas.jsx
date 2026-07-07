@@ -80,9 +80,13 @@ export default function SlideCanvas({
   const ordered = sortByZ(objects || [])
   const selSet = new Set(selectedIds)
 
-  // Convert a pointer event to stage-fraction coords.
+  // Convert a pointer event to stage-fraction coords. Guards a missing stage
+  // (e.g. a stray listener firing after unmount) by returning null.
   const toFrac = useCallback((e) => {
-    const r = stageRef.current.getBoundingClientRect()
+    const el = stageRef.current
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    if (!r.width || !r.height) return null
     return {
       x: (e.clientX - r.left) / r.width,
       y: (e.clientY - r.top) / r.height,
@@ -91,10 +95,25 @@ export default function SlideCanvas({
 
   // ── Drag-move ─────────────────────────────────────────────────────────────
   const dragRef = useRef(null)
+  // Remove any lingering global drag/marquee listeners on unmount so a stray
+  // pointermove can't fire against a torn-down stage.
+  useEffect(() => () => {
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', onPointerUp)
+    window.removeEventListener('pointermove', onMarqueeMove)
+    window.removeEventListener('pointerup', onMarqueeUp)
+  }) // eslint-disable-line
+
   const startMove = (e, obj) => {
     if (!editable) return
     e.stopPropagation()
+    if (!toFrac(e)) return
     const additive = e.shiftKey
+    // Was this object already the sole selection? A no-drag release on such a
+    // text object enters edit mode (Google-Slides "click again to edit" — more
+    // robust than relying on native dblclick, which a mid-sequence re-render can
+    // swallow). onDoubleClick still works as a shortcut when it does fire.
+    const wasSoleSelected = !additive && selectedIds.length === 1 && selSet.has(obj.id)
     let sel = selectedIds
     if (!selSet.has(obj.id)) {
       sel = additive ? [...selectedIds, obj.id] : [obj.id]
@@ -107,7 +126,8 @@ export default function SlideCanvas({
     const start = toFrac(e)
     const moving = (objects || []).filter((o) => sel.includes(o.id))
     dragRef.current = {
-      kind: 'move', start,
+      kind: 'move', start, moved: false,
+      editOnClick: wasSoleSelected && obj.type === 'text' ? obj.id : null,
       origins: moving.map((o) => ({ id: o.id, x: o.x, y: o.y, w: o.w, h: o.h })),
       ids: moving.map((o) => o.id),
     }
@@ -120,6 +140,7 @@ export default function SlideCanvas({
     if (!editable) return
     e.stopPropagation()
     const start = toFrac(e)
+    if (!start) return
     dragRef.current = {
       kind: 'resize', start, handle,
       origin: { id: obj.id, x: obj.x, y: obj.y, w: obj.w, h: obj.h },
@@ -133,6 +154,7 @@ export default function SlideCanvas({
   const startRotate = (e, obj) => {
     if (!editable) return
     e.stopPropagation()
+    if (!stageRef.current) return
     const r = stageRef.current.getBoundingClientRect()
     const cx = (obj.x + obj.w / 2) * r.width + r.left
     const cy = (obj.y + obj.h / 2) * r.height + r.top
@@ -149,6 +171,8 @@ export default function SlideCanvas({
     const d = dragRef.current
     if (!d) return
     const cur = toFrac(e)
+    if (!cur && d.kind !== 'rotate') return  // rotate uses cached centre, not toFrac
+    d.moved = true  // a real drag happened → commit on pointer-up
 
     if (d.kind === 'move') {
       let dxF = cur.x - d.start.x
@@ -191,22 +215,28 @@ export default function SlideCanvas({
   }, [objects, onChange, stageSize, toFrac])
 
   const onPointerUp = useCallback(() => {
-    if (dragRef.current) {
+    const d = dragRef.current
+    if (d) {
       dragRef.current = null
       setGuides({ v: [], h: [] })
-      onChange?.(objects, { commit: true })  // commit last state to CRDT
+      // Only commit when the pointer actually moved. A plain click (no drag)
+      // must NOT trigger a state update — that would re-render mid-sequence and
+      // break the browser's native dblclick detection (→ text-object editing).
+      if (d.moved) onChange?.(objects, { commit: true })
+      else if (d.editOnClick) onEditText?.(d.editOnClick)  // click-again-to-edit
     }
     window.removeEventListener('pointermove', onPointerMove)
     window.removeEventListener('pointerup', onPointerUp)
-  }, [objects, onChange, onPointerMove])
+  }, [objects, onChange, onPointerMove, onEditText])
 
   // ── Marquee selection on empty-stage drag ─────────────────────────────────
   const marqueeRef = useRef(null)
   const startMarquee = (e) => {
     if (!editable || e.button !== 0) return
     if (e.target !== stageRef.current && !e.target.classList.contains('vslide-stage-bg')) return
-    if (!e.shiftKey) onSelect?.([])
     const start = toFrac(e)
+    if (!start) return
+    if (!e.shiftKey) onSelect?.([])
     marqueeRef.current = { start, additive: e.shiftKey, base: selectedIds }
     window.addEventListener('pointermove', onMarqueeMove)
     window.addEventListener('pointerup', onMarqueeUp)
@@ -215,6 +245,7 @@ export default function SlideCanvas({
     const m = marqueeRef.current
     if (!m) return
     const cur = toFrac(e)
+    if (!cur) return
     const box = {
       x: Math.min(m.start.x, cur.x), y: Math.min(m.start.y, cur.y),
       w: Math.abs(cur.x - m.start.x), h: Math.abs(cur.y - m.start.y),

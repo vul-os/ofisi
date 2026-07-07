@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -49,7 +49,6 @@ import { Button, IconButton, Tooltip, Topbar, Menu, UrlPopover, LoadingState, Sa
 import ThemeGallery from './ThemeGallery.jsx'
 import MasterSlideEditor from './MasterSlideEditor.jsx'
 import TransitionPanel from './TransitionPanel.jsx'
-import InsertPanel from './InsertPanel.jsx'
 import TemplateGallery from './TemplateGallery.jsx'
 import { usePresenterView } from './PresenterView.jsx'
 import { getTheme } from './themes.js'
@@ -267,8 +266,19 @@ export default function SlidesEditor() {
   const canvasStageRef = useRef(null)
 
   const activeSlide = slidesData.slides[activeIdx] ?? slidesData.slides[0]
-  // Objects for the active slide — migrated lazily from legacy flow content.
-  const activeObjects = activeSlide ? ensureObjects(activeSlide) : []
+  // Objects for the active slide. Migration (legacy content → objects[]) is
+  // memoized per slide id so a slide without objects[] yields STABLE ids across
+  // renders (re-migrating each render would mint new ids → remount nodes → break
+  // selection/editing). The effect below persists the migration once.
+  const migrationCacheRef = useRef(new Map())
+  const activeObjects = useMemo(() => {
+    if (!activeSlide) return []
+    if (Array.isArray(activeSlide.objects)) return sanitizeObjects(activeSlide.objects)
+    const cache = migrationCacheRef.current
+    if (!cache.has(activeSlide.id)) cache.set(activeSlide.id, ensureObjects(activeSlide))
+    return cache.get(activeSlide.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSlide?.id, activeSlide?.objects, activeSlide?.content, activeSlide?.title])
 
   // Presenter view hook
   const { openPresenter, syncSlide } = usePresenterView(slidesData)
@@ -312,9 +322,10 @@ export default function SlidesEditor() {
       Placeholder.configure({ placeholder: 'Slide content…' }),
     ],
     content: activeSlide?.content || '<p></p>',
-    onUpdate: ({ editor }) => {
-      updateSlideField(activeIdx, 'content', editor.getHTML())
-    },
+    // The object model (objects[]) is now the source of truth for slide body;
+    // this flow editor is kept ONLY for undo-history + as a formatting target
+    // when no text object is open. It must never write back into slide.content
+    // (that would clobber the object-derived content sync in updateObjects).
   })
 
   // ── Load file ─────────────────────────────────────────────────────────────
@@ -397,6 +408,16 @@ export default function SlidesEditor() {
     setSelectedObjectIds([])
     setEditingObjectId(null)
   }, [activeIdx]) // eslint-disable-line
+
+  // Persist a legacy slide's migration (content → objects[]) exactly once, so
+  // the object ids become stable (no per-render id churn) and future loads skip
+  // migration. Uses the memoized activeObjects (stable ids) as the seed.
+  useEffect(() => {
+    if (!activeSlide || Array.isArray(activeSlide.objects)) return
+    if (!activeObjects.length) return
+    updateSlideMeta(activeIdx, { objects: activeObjects })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSlide?.id])
 
   // ── Notes panel resize ────────────────────────────────────────────────────
   useEffect(() => {

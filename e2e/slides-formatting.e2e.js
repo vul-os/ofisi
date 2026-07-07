@@ -5,8 +5,10 @@
  * slide's TipTap/ProseMirror editor runs LOCALLY in the page, so we assert the
  * real marks/nodes it emits into the slide body.
  *
- * How the slide editor is driven here: the deck is deep-linked; the active
- * slide's HTML is edited in a live ProseMirror surface (`.tiptap .ProseMirror`).
+ * How the slide editor is driven here (feat/slides-canvas): the deck is
+ * deep-linked; its legacy flow content migrates into positioned text objects on
+ * the object canvas. Double-clicking a text object opens an inline ProseMirror
+ * editor (`.tiptap .ProseMirror`) — the same TipTap surface, now per-object.
  * We select the slide text (Ctrl+A) and click the wave-48 toolbar controls:
  *   • Font family — a Menu; picking "Georgia" applies textStyle{fontFamily} →
  *     an inline `font-family` style on a <span> in the slide body.
@@ -36,18 +38,36 @@ async function openDeck(page) {
   })
   await page.goto('/slides/deck1')
   await expect(page.getByLabel('Presentation title')).toHaveValue('Pitch', { timeout: 20_000 })
-  // The slide-body editor surface.
-  await expect(page.locator('.tiptap .ProseMirror')).toBeVisible({ timeout: 15_000 })
+  // The canvas renders the migrated text objects.
+  await expect(page.locator('.vslide-object').first()).toBeVisible({ timeout: 15_000 })
 }
 
-const body = (page) => page.locator('.tiptap .ProseMirror').first()
+// The inline object text editor is the visible ProseMirror surface (opens when
+// you click an already-selected text object).
+const body = (page) => page.locator('[data-object-text-editor] .ProseMirror').first()
 
-// Type text into the (initially empty) slide body and select it, so a mark/list
-// op has a real selection to act on. On a deep-link the seeded slide content
-// re-syncs only on a slide switch, so we author the text live instead.
+// Open a text object for editing, replace its text with a known selection, so a
+// mark/list op has a real selection to act on.
 async function typeAndSelectAll(page) {
-  const editor = body(page)
-  await editor.click()
+  // Double-click the body text object (the last text object on the slide) to
+  // open its inline editor.
+  const objects = page.locator('.vslide-object')
+  // Click to select the body text object, then click again to enter edit mode
+  // (Google-Slides style). This opens the inline ProseMirror editor.
+  await objects.last().click()
+  await objects.last().click()
+  const editor = page.locator('[data-object-text-editor] .ProseMirror').first()
+  await expect(editor).toBeVisible({ timeout: 10_000 })
+  // Focus the contenteditable directly (the overlay stops pointer propagation,
+  // so a synthetic click may not seat the selection); then select-all + type.
+  await editor.focus()
+  await editor.evaluate((el) => {
+    el.focus()
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const sel = window.getSelection()
+    sel.removeAllRanges(); sel.addRange(range)
+  })
   await page.keyboard.type('Highlight me please')
   await expect(editor).toContainText('Highlight me please')
   await page.keyboard.press('ControlOrMeta+A')

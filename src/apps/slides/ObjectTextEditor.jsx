@@ -60,6 +60,7 @@ export default function ObjectTextEditor({ obj, stageRect, onCommit, onClose, on
 
   return (
     <div
+      data-object-text-editor
       className="absolute z-[300000] bg-paper/95 border-2 border-accent rounded-sm shadow-e2"
       style={{
         left: `${obj.x * 100}%`, top: `${obj.y * 100}%`,
