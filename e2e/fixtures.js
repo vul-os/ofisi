@@ -56,9 +56,24 @@ export async function installBackend(page, opts = {}) {
     if (path === '/auth/status' || path === '/auth/me')
       return json(route, { enabled: false, authenticated: true, account_id: 'you@vulos.test' })
 
+    // ── local files (self-host disk scan) — the AppHome home lists these; the
+    // store calls .filter() on the result, so it MUST be an array. ────────────
+    if (path === '/local-files' && method === 'GET')
+      return json(route, [])
+
     // ── files ───────────────────────────────────────────────────────────────
     if (path === '/files' && method === 'GET')
       return json(route, Object.values(state.files))
+
+    // createFile — the unified Open/Import flow POSTs {name,type,content} here,
+    // then navigates to /:route/:id (which GETs /files/:id). Store the imported
+    // content so the destination editor loads exactly what the importer produced.
+    if (path === '/files' && method === 'POST') {
+      const id = uid('file')
+      const f = { id, name: body.name || 'Untitled', type: body.type || 'doc', content: body.content }
+      state.files[id] = f
+      return json(route, f)
+    }
 
     let m
     if ((m = path.match(/^\/files\/([^/]+)$/))) {

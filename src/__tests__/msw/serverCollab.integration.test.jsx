@@ -136,7 +136,10 @@ describe('ServerCollabSession over api.js + MSW /v1 collab endpoints', () => {
     let seq = 0
     for (const op of ops) relayOp('doc1', { origin: 'A', seq: ++seq, payload: op })
     for (const op of ops) relayOp('doc1', { origin: 'A', seq: ++seq, payload: op }) // duplicate delivery
-    await tick()
+    // Await the real convergence (op applied) rather than a fixed sleep. RGA
+    // dedup makes the duplicate delivery idempotent, so this settles to 'hi',
+    // never 'hihi', however long the relay/apply takes.
+    await waitFor(() => expect(b.getText()).toBe('hi'))
 
     expect(b.getText()).toBe('hi')  // applied once despite duplicate delivery
     expect(remoteText).toBe('hi')

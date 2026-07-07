@@ -365,6 +365,34 @@ describe('SlideCanvas interaction (P2)', () => {
     expect(a.rotation).not.toBe(0)
   })
 
+  // Regression: the FINAL commit on pointer-up must carry the DRAGGED geometry,
+  // not the stale pre-gesture snapshot. Before the fix, onPointerUp committed the
+  // `objects` prop captured when the drag started, so releasing the mouse snapped
+  // the object right back to where it began (the live commit:false updates are
+  // transient state; the commit:true on release is what persists). We assert the
+  // commit:true payload equals the last committed live geometry.
+  it('pointer-up commits the dragged geometry, not the original (revert-on-release guard)', () => {
+    const onChange = vi.fn()
+    render(<SlideCanvas objects={baseObjects} selectedIds={['a']} onSelect={() => {}} onChange={onChange} />)
+    const seHandle = screen.getByLabelText('Resize se')
+    fireEvent.pointerDown(seHandle, { clientX: 480, clientY: 480 })
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 600, clientY: 600 }))
+      window.dispatchEvent(new MouseEvent('pointerup', {}))
+    })
+    const lastLive = [...onChange.mock.calls].reverse().find((c) => c[1] && c[1].commit === false)
+    const committed = [...onChange.mock.calls].reverse().find((c) => c[1] && c[1].commit === true)
+    expect(lastLive).toBeTruthy()
+    expect(committed).toBeTruthy()
+    const grew = lastLive[0].find((o) => o.id === 'a')
+    const saved = committed[0].find((o) => o.id === 'a')
+    // The persisted object is the enlarged one (w grew past its 0.3 origin), i.e.
+    // the release did NOT revert to the original geometry.
+    expect(grew.w).toBeGreaterThan(0.3)
+    expect(saved.w).toBeCloseTo(grew.w, 5)
+    expect(saved.w).toBeGreaterThan(0.3)
+  })
+
   it('keyboard arrow nudges the selected object', () => {
     const onChange = vi.fn()
     render(<SlideCanvas objects={baseObjects} selectedIds={['a']} onSelect={() => {}} onChange={onChange} />)

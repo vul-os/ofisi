@@ -95,14 +95,22 @@ export default function SlideCanvas({
 
   // ── Drag-move ─────────────────────────────────────────────────────────────
   const dragRef = useRef(null)
-  // Remove any lingering global drag/marquee listeners on unmount so a stray
+  // Remove any lingering global drag/marquee listeners on UNMOUNT so a stray
   // pointermove can't fire against a torn-down stage.
+  //
+  // NOTE (bug fix): this MUST have an empty dep array so the cleanup runs only on
+  // unmount. Without it, the effect re-runs after *every* render and its cleanup
+  // calls window.removeEventListener('pointermove', onPointerMove) — which tears
+  // off the ACTIVE drag/resize/rotate listeners the moment any unrelated
+  // re-render (presence heartbeat, autosave debounce, collab tick) lands mid-
+  // gesture, silently aborting the move/resize/rotate. Gestures self-remove their
+  // own listeners on pointer-up, so this is purely an unmount safety net.
   useEffect(() => () => {
     window.removeEventListener('pointermove', onPointerMove)
     window.removeEventListener('pointerup', onPointerUp)
     window.removeEventListener('pointermove', onMarqueeMove)
     window.removeEventListener('pointerup', onMarqueeUp)
-  }) // eslint-disable-line
+  }, []) // eslint-disable-line
 
   const startMove = (e, obj) => {
     if (!editable) return
@@ -171,7 +179,6 @@ export default function SlideCanvas({
     const d = dragRef.current
     if (!d) return
     const cur = toFrac(e)
-    if (!cur && d.kind !== 'rotate') return  // rotate uses cached centre, not toFrac
     d.moved = true  // a real drag happened → commit on pointer-up
 
     if (d.kind === 'move') {
@@ -189,6 +196,7 @@ export default function SlideCanvas({
         if (!org) return o
         return { ...o, x: org.x + dxF, y: org.y + dyF }
       })
+      d.last = next   // remember the live geometry so pointer-up commits IT
       onChange?.(next, { commit: false })
     } else if (d.kind === 'resize') {
       const { origin, handle } = d
@@ -203,6 +211,7 @@ export default function SlideCanvas({
       if (w < MIN_OBJECT_SIZE) { if (handle.dx < 0) x = origin.x + origin.w - MIN_OBJECT_SIZE; w = MIN_OBJECT_SIZE }
       if (h < MIN_OBJECT_SIZE) { if (handle.dy < 0) y = origin.y + origin.h - MIN_OBJECT_SIZE; h = MIN_OBJECT_SIZE }
       const next = (objects || []).map((o) => (o.id === origin.id ? { ...o, x, y, w, h } : o))
+      d.last = next   // remember the live geometry so pointer-up commits IT
       onChange?.(next, { commit: false })
     } else if (d.kind === 'rotate') {
       const ang = Math.atan2(e.clientY - d.cy, e.clientX - d.cx)
@@ -210,6 +219,7 @@ export default function SlideCanvas({
       if (e.shiftKey) deg = Math.round(deg / 15) * 15  // snap 15°
       deg = ((deg % 360) + 360) % 360
       const next = (objects || []).map((o) => (o.id === d.origin.id ? { ...o, rotation: deg } : o))
+      d.last = next   // remember the live geometry so pointer-up commits IT
       onChange?.(next, { commit: false })
     }
   }, [objects, onChange, stageSize, toFrac])
@@ -222,7 +232,16 @@ export default function SlideCanvas({
       // Only commit when the pointer actually moved. A plain click (no drag)
       // must NOT trigger a state update — that would re-render mid-sequence and
       // break the browser's native dblclick detection (→ text-object editing).
-      if (d.moved) onChange?.(objects, { commit: true })
+      //
+      // BUG FIX: commit the FINAL dragged geometry (d.last), captured by
+      // onPointerMove, NOT the stale `objects` closure. `objects` is the
+      // pre-gesture snapshot from the render that attached this listener, so
+      // committing it on pointer-up overwrote the live drag/resize/rotate and
+      // snapped the object back to where it started the instant the mouse was
+      // released (the live commit:false updates are transient React state only;
+      // the pointer-up commit:true is what persists). d.last carries the
+      // last-rendered geometry, so release now keeps what you dragged.
+      if (d.moved) onChange?.(d.last || objects, { commit: true })
       else if (d.editOnClick) onEditText?.(d.editOnClick)  // click-again-to-edit
     }
     window.removeEventListener('pointermove', onPointerMove)

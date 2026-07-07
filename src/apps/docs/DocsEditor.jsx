@@ -952,7 +952,13 @@ export default function DocsEditor() {
   useEffect(() => {
     if (!editor) return
     const measure = () => {
-      const contentEl = scrollRef.current?.querySelector('.tiptap')
+      // Measure the ProseMirror element whose DIRECT children are the document
+      // blocks. `.tiptap` is the EditorContent WRAPPER — its only child is the
+      // `.ProseMirror` editor, so measuring it saw a single page-tall block and
+      // never paginated (pageCount stuck at 1 for any multi-page doc). The real
+      // blocks live one level deeper.
+      const contentEl = scrollRef.current?.querySelector('.tiptap .ProseMirror')
+        || scrollRef.current?.querySelector('.ProseMirror')
       if (!contentEl) return
       const { breaks, pageCount: pc } = measurePageBreaks(contentEl, contentHeightPxRef.current)
       setPageBreaks(breaks)
@@ -974,7 +980,8 @@ export default function DocsEditor() {
 
   // Re-measure when the page geometry changes (size/orientation/margins).
   useEffect(() => {
-    const contentEl = scrollRef.current?.querySelector('.tiptap')
+    const contentEl = scrollRef.current?.querySelector('.tiptap .ProseMirror')
+      || scrollRef.current?.querySelector('.ProseMirror')
     if (!contentEl) return
     const { breaks, pageCount: pc } = measurePageBreaks(contentEl, contentHeightPx)
     setPageBreaks(breaks)

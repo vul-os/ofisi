@@ -46,6 +46,24 @@ class FakeFabric extends EventTarget {
 }
 const settle = () => new Promise((r) => setTimeout(r, 20))
 
+// Poll a predicate until it holds, instead of sleeping a fixed amount and hoping
+// the async encrypt→broadcast→decrypt chain finished. A fixed `settle(20)` is a
+// latent flake: convergence here goes through SubtleCrypto (seal/open) which can
+// exceed 20ms when the full parallel suite saturates the CPU. Polling awaits the
+// REAL condition and is robust under load while staying fast in the common case.
+async function until(predicate, { timeoutMs = 2000, stepMs = 5 } = {}) {
+  const start = Date.now()
+  for (;;) {
+    if (predicate()) return
+    if (Date.now() - start > timeoutMs) {
+      // Final attempt: throw the underlying assertion for a useful message.
+      predicate({ assert: true })
+      throw new Error('until(): predicate never became true')
+    }
+    await new Promise((r) => setTimeout(r, stepMs))
+  }
+}
+
 describe('P2PShareModal (sharer UI)', () => {
   it('shows both an editor (rw) and view-only (ro) invite link', async () => {
     const rw = await generateInvite({ cap: CAP_RW, baseUrl: 'https://ex.test/docs/x' })
@@ -118,7 +136,9 @@ describe('two sessions from the modal links converge; ro is rejected + sealed', 
 
     // Editor writes → viewer converges (ro peer reads live edits).
     editor.applyLocal('', 'secret-plan')
-    await settle()
+    // Await the real convergence condition (encrypt→broadcast→decrypt), not a
+    // fixed sleep. Robust when SubtleCrypto is slow under parallel-suite load.
+    await until(() => viewer.getText() === 'secret-plan')
     expect(viewer.getText()).toBe('secret-plan')
     expect(viewer.readOnly).toBe(true)
 
