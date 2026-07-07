@@ -195,3 +195,18 @@ describe('installCustomFormulas seam', () => {
     expect(p.parse('UPPER("hi")').result).toBe('HI')
   })
 })
+
+describe('FILTER — error propagation is scoped to INCLUDED rows (deep/office)', () => {
+  // FILTER takes ONE params array: [array, include, if_empty] (parser convention).
+  it('an error in a FILTERED-OUT row does not corrupt the result', () => {
+    // {10; #DIV/0!; 30} with mask {1;0;1} → the error is in the excluded row.
+    // Excel/Sheets return {10, 30}; the bug returned #DIV/0! for the whole call.
+    expect(FILTER([[[10], [ERR.DIV0], [30]], [[1], [0], [1]]])).toBe('10, 30')
+  })
+  it('an error in an INCLUDED row still propagates', () => {
+    expect(FILTER([[[10], [ERR.DIV0], [30]], [[1], [1], [1]]])).toBe(ERR.DIV0)
+  })
+  it('an error in the INCLUDE mask propagates (not silently kept)', () => {
+    expect(FILTER([[[10], [20]], [[ERR.NA], [1]]])).toBe(ERR.NA)
+  })
+})

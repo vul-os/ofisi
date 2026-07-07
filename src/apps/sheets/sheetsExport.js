@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx'
 import { saveAs } from 'file-saver'
 import { escapeChartText } from './charts.js'
 
-function fortuneToWorksheet(sheet) {
+export function fortuneToWorksheet(sheet) {
   const ws = {}
   const cells = sheet.celldata || []
   let maxR = 0, maxC = 0
@@ -10,6 +10,17 @@ function fortuneToWorksheet(sheet) {
     if (!v) continue
     const raw = v.v !== undefined ? v.v : v.m
     const cell = { v: raw, t: typeof raw === 'number' ? 'n' : 's' }
+    // DATA-INTEGRITY: preserve the cell FORMULA on export. sheetsImport stores an
+    // imported formula as `v.f = "=..."` (leading '='), and the import docstring
+    // promises formulas round-trip — but without this the exporter wrote only the
+    // cached value, silently converting every formula to a static number on
+    // xlsx→edit→xlsx (or ods). SheetJS wants the formula WITHOUT the leading '=';
+    // we keep `v` too as the cached value so non-recalculating readers still show
+    // a result. (xlsx/ods are binary formats, not re-parsed as text like CSV, so
+    // this is not the CSV-injection surface guarded by csvField.)
+    if (v.f != null && v.f !== '') {
+      cell.f = String(v.f).replace(/^=/, '')
+    }
     // Carry the cell's number-format code (Fortune Sheet ct.fa) into the xlsx
     // `z` field so currency/percent/date presets round-trip to Excel. 'General'
     // is the default and needs no explicit format.
@@ -27,6 +38,32 @@ function fortuneToWorksheet(sheet) {
       s: { r: m.r, c: m.c },
       e: { r: m.r + (m.rs || 1) - 1, c: m.c + (m.cs || 1) - 1 },
     }))
+  }
+  // DATA-INTEGRITY: restore column widths / row heights. sheetsImport reads these
+  // into config.columnlen / config.rowlen (px) and the docstring promises they
+  // round-trip, but the exporter previously emitted neither — so every column
+  // flattened to default width and every row to default height on round-trip.
+  const columnlen = sheet.config?.columnlen
+  if (columnlen && typeof columnlen === 'object') {
+    const colArr = []
+    for (const [i, px] of Object.entries(columnlen)) {
+      const idx = Number(i)
+      if (Number.isInteger(idx) && idx >= 0 && Number.isFinite(px) && px > 0) {
+        colArr[idx] = { wpx: px }
+      }
+    }
+    if (colArr.length) ws['!cols'] = colArr
+  }
+  const rowlen = sheet.config?.rowlen
+  if (rowlen && typeof rowlen === 'object') {
+    const rowArr = []
+    for (const [i, px] of Object.entries(rowlen)) {
+      const idx = Number(i)
+      if (Number.isInteger(idx) && idx >= 0 && Number.isFinite(px) && px > 0) {
+        rowArr[idx] = { hpx: px }
+      }
+    }
+    if (rowArr.length) ws['!rows'] = rowArr
   }
   return ws
 }

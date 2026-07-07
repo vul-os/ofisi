@@ -266,8 +266,18 @@ export function FILTER(params) {
   const mask = flatten(includeRaw)
   const kept = []
   for (let i = 0; i < arr.length; i++) {
+    const m = i < mask.length ? mask[i] : 0
+    // An error in the INCLUDE mask propagates (Excel semantics) — and must not be
+    // fed to toBool, which coerces an unrecognised string to true and would
+    // silently KEEP the row instead of surfacing the error.
+    if (isErr(m)) return m
+    if (!toBool(m)) continue
+    // Only propagate an error from an INCLUDED row. Previously the isErr check ran
+    // on every source element before the mask was consulted, so an error sitting
+    // in a FILTERED-OUT row aborted the whole result: FILTER({10;#DIV/0!;30},
+    // {1;0;1}) wrongly returned #DIV/0! instead of {10, 30}.
     if (isErr(arr[i])) return arr[i]
-    if (i < mask.length && toBool(mask[i])) kept.push(arr[i])
+    kept.push(arr[i])
   }
   if (kept.length === 0) return ifEmpty !== undefined ? ifEmpty : ERR.NA
   if (kept.length === 1) return kept[0]

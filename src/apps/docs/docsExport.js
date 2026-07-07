@@ -2,7 +2,7 @@ import { saveAs } from 'file-saver'
 import {
   Document, Packer, Paragraph, TextRun, HeadingLevel,
   Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun,
-  Header, Footer, PageNumber, AlignmentType,
+  Header, Footer, PageNumber, AlignmentType, ExternalHyperlink,
 } from 'docx'
 import TurndownService from 'turndown'
 import { sanitizeDocHtml } from '../../lib/sanitize'
@@ -517,7 +517,7 @@ async function nodeToDocx(node, fnOrder) {
   }
 }
 
-function inlineNodes(nodes, fnOrder) {
+export function inlineNodes(nodes, fnOrder) {
   return nodes.map((node) => {
     if (node.type === 'footnoteRef') {
       const num = fnOrder?.get(node.attrs?.id)
@@ -541,18 +541,30 @@ function inlineNodes(nodes, fnOrder) {
     const font = rawFamily
       ? rawFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '')
       : undefined
-    return new TextRun({
+    // DATA-INTEGRITY: a `link` mark carries the hyperlink href. Previously
+    // inlineNodes handled no link case, so the anchor TEXT survived to .docx but
+    // the URL was silently dropped — a broken-reference data loss, and
+    // inconsistent with the HTML/Markdown exports (which keep links). When a run
+    // is linked, render it underlined+blue and wrap it in a docx ExternalHyperlink.
+    const href = markAttr('link', 'href')
+    const linkOk = typeof href === 'string' && /^(https?:|mailto:)/i.test(href.trim())
+    const run = new TextRun({
       text: node.text || '',
       bold: hasMark('bold'),
       italics: hasMark('italic'),
-      underline: hasMark('underline') ? {} : undefined,
+      // Linked runs get the conventional underline even if no explicit mark.
+      underline: (hasMark('underline') || linkOk) ? {} : undefined,
       strike: hasMark('strike'),
       superScript: hasMark('superscript'),
       subScript: hasMark('subscript'),
-      color: color || undefined,
+      color: color || (linkOk ? '0563C1' : undefined),
       // docx size is in half-points.
       size: Number.isFinite(sizePt) && sizePt > 0 ? Math.round(sizePt * 2) : undefined,
       font,
     })
+    // Only emit a hyperlink for safe schemes (http/https/mailto). A javascript:
+    // or data: href is dropped to plain text rather than written as a live link.
+    if (linkOk) return new ExternalHyperlink({ link: href.trim(), children: [run] })
+    return run
   })
 }

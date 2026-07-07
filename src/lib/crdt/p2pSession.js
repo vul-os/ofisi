@@ -277,21 +277,28 @@ function diffToOps(prevText, nextText, crdt) {
   const ops = []
   if (prevText === nextText) return ops
 
+  // Diff in CODE POINTS, not UTF-16 units — the CRDT is one node per code point.
+  // Indexing a raw string by code unit splits astral chars (emoji, etc.) into
+  // lone surrogates that the CRDT rejects, silently dropping the glyph. See the
+  // matching note in index.js diffToOps.
+  const prev = Array.from(prevText)
+  const next = Array.from(nextText)
+
   let prefixLen = 0
   while (
-    prefixLen < prevText.length && prefixLen < nextText.length &&
-    prevText[prefixLen] === nextText[prefixLen]
+    prefixLen < prev.length && prefixLen < next.length &&
+    prev[prefixLen] === next[prefixLen]
   ) prefixLen++
 
   let suffixLen = 0
   while (
-    suffixLen < prevText.length - prefixLen &&
-    suffixLen < nextText.length - prefixLen &&
-    prevText[prevText.length - 1 - suffixLen] === nextText[nextText.length - 1 - suffixLen]
+    suffixLen < prev.length - prefixLen &&
+    suffixLen < next.length - prefixLen &&
+    prev[prev.length - 1 - suffixLen] === next[next.length - 1 - suffixLen]
   ) suffixLen++
 
-  const prevMid = prevText.slice(prefixLen, prevText.length - suffixLen)
-  const nextMid = nextText.slice(prefixLen, nextText.length - suffixLen)
+  const prevMid = prev.slice(prefixLen, prev.length - suffixLen)
+  const nextMid = next.slice(prefixLen, next.length - suffixLen)
 
   // Delete old middle (right-to-left preserves indices). Apply as we go so the
   // subsequent inserts see the post-delete visible order.

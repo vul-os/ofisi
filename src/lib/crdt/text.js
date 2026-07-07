@@ -88,6 +88,11 @@ export const TEXT_OP_DELETE = 2
 
 const MAX_CODEPOINT = 0x10ffff
 
+// Cap on buffered out-of-order deletes (targets not yet inserted). Bounds the
+// memory a hostile/buggy peer can pin by streaming deletes for ids that will
+// never exist. A legitimate reorder window is tiny; this is only a safety valve.
+const MAX_PENDING_DELETES = 10000
+
 /** True iff v is an integer that String.fromCodePoint accepts (no throw). */
 function isValidCodePoint(v) {
   return (
@@ -129,6 +134,12 @@ export class TextCRDT {
     this._nodes = new Map()
     // Map<opid-key, opid[]>  child lists kept sorted descending (RGA order)
     this._children = new Map()
+    // Map<target-opid-key, true>  — deletes whose target INSERT has not yet been
+    // seen (out-of-order / non-causal delivery). Held here and replayed the moment
+    // the target node is inserted, so a delete can never be lost just because it
+    // raced ahead of its insert on a different network path. Bounded to cap the
+    // memory a hostile peer could pin by spamming deletes for never-existent ids.
+    this._pendingDeletes = new Map()
 
     this._rootKey = _key(ROOT_ID)
     this._children.set(this._rootKey, [])
@@ -188,10 +199,16 @@ export class TextCRDT {
       const parent = op.p && !opidZero(op.p) ? op.p : ROOT_ID
       const parentKey = _key(parent)
 
-      this._nodes.set(k, { id: op.id, parent, value: String.fromCodePoint(op.v), deleted: false })
+      // A delete for this node may have arrived BEFORE this insert (out-of-order
+      // delivery). If so it was buffered; honour it now so the char is born
+      // already-deleted rather than lingering visible forever (a divergence bug).
+      const bornDeleted = this._pendingDeletes.has(k)
+      if (bornDeleted) this._pendingDeletes.delete(k)
+      this._nodes.set(k, { id: op.id, parent, value: String.fromCodePoint(op.v), deleted: bornDeleted })
       if (!this._children.has(parentKey)) this._children.set(parentKey, [])
       this._insertChild(parentKey, op.id)
-      return true
+      // A char that is born already-deleted produced no visible change.
+      return !bornDeleted
     }
 
     if (op.k === TEXT_OP_DELETE) {
@@ -199,10 +216,20 @@ export class TextCRDT {
       // clock observe). Missing/malformed → drop rather than corrupt/throw.
       if (!isValidOpId(op.id)) return false
       if (!isValidOpId(op.t)) return false
+      this._clock.observe(op.id.c)
       const targetKey = _key(op.t)
       const node = this._nodes.get(targetKey)
-      if (!node || node.deleted) return false
-      this._clock.observe(op.id.c)
+      if (!node) {
+        // Target INSERT not seen yet (non-causal / reordered delivery). Buffer
+        // the delete so it applies the instant the insert lands — dropping it
+        // here would leave the char permanently visible on this replica while
+        // the originating peer shows it deleted → the two never converge.
+        if (this._pendingDeletes.size < MAX_PENDING_DELETES) {
+          this._pendingDeletes.set(targetKey, true)
+        }
+        return false
+      }
+      if (node.deleted) return false
       node.deleted = true
       return true
     }
@@ -250,6 +277,7 @@ export class TextCRDT {
     this._nodes.clear()
     this._children.clear()
     this._children.set(this._rootKey, [])
+    this._pendingDeletes.clear()
 
     if (!snap || !Array.isArray(snap.nodes)) return
 
@@ -262,6 +290,7 @@ export class TextCRDT {
       (n) => n && typeof n === 'object' && isValidOpId(n.id) && isValidCodePoint(n.v),
     )
     const sorted = validNodes.sort((a, b) => opidLess(a.id, b.id) ? -1 : 1)
+    let maxCounter = 0
     for (const n of sorted) {
       const k = _key(n.id)
       const parent = n.p && !opidZero(n.p) ? n.p : ROOT_ID
@@ -269,7 +298,16 @@ export class TextCRDT {
       this._nodes.set(k, { id: n.id, parent, value: String.fromCodePoint(n.v), deleted: !!n.d })
       if (!this._children.has(parentKey)) this._children.set(parentKey, [])
       this._insertChild(parentKey, n.id)
+      if (n.id.c > maxCounter) maxCounter = n.id.c
     }
+    // DATA-INTEGRITY: seed the Lamport clock past the highest counter we just
+    // restored. Without this the clock stays at 0 after a reload/cold-start, so
+    // the next localInsert mints an OpID with a tiny counter — which (a) can
+    // COLLIDE with this replica's own restored ops (same replicaId + counter 1),
+    // making apply() reject the new insert as "already seen" and SILENTLY DROP
+    // the user's edit, and (b) sorts the new char before existing text in RGA
+    // sibling order. Mirrors GridSession._loadLocal, which already re-seeds.
+    this._clock.observe(maxCounter)
   }
 
   // ─── Internal helpers ───────────────────────────────────────────────────

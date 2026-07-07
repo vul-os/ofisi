@@ -393,6 +393,14 @@ export class GridSession extends EventTarget {
       // Cold-join: merge incoming snapshot cells.
       for (const cell of msg.cells) {
         if (cell.opId) {
+          // DATA-INTEGRITY: advance our Lamport clock past every counter in the
+          // snapshot BEFORE the joiner makes any edit. Otherwise the clock stays
+          // low, our first setCell() mints a smaller OpID than the cell already
+          // holds, and LWW (higher OpID wins) DROPS the joiner's edit — the user
+          // types a value that silently reverts to the peer's. The grid_op path
+          // and _loadLocal already observe; this cold-join path must too.
+          const parts = String(cell.opId).split('_')
+          this._clock.observe(parseInt(parts[1], 10) || 0)
           const kind = cell.deleted ? GRID_OP_CLEAR : GRID_OP_SET
           this._crdt.apply({ kind, id: cell.opId, key: { r: cell.r, c: cell.c }, v: cell.value })
         }

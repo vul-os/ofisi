@@ -450,6 +450,18 @@ export class TreeSession extends EventTarget {
       })
     } else if (msg.type === 'tree_snapshot' && msg.nodes) {
       for (const n of msg.nodes) {
+        // DATA-INTEGRITY: advance our Lamport clock past every counter carried in
+        // the snapshot BEFORE the joiner edits anything. Otherwise the clock stays
+        // low, our first setSlide/moveSlide mints a smaller OpID than the node
+        // already holds, and the LWW guards (opIdLess on valueId/ordId) DROP the
+        // joiner's edit — a slide text change or reorder silently reverts. The
+        // tree_op path and _loadLocal already observe; this cold-join path must too.
+        for (const opId of [n.ordId, n.valueId]) {
+          if (opId && typeof opId === 'string') {
+            const parts = opId.split('_')
+            this._clock.observe(parseInt(parts[1], 10) || 0)
+          }
+        }
         if (n.ordId) {
           this._crdt.apply({ kind: TREE_OP_INSERT, id: n.ordId, parent: n.parent, ordKey: n.ordKey })
         }
