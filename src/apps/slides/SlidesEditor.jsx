@@ -18,13 +18,24 @@ import {
   AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Image as ImageIcon,
   StickyNote, Palette, Layout, Highlighter, RemoveFormatting,
   Copy, FileText, GripVertical, Monitor, Zap, Undo, Redo,
-  ChevronDown as ChevronDownIcon, Type as TypeIcon, LayoutGrid, X,
+  ChevronDown as ChevronDownIcon, Type as TypeIcon, LayoutGrid, X, Square,
 } from 'lucide-react'
 import { sanitizeSlideHtml as sanitize } from '../../lib/sanitize'
 import { useFilesStore } from '../../store/filesStore'
 import { api } from '../../lib/api'
 import SlidePreview from './SlidePreview'
 import { exportSlidesToPdf, exportSlidesToPptx } from './slidesExport'
+import SlideCanvas from './SlideCanvas.jsx'
+import ObjectTextEditor from './ObjectTextEditor.jsx'
+import ArrangeToolbar from './ArrangeToolbar.jsx'
+import {
+  ensureObjects, sanitizeObjects, newObjectId, flowContentFromObjects, sortByZ,
+} from './slideObjects.js'
+import {
+  bringToFront, sendToBack, bringForward, sendBackward,
+  groupObjects, ungroupObjects, expandSelectionToGroups, align, distribute,
+} from './slideArrange.js'
+import { playAnimationsOn } from './slideAnimations.js'
 import { TreeSession, getTreeReplicaId, ordKeyBetween } from '../../lib/crdt/tree.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
@@ -120,6 +131,41 @@ function SlideFontFamilySelector({ editor }) {
   )
 }
 
+// ObjectInsertMenu — insert image / shapes as positioned canvas objects (P4).
+function ObjectInsertMenu({ onImage, onShape }) {
+  const SHAPES = [
+    ['rect', 'Rectangle'], ['roundRect', 'Rounded'], ['oval', 'Oval'],
+    ['triangle', 'Triangle'], ['star', 'Star'], ['line', 'Line'],
+    ['arrow', 'Arrow'], ['callout', 'Callout'],
+  ]
+  return (
+    <Menu
+      width="w-44"
+      trigger={
+        <button
+          type="button"
+          className="toolbar-btn flex items-center gap-1 px-2 text-xs"
+          aria-label="Insert object"
+          aria-haspopup="menu"
+        >
+          <LayoutGrid size={13} aria-hidden="true" /> Insert
+          <ChevronDownIcon size={10} className="opacity-60" aria-hidden="true" />
+        </button>
+      }
+    >
+      <Menu.Item onClick={onImage}>
+        <ImageIcon size={13} /> Image
+      </Menu.Item>
+      <Menu.Sep />
+      {SHAPES.map(([kind, label]) => (
+        <Menu.Item key={kind} onClick={() => onShape(kind)}>
+          <Square size={13} /> {label}
+        </Menu.Item>
+      ))}
+    </Menu>
+  )
+}
+
 // Reveal.js theme names (kept for backward compatibility with legacy decks).
 const LEGACY_TRANSITIONS = ['none', 'fade', 'slide', 'convex', 'concave', 'zoom']
 
@@ -133,6 +179,14 @@ function newSlide(master = 'content') {
     master,
     transition: 'none',
     animations: [],
+    // P2: positioned-object model. A fresh slide seeds one empty text object.
+    objects: [
+      {
+        id: newObjectId(), type: 'text',
+        x: 0.08, y: 0.10, w: 0.84, h: 0.20, rotation: 0, z: 1,
+        html: '<h2></h2>', align: 'left', valign: 'top',
+      },
+    ],
   }
 }
 
@@ -205,7 +259,16 @@ export default function SlidesEditor() {
   const [dragSlideIdx, setDragSlideIdx] = useState(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
 
+  // ── P2/P3: positioned-object canvas state ─────────────────────────────────
+  const [selectedObjectIds, setSelectedObjectIds] = useState([])
+  const [editingObjectId, setEditingObjectId] = useState(null)
+  const [objectEditor, setObjectEditor] = useState(null)   // TipTap editor of the object being edited
+  const [animPlaying, setAnimPlaying] = useState(false)
+  const canvasStageRef = useRef(null)
+
   const activeSlide = slidesData.slides[activeIdx] ?? slidesData.slides[0]
+  // Objects for the active slide — migrated lazily from legacy flow content.
+  const activeObjects = activeSlide ? ensureObjects(activeSlide) : []
 
   // Presenter view hook
   const { openPresenter, syncSlide } = usePresenterView(slidesData)
@@ -296,7 +359,16 @@ export default function SlidesEditor() {
           ...prev,
           slides: crdtSlides
             .filter((s) => s.data && typeof s.data === 'object')
-            .map((s) => ({ ...s.data })),
+            // WAVE-55/56 discipline: a peer-supplied slide's positioned objects
+            // are untrusted structured data. Validate/clamp EVERY descriptor at
+            // this CRDT ingress boundary (finite geometry, bounded z/count,
+            // sanitized text, gated image src) and fail closed — a malformed
+            // object is repaired or dropped, never rendered raw.
+            .map((s) => {
+              const slide = { ...s.data }
+              if (Array.isArray(slide.objects)) slide.objects = sanitizeObjects(slide.objects)
+              return slide
+            }),
         }
         schedule(next)
         return next
@@ -321,6 +393,9 @@ export default function SlidesEditor() {
       broadcastSlideCursor(activeSlide.id)
       syncSlide(activeIdx)
     }
+    // Reset canvas interaction state when switching slides.
+    setSelectedObjectIds([])
+    setEditingObjectId(null)
   }, [activeIdx]) // eslint-disable-line
 
   // ── Notes panel resize ────────────────────────────────────────────────────
@@ -362,6 +437,19 @@ export default function SlidesEditor() {
         e.preventDefault()
         openPresenter(activeIdx)
       }
+      // Object-level shortcuts (only when object(s) are selected + not editing).
+      if (selectedObjectIds.length > 0 && !isEditing && !editingObjectId) {
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault(); deleteSelectedObjects(); return
+        }
+        if (meta && e.key === 'g') {
+          e.preventDefault()
+          doArrange(e.shiftKey ? 'ungroup' : 'group'); return
+        }
+        // Arrow nudge is owned by SlideCanvas (capture listener); don't also
+        // navigate slides while objects are selected.
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return
+      }
       // Arrow key navigation in sidebar
       if (!isEditing) {
         if (e.key === 'ArrowDown') {
@@ -376,7 +464,7 @@ export default function SlidesEditor() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [activeIdx, slidesData.slides.length]) // eslint-disable-line
+  }, [activeIdx, slidesData.slides.length, selectedObjectIds, editingObjectId, activeObjects]) // eslint-disable-line
 
   // ── Autosave ──────────────────────────────────────────────────────────────
   const autosave = useCallback(async (sd) => {
@@ -422,6 +510,108 @@ export default function SlidesEditor() {
       return next
     })
   }
+
+  // ── P2/P3: object operations ──────────────────────────────────────────────
+  // Write the active slide's objects[] through the same field path as content,
+  // so the CRDT tree syncs them as part of the slide node. `commit` gates the
+  // CRDT/persist write: transient drag frames pass commit:false (local render
+  // only), and the pointer-up passes commit:true.
+  const updateObjects = useCallback((nextObjects, { commit = true } = {}) => {
+    setSlidesData((prev) => {
+      const idx = prev.slides.findIndex((s) => s.id === activeSlide?.id)
+      if (idx < 0) return prev
+      const objects = sanitizeObjects(nextObjects)
+      const slide = {
+        ...prev.slides[idx],
+        objects,
+        // Keep a legacy flow `content` in sync so thumbnails / PDF / notes-print
+        // (which still read slide.content) stay accurate.
+        content: flowContentFromObjects(objects),
+      }
+      const slides = [...prev.slides]
+      slides[idx] = slide
+      const next = { ...prev, slides }
+      if (commit) {
+        schedule(next)
+        const session = treeSessionRef.current
+        if (session) { session.setSlide(slide.id, slide); session.saveLocal() }
+      }
+      return next
+    })
+  }, [activeSlide?.id]) // eslint-disable-line
+
+  // Commit an object text edit back into the object model.
+  const commitObjectText = useCallback((html) => {
+    if (!editingObjectId) return
+    updateObjects(
+      activeObjects.map((o) => (o.id === editingObjectId ? { ...o, html } : o)),
+      { commit: true },
+    )
+  }, [editingObjectId, activeObjects, updateObjects])
+
+  // ── P1: play the active slide's animations in the editor preview ──────────
+  const playAnimations = useCallback(() => {
+    const stage = canvasStageRef.current
+    if (!stage || !activeSlide) return
+    // Target the animatable objects in z-order (matches present-mode ordering).
+    const els = sortByZ(activeObjects)
+      .map((o) => stage.querySelector(`[data-object-id="${o.id}"]`))
+      .filter(Boolean)
+    setAnimPlaying(true)
+    const cleanup = playAnimationsOn(els, activeSlide.animations || [])
+    // Auto-clear the "playing" flag once the longest animation could have run.
+    const t = setTimeout(() => { cleanup(); setAnimPlaying(false) }, 2000)
+    return () => { clearTimeout(t); cleanup() }
+  }, [activeObjects, activeSlide]) // eslint-disable-line
+
+  const insertObject = (partial) => {
+    const maxZ = Math.max(0, ...activeObjects.map((o) => o.z || 0))
+    const obj = { id: newObjectId(), rotation: 0, z: maxZ + 1, ...partial }
+    updateObjects([...activeObjects, obj], { commit: true })
+    setSelectedObjectIds([obj.id])
+    if (obj.type === 'text') setEditingObjectId(obj.id)
+  }
+
+  const insertTextObject = () => insertObject({
+    type: 'text', x: 0.3, y: 0.4, w: 0.4, h: 0.15, html: '<p>Text</p>', align: 'left', valign: 'top',
+  })
+  const insertShapeObject = (shape = 'rect', fill = '#7c6af7', stroke = '#5b4dd0') => insertObject({
+    type: 'shape', shape, x: 0.35, y: 0.35, w: 0.3, h: 0.3, fill, stroke, strokeWidth: 2, opacity: 1,
+  })
+  const insertImageObject = (src) => insertObject({
+    type: 'image', src, x: 0.3, y: 0.3, w: 0.4, h: 0.4,
+  })
+
+  const deleteSelectedObjects = () => {
+    if (selectedObjectIds.length === 0) return
+    updateObjects(activeObjects.filter((o) => !selectedObjectIds.includes(o.id)), { commit: true })
+    setSelectedObjectIds([])
+    setEditingObjectId(null)
+  }
+
+  // Contextual arrange dispatcher (P3).
+  const doArrange = (op, arg) => {
+    const ids = expandSelectionToGroups(activeObjects, selectedObjectIds)
+    let next = activeObjects
+    switch (op) {
+      case 'bringToFront':  next = bringToFront(activeObjects, ids); break
+      case 'sendToBack':    next = sendToBack(activeObjects, ids); break
+      case 'bringForward':  next = bringForward(activeObjects, ids); break
+      case 'sendBackward':  next = sendBackward(activeObjects, ids); break
+      case 'group':         next = groupObjects(activeObjects, selectedObjectIds); break
+      case 'ungroup':       next = ungroupObjects(activeObjects, selectedObjectIds); break
+      case 'align':         next = align(activeObjects, ids, arg); break
+      case 'distribute':    next = distribute(activeObjects, ids, arg); break
+      default: return
+    }
+    updateObjects(next, { commit: true })
+  }
+
+  const editingObject = activeObjects.find((o) => o.id === editingObjectId) || null
+  // The formatting toolbar acts on the object editor while a text object is open,
+  // otherwise on the (hidden) flow editor — which always exists past the loading
+  // guard below, so `fmtEditor` is never null when the toolbar renders.
+  const fmtEditor = objectEditor || editor
 
   // ── Slide operations ──────────────────────────────────────────────────────
   const addSlide = (master = 'content') => {
@@ -1079,7 +1269,19 @@ export default function SlidesEditor() {
                 />
               </div>
 
-              {/* Formatting toolbar + Insert panel */}
+              {/* Formatting toolbar — operates on the object being edited when
+                  a text object is open, else on the hidden flow editor (kept for
+                  back-compat + undo history). When object(s) are selected but not
+                  being edited, the contextual Arrange toolbar takes over. */}
+              {selectedObjectIds.length > 0 && !editingObjectId ? (
+                <ArrangeToolbar
+                  count={selectedObjectIds.length}
+                  canGroup={selectedObjectIds.length >= 2}
+                  canUngroup={activeObjects.some((o) => selectedObjectIds.includes(o.id) && o.group)}
+                  onArrange={doArrange}
+                  onDelete={deleteSelectedObjects}
+                />
+              ) : (
               <div
                 className="toolbar-surface flex items-center gap-0.5 px-2 sm:px-3 h-auto min-h-10 py-1 flex-wrap"
                 role="toolbar"
@@ -1088,16 +1290,16 @@ export default function SlidesEditor() {
                 {/* Undo / Redo */}
                 <Tooltip label="Undo (⌘Z)">
                   <IconButton size="sm"
-                    onClick={() => editor.chain().focus().undo().run()}
-                    disabled={!editor.can().undo()}
+                    onClick={() => fmtEditor.chain().focus().undo().run()}
+                    disabled={!fmtEditor.can().undo()}
                     aria-label="Undo">
                     <Undo size={14} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip label="Redo (⌘⇧Z)">
                   <IconButton size="sm"
-                    onClick={() => editor.chain().focus().redo().run()}
-                    disabled={!editor.can().redo()}
+                    onClick={() => fmtEditor.chain().focus().redo().run()}
+                    disabled={!fmtEditor.can().redo()}
                     aria-label="Redo">
                     <Redo size={14} />
                   </IconButton>
@@ -1115,7 +1317,7 @@ export default function SlidesEditor() {
                     >
                       <TypeIcon size={12} aria-hidden="true" />
                       {SLIDE_HEADINGS.find((h) =>
-                        h.value === 0 ? !editor.isActive('heading') : editor.isActive('heading', { level: h.value })
+                        h.value === 0 ? !fmtEditor.isActive('heading') : fmtEditor.isActive('heading', { level: h.value })
                       )?.label || 'Normal'}
                       <ChevronDownIcon size={10} className="opacity-60" aria-hidden="true" />
                     </button>
@@ -1124,10 +1326,10 @@ export default function SlidesEditor() {
                   {SLIDE_HEADINGS.map(({ label, value }) => (
                     <Menu.Item
                       key={value}
-                      active={value === 0 ? !editor.isActive('heading') : editor.isActive('heading', { level: value })}
+                      active={value === 0 ? !fmtEditor.isActive('heading') : fmtEditor.isActive('heading', { level: value })}
                       onClick={() => {
-                        if (value === 0) editor.chain().focus().setParagraph().run()
-                        else editor.chain().focus().toggleHeading({ level: value }).run()
+                        if (value === 0) fmtEditor.chain().focus().setParagraph().run()
+                        else fmtEditor.chain().focus().toggleHeading({ level: value }).run()
                       }}
                     >
                       {label}
@@ -1136,7 +1338,7 @@ export default function SlidesEditor() {
                 </Menu>
 
                 {/* Font family */}
-                <SlideFontFamilySelector editor={editor} />
+                <SlideFontFamilySelector editor={fmtEditor} />
 
                 {/* Font size */}
                 <Menu
@@ -1149,7 +1351,7 @@ export default function SlidesEditor() {
                     >
                       <span className="flex-1 text-center tabular-nums">
                         {(() => {
-                          const fs = editor.getAttributes('textStyle').fontSize
+                          const fs = fmtEditor.getAttributes('textStyle').fontSize
                           return fs ? parseInt(fs) : '—'
                         })()}
                       </span>
@@ -1160,7 +1362,7 @@ export default function SlidesEditor() {
                   {SLIDE_FONT_SIZES.map((sz) => (
                     <Menu.Item
                       key={sz}
-                      onClick={() => editor.chain().focus().setMark('textStyle', { fontSize: `${sz}pt` }).run()}
+                      onClick={() => fmtEditor.chain().focus().setMark('textStyle', { fontSize: `${sz}pt` }).run()}
                     >
                       {sz}
                     </Menu.Item>
@@ -1169,30 +1371,30 @@ export default function SlidesEditor() {
 
                 <span className="toolbar-divider" />
                 <Tooltip label="Bold (⌘B)">
-                  <IconButton size="sm" active={editor.isActive('bold')}
-                    onClick={() => editor.chain().focus().toggleBold().run()} aria-label="Bold">
+                  <IconButton size="sm" active={fmtEditor.isActive('bold')}
+                    onClick={() => fmtEditor.chain().focus().toggleBold().run()} aria-label="Bold">
                     <Bold size={14} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip label="Italic (⌘I)">
-                  <IconButton size="sm" active={editor.isActive('italic')}
-                    onClick={() => editor.chain().focus().toggleItalic().run()} aria-label="Italic">
+                  <IconButton size="sm" active={fmtEditor.isActive('italic')}
+                    onClick={() => fmtEditor.chain().focus().toggleItalic().run()} aria-label="Italic">
                     <Italic size={14} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip label="Underline (⌘U)">
-                  <IconButton size="sm" active={editor.isActive('underline')}
-                    onClick={() => editor.chain().focus().toggleUnderline().run()} aria-label="Underline">
+                  <IconButton size="sm" active={fmtEditor.isActive('underline')}
+                    onClick={() => fmtEditor.chain().focus().toggleUnderline().run()} aria-label="Underline">
                     <UnderlineIcon size={14} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip label="Strikethrough">
-                  <IconButton size="sm" active={editor.isActive('strike')}
-                    onClick={() => editor.chain().focus().toggleStrike().run()} aria-label="Strikethrough">
+                  <IconButton size="sm" active={fmtEditor.isActive('strike')}
+                    onClick={() => fmtEditor.chain().focus().toggleStrike().run()} aria-label="Strikethrough">
                     <Strikethrough size={14} />
                   </IconButton>
                 </Tooltip>
-                <SlideLinkButton editor={editor} />
+                <SlideLinkButton editor={fmtEditor} />
                 {/* Text color */}
                 <label
                   className="toolbar-btn relative cursor-pointer flex items-center gap-1"
@@ -1203,8 +1405,8 @@ export default function SlidesEditor() {
                   <input
                     type="color"
                     className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-                    value={editor.getAttributes('textStyle').color || '#000000'}
-                    onChange={(e) => editor.chain().focus().setColor(e.target.value).run()}
+                    value={fmtEditor.getAttributes('textStyle').color || '#000000'}
+                    onChange={(e) => fmtEditor.chain().focus().setColor(e.target.value).run()}
                     aria-label="Choose text color"
                   />
                 </label>
@@ -1212,7 +1414,7 @@ export default function SlidesEditor() {
                 <label
                   className={[
                     'toolbar-btn relative cursor-pointer flex items-center',
-                    editor.isActive('highlight') ? 'text-accent' : '',
+                    fmtEditor.isActive('highlight') ? 'text-accent' : '',
                   ].join(' ')}
                   title="Highlight"
                   aria-label="Highlight color"
@@ -1221,53 +1423,92 @@ export default function SlidesEditor() {
                   <input
                     type="color"
                     className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-                    value={editor.getAttributes('highlight').color || '#fef08a'}
-                    onChange={(e) => editor.chain().focus().toggleHighlight({ color: e.target.value }).run()}
+                    value={fmtEditor.getAttributes('highlight').color || '#fef08a'}
+                    onChange={(e) => fmtEditor.chain().focus().toggleHighlight({ color: e.target.value }).run()}
                     aria-label="Choose highlight color"
                   />
                 </label>
                 <span className="toolbar-divider" />
                 <Tooltip label="Align left">
-                  <IconButton size="sm" active={editor.isActive({ textAlign: 'left' })}
-                    onClick={() => editor.chain().focus().setTextAlign('left').run()} aria-label="Align left">
+                  <IconButton size="sm" active={fmtEditor.isActive({ textAlign: 'left' })}
+                    onClick={() => fmtEditor.chain().focus().setTextAlign('left').run()} aria-label="Align left">
                     <AlignLeft size={14} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip label="Align center">
-                  <IconButton size="sm" active={editor.isActive({ textAlign: 'center' })}
-                    onClick={() => editor.chain().focus().setTextAlign('center').run()} aria-label="Align center">
+                  <IconButton size="sm" active={fmtEditor.isActive({ textAlign: 'center' })}
+                    onClick={() => fmtEditor.chain().focus().setTextAlign('center').run()} aria-label="Align center">
                     <AlignCenter size={14} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip label="Align right">
-                  <IconButton size="sm" active={editor.isActive({ textAlign: 'right' })}
-                    onClick={() => editor.chain().focus().setTextAlign('right').run()} aria-label="Align right">
+                  <IconButton size="sm" active={fmtEditor.isActive({ textAlign: 'right' })}
+                    onClick={() => fmtEditor.chain().focus().setTextAlign('right').run()} aria-label="Align right">
                     <AlignRight size={14} />
                   </IconButton>
                 </Tooltip>
                 <span className="toolbar-divider" />
                 <Tooltip label="Bullet list">
-                  <IconButton size="sm" active={editor.isActive('bulletList')}
-                    onClick={() => editor.chain().focus().toggleBulletList().run()} aria-label="Bullet list">
+                  <IconButton size="sm" active={fmtEditor.isActive('bulletList')}
+                    onClick={() => fmtEditor.chain().focus().toggleBulletList().run()} aria-label="Bullet list">
                     <List size={14} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip label="Numbered list">
-                  <IconButton size="sm" active={editor.isActive('orderedList')}
-                    onClick={() => editor.chain().focus().toggleOrderedList().run()} aria-label="Numbered list">
+                  <IconButton size="sm" active={fmtEditor.isActive('orderedList')}
+                    onClick={() => fmtEditor.chain().focus().toggleOrderedList().run()} aria-label="Numbered list">
                     <ListOrdered size={14} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip label="Clear formatting">
                   <IconButton size="sm"
-                    onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
+                    onClick={() => fmtEditor.chain().focus().unsetAllMarks().clearNodes().run()}
                     aria-label="Clear formatting">
                     <RemoveFormatting size={14} />
                   </IconButton>
                 </Tooltip>
                 <span className="toolbar-divider" />
-                {/* Insert panel */}
-                <InsertPanel editor={editor} api={api} />
+                {/* Insert objects onto the canvas */}
+                <Tooltip label="Insert text box">
+                  <IconButton size="sm" onClick={insertTextObject} aria-label="Insert text box">
+                    <TypeIcon size={14} />
+                  </IconButton>
+                </Tooltip>
+                <ObjectInsertMenu
+                  onImage={() => imgInput.current?.click()}
+                  onShape={insertShapeObject}
+                />
+                <input
+                  ref={imgInput}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0]; if (!f) return
+                    try {
+                      const { url } = await api.uploadImage(f)
+                      insertImageObject(url)
+                    } catch {
+                      const reader = new FileReader()
+                      reader.onload = (ev) => { if (ev.target?.result) insertImageObject(String(ev.target.result)) }
+                      reader.readAsDataURL(f)
+                    }
+                    e.target.value = ''
+                  }}
+                />
+                <span className="toolbar-divider" />
+                {/* P1: preview animations in the editor */}
+                <Tooltip label="Play animations">
+                  <IconButton
+                    size="sm"
+                    active={animPlaying}
+                    disabled={!(activeSlide.animations && activeSlide.animations.length)}
+                    onClick={playAnimations}
+                    aria-label="Play animations"
+                  >
+                    <Play size={14} />
+                  </IconButton>
+                </Tooltip>
                 <span className="toolbar-divider" />
                 {/* Slide background */}
                 <label
@@ -1289,16 +1530,36 @@ export default function SlidesEditor() {
                   />
                 </label>
               </div>
+              )}
 
-              {/* Slide canvas — a lit "stage": the deck rests on a subtle
-                  spotlight so the slide reads as the protagonist. */}
+              {/* Slide canvas — free-positioning object stage (P2). */}
               <div className="slide-stage flex-1 overflow-auto px-3 sm:px-6 py-4 sm:py-10 bg-bg">
-                <article
-                  className="paper-grain mx-auto bg-paper border border-line rounded-lg shadow-e3 px-12 py-10 animate-scale-in"
-                  style={{ maxWidth: '900px', minHeight: '420px' }}
-                >
+                <div ref={canvasStageRef} className="mx-auto animate-scale-in" style={{ maxWidth: '900px' }}>
+                  <SlideCanvas
+                    objects={activeObjects}
+                    background={activeSlide.background}
+                    selectedIds={selectedObjectIds}
+                    onSelect={setSelectedObjectIds}
+                    onChange={(next, opts) => updateObjects(next, opts)}
+                    onEditText={(id) => { setEditingObjectId(id); setSelectedObjectIds([id]) }}
+                    editable
+                    overlay={editingObject && (
+                      <ObjectTextEditor
+                        key={editingObject.id}
+                        obj={editingObject}
+                        stageRect
+                        onEditorReady={setObjectEditor}
+                        onCommit={commitObjectText}
+                        onClose={() => { setEditingObjectId(null); setObjectEditor(null) }}
+                      />
+                    )}
+                  />
+                </div>
+                {/* Hidden flow editor: keeps TipTap mounted (undo history + the
+                    fallback formatting target when no object is being edited). */}
+                <div className="sr-only" aria-hidden="true">
                   <EditorContent editor={editor} className="tiptap" />
-                </article>
+                </div>
               </div>
 
               {/* Speaker notes — resizable */}

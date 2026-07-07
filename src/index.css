@@ -660,3 +660,58 @@
   border: none !important;
   box-shadow: inset 0 0 0 1px var(--line-strong), var(--elev-2);
 }
+
+/* ===========================================================================
+ *  Slides — object animations (P1: TransitionPanel `animations[]` playback)
+ *  ----------------------------------------------------------------------------
+ *  A small, dependency-free CSS animation layer. Each stored animation maps to
+ *  one of these `.vslide-anim-*` classes (see slideAnimations.js). Used by BOTH
+ *  the in-editor preview and the reveal.js present surface. All honour
+ *  prefers-reduced-motion (the media query at the bottom neutralises them).
+ * ========================================================================== */
+@keyframes vslide-fade-in   { from { opacity: 0 } to { opacity: 1 } }
+@keyframes vslide-fade-out  { from { opacity: 1 } to { opacity: 0 } }
+@keyframes vslide-fly-in    { from { opacity: 0; transform: translateY(28px) } to { opacity: 1; transform: translateY(0) } }
+@keyframes vslide-fly-out   { from { opacity: 1; transform: translateY(0) }    to { opacity: 0; transform: translateY(28px) } }
+@keyframes vslide-zoom-in   { from { opacity: 0; transform: scale(0.6) }       to { opacity: 1; transform: scale(1) } }
+@keyframes vslide-zoom-out  { from { opacity: 1; transform: scale(1) }         to { opacity: 0; transform: scale(0.6) } }
+@keyframes vslide-spin-in   { from { opacity: 0; transform: rotate(-180deg) scale(0.7) } to { opacity: 1; transform: rotate(0) scale(1) } }
+@keyframes vslide-spin-out  { from { opacity: 1; transform: rotate(0) scale(1) } to { opacity: 0; transform: rotate(180deg) scale(0.7) } }
+@keyframes vslide-bounce {
+  0%   { opacity: 0; transform: translateY(-40px) }
+  60%  { opacity: 1; transform: translateY(8px) }
+  80%  { transform: translateY(-4px) }
+  100% { transform: translateY(0) }
+}
+@keyframes vslide-pulse {
+  0%, 100% { transform: scale(1) }
+  50%      { transform: scale(1.08) }
+}
+@keyframes vslide-spin-emph { from { transform: rotate(0) } to { transform: rotate(360deg) } }
+@keyframes vslide-bounce-emph {
+  0%, 100% { transform: translateY(0) }
+  30%      { transform: translateY(-16px) }
+  60%      { transform: translateY(0) }
+}
+
+.vslide-anim-fade-in    { animation: vslide-fade-in   0.5s ease both }
+.vslide-anim-fade-out   { animation: vslide-fade-out  0.5s ease both }
+.vslide-anim-fly-in     { animation: vslide-fly-in    0.55s cubic-bezier(0.16,1,0.3,1) both }
+.vslide-anim-fly-out    { animation: vslide-fly-out   0.5s ease both }
+.vslide-anim-zoom-in    { animation: vslide-zoom-in   0.5s cubic-bezier(0.16,1,0.3,1) both }
+.vslide-anim-zoom-out   { animation: vslide-zoom-out  0.45s ease both }
+.vslide-anim-spin-in    { animation: vslide-spin-in   0.6s cubic-bezier(0.16,1,0.3,1) both }
+.vslide-anim-spin-out   { animation: vslide-spin-out  0.5s ease both }
+.vslide-anim-bounce     { animation: vslide-bounce    0.8s cubic-bezier(0.28,0.84,0.42,1) both }
+.vslide-anim-pulse      { animation: vslide-pulse     0.6s ease both }
+.vslide-anim-spin-emph  { animation: vslide-spin-emph 0.7s ease both }
+.vslide-anim-bounce-emph{ animation: vslide-bounce-emph 0.7s ease both }
+
+@media (prefers-reduced-motion: reduce) {
+  .vslide-anim-fade-in, .vslide-anim-fade-out, .vslide-anim-fly-in,
+  .vslide-anim-fly-out, .vslide-anim-zoom-in, .vslide-anim-zoom-out,
+  .vslide-anim-spin-in, .vslide-anim-spin-out, .vslide-anim-bounce,
+  .vslide-anim-pulse, .vslide-anim-spin-emph, .vslide-anim-bounce-emph {
+    animation: none !important;
+  }
+}

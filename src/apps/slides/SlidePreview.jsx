@@ -4,21 +4,45 @@ import { X } from 'lucide-react'
 // tags, strips anything that could execute code (<script>, on* handlers,
 // javascript: URLs, <iframe>).
 import { sanitizeSlideHtml as sanitize } from '../../lib/sanitize'
+import { ensureObjects, sortByZ } from './slideObjects'
+import ShapeSvg from './ShapeSvg.jsx'
+import { playAnimationsOn } from './slideAnimations.js'
 
 /**
  * SlidePreview — full-screen reveal.js presentation overlay.
  *
+ * Renders each slide's positioned objects (P2) inside the reveal <section>, and
+ * plays that slide's per-element animations (P1) on slide-change. reveal owns the
+ * slide-to-slide transition; our CSS animation layer runs the entrance/exit/
+ * emphasis effects on the objects (honouring prefers-reduced-motion).
+ *
  * The presentation itself is reveal.js territory (its own themes), so the
- * design-system retint is intentionally light-touch: the close affordance is
- * the only piece of Vulos chrome on this surface.  Background stays
- * pitch-black so reveal themes (especially black/night) render correctly.
+ * design-system retint is intentionally light-touch. Background stays
+ * pitch-black so reveal themes render correctly.
  */
 export default function SlidePreview({ data, onClose }) {
   const containerRef = useRef(null)
+  const deckRef = useRef(null)
+  const animCleanupRef = useRef(null)
+
+  // Precompute objects per slide so render + animation playback agree.
+  const slides = data.slides.map((s) => ({ ...s, _objects: ensureObjects(s) }))
 
   useEffect(() => {
     if (!containerRef.current) return
     let deck = null
+
+    // Play the animations for the section that just became active.
+    const playForSection = (sectionEl) => {
+      if (animCleanupRef.current) { animCleanupRef.current(); animCleanupRef.current = null }
+      const idx = Number(sectionEl?.dataset?.slideIndex)
+      const slide = Number.isFinite(idx) ? slides[idx] : null
+      if (!slide) return
+      const els = sortByZ(slide._objects)
+        .map((o) => sectionEl.querySelector(`[data-object-id="${o.id}"]`))
+        .filter(Boolean)
+      animCleanupRef.current = playAnimationsOn(els, slide.animations || [])
+    }
 
     import('reveal.js').then(({ default: Reveal }) => {
       deck = new Reveal(containerRef.current, {
@@ -33,11 +57,19 @@ export default function SlidePreview({ data, onClose }) {
         overview: true,
         center: true,
       })
-      deck.initialize()
+      deck.initialize().then(() => {
+        deckRef.current = deck
+        // First slide.
+        playForSection(deck.getCurrentSlide?.())
+        deck.on('slidechanged', (ev) => playForSection(ev.currentSlide))
+      })
     })
 
-    return () => { try { deck?.destroy() } catch { /* ignore */ } }
-  }, [data])
+    return () => {
+      if (animCleanupRef.current) { animCleanupRef.current(); animCleanupRef.current = null }
+      try { deck?.destroy() } catch { /* ignore */ }
+    }
+  }, [data]) // eslint-disable-line
 
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose() }
@@ -46,8 +78,6 @@ export default function SlidePreview({ data, onClose }) {
   }, [onClose])
 
   // Restore focus to whatever was focused before the presentation opened.
-  // (We deliberately do NOT trap focus — Reveal.js owns arrow/Space keyboard
-  // navigation while the deck is open.)
   const priorFocusRef = useRef(null)
   useEffect(() => {
     priorFocusRef.current = document.activeElement
@@ -85,15 +115,44 @@ export default function SlidePreview({ data, onClose }) {
 
       <div ref={containerRef} className="reveal flex-1 w-full">
         <div className="slides">
-          {data.slides.map((slide) => (
-            <section key={slide.id} data-background={slide.background || undefined}>
-              {slide.title && <h2>{slide.title}</h2>}
-              {/*
-                IMPORTANT — slide.content is user-authored HTML.  It MUST go
-                through the shared sanitize() wrapper (src/lib/sanitize.js)
-                before being passed to dangerouslySetInnerHTML.  Do not bypass.
-              */}
-              <div dangerouslySetInnerHTML={{ __html: sanitize(slide.content) }} />
+          {slides.map((slide, idx) => (
+            <section
+              key={slide.id}
+              data-slide-index={idx}
+              data-background={slide.background || undefined}
+              data-transition={slide.transition && slide.transition !== 'none' ? slide.transition : undefined}
+            >
+              {/* Positioned-object stage: absolute objects on a 16:9 box.
+                  Kept read-only; text HTML is sanitized before render. */}
+              <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9' }}>
+                {sortByZ(slide._objects).map((obj) => (
+                  <div
+                    key={obj.id}
+                    data-object-id={obj.id}
+                    style={{
+                      position: 'absolute',
+                      left: `${obj.x * 100}%`, top: `${obj.y * 100}%`,
+                      width: `${obj.w * 100}%`, height: `${obj.h * 100}%`,
+                      transform: `rotate(${obj.rotation || 0}deg)`,
+                      transformOrigin: 'center center',
+                      zIndex: obj.z || 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: obj.valign === 'middle' ? 'center' : obj.valign === 'bottom' ? 'flex-end' : 'flex-start',
+                      textAlign: obj.align || 'left',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {obj.type === 'text' && (
+                      <div dangerouslySetInnerHTML={{ __html: sanitize(obj.html) }} />
+                    )}
+                    {obj.type === 'image' && obj.src && (
+                      <img src={obj.src} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    )}
+                    {obj.type === 'shape' && <ShapeSvg obj={obj} />}
+                  </div>
+                ))}
+              </div>
               {slide.notes && <aside className="notes">{slide.notes}</aside>}
             </section>
           ))}
