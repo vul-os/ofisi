@@ -17,6 +17,12 @@ const (
 	CtxAuthenticated = "authenticated"
 	CtxUserID        = "userID"  // verified account id from the JWT subject
 	CtxIsAdmin       = "isAdmin" // true if the JWT carries the admin scope
+	// CtxTenantID is the tenant (account) scope the request is confined to when
+	// identity was resolved via the SSO session-introspection path (multi-user
+	// cloud). Empty in local single-identity mode and on the product-JWT / vk_
+	// paths that pre-date multi-tenant SSO. Handlers scope data reads/writes by
+	// this value so a user only ever sees their own tenant's data.
+	CtxTenantID = "tenantID"
 )
 
 // Auth validates the session JWT, and on success sets the verified identity

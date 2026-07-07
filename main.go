@@ -21,6 +21,7 @@ import (
 	"vulos-office/backend/middleware"
 	"vulos-office/backend/obs"
 	"vulos-office/backend/seam"
+	"vulos-office/backend/session"
 	"vulos-office/backend/storage"
 	"vulos-office/backend/userauth"
 
@@ -125,6 +126,22 @@ func main() {
 	// package imports only backend/seam, never the cloud adapter.
 	billing.Configure(provider)
 
+	// ── SSO session-introspection seam ────────────────────────────────────────
+	// Wedge-aligned identity: Office holds NO session-signing power. When
+	// IDENTITY_URL is set (multi-user cloud, or a sovereign box brokering many
+	// users) Office INTROSPECTS the `vc_session` cookie against that provider,
+	// presenting the SAME shared service secret it already holds for the CP
+	// (VULOS_CP_TOKEN == the provider's CP_SHARED_SECRET). When IDENTITY_URL is
+	// UNSET (self-host single-user appliance) this path is DISABLED and Office
+	// keeps its existing local single-identity behavior — unchanged.
+	sessCfg := session.FromEnv()
+	sessionIntrospector := session.NewIntrospector(sessCfg)
+	if sessionIntrospector != nil {
+		log.Printf("[sso] session introspection enabled (identity provider %s)", sessCfg.IdentityURL)
+	} else {
+		log.Printf("[sso] session introspection disabled (no %s); local single-identity mode", session.EnvIdentityURL)
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
@@ -180,10 +197,16 @@ func main() {
 	api.POST("/auth/logout", authHandler.Logout)
 	api.GET("/auth/status", authHandler.Status)
 
-	// Protected API routes
+	// Protected API routes.
+	//
+	// AuthWithSSO preserves the existing product-JWT session gate and, when
+	// IDENTITY_URL is configured, ADDS the SSO `vc_session` introspection path
+	// (fail-closed). When auth is disabled AND no SSO provider is set it is a
+	// no-op passthrough (self-host single-user — unchanged), so we only install
+	// it when at least one identity source is active.
 	protected := api.Group("/")
-	if cfg.Auth.Enabled {
-		protected.Use(middleware.Auth(cfg))
+	if cfg.Auth.Enabled || sessionIntrospector != nil {
+		protected.Use(middleware.AuthWithSSO(cfg, sessionIntrospector))
 	}
 
 	// Write/collab sub-group — same auth middleware as protected, plus a
@@ -194,8 +217,8 @@ func main() {
 	// leaving normal human editing (save-on-keyup, comment spam) unaffected.
 	// Disable with --no-rate-limit-writes for trusted internal tooling.
 	writes := api.Group("/")
-	if cfg.Auth.Enabled {
-		writes.Use(middleware.Auth(cfg))
+	if cfg.Auth.Enabled || sessionIntrospector != nil {
+		writes.Use(middleware.AuthWithSSO(cfg, sessionIntrospector))
 	}
 	if !*noRateLimitWrites {
 		writeLimiter := middleware.NewTokenBucket(30, 10)
@@ -283,7 +306,7 @@ func main() {
 	v1Handler := handlers.NewV1Handler(store).WithDocSync(docSyncStore)
 	docSyncHandler := handlers.NewDocSyncHandler(store, docSyncStore)
 	v1 := r.Group("/v1")
-	v1.Use(middleware.V1Auth(cfg, v1Introspector))
+	v1.Use(middleware.V1Auth(cfg, v1Introspector, sessionIntrospector))
 	// Reads.
 	v1.GET("/documents", v1Handler.ListDocuments)
 	v1.GET("/documents/:id", v1Handler.GetDocument)

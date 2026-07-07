@@ -31,6 +31,17 @@ primary_region = "PLACEHOLDER"   # Fly region code (e.g. "iad", "lhr", "fra")
 # secret — main.go/storage.Resolve select Postgres when DATABASE_URL (or
 # VULOS_DATABASE_URL) is present, overriding the local default:
 #   fly secrets set -c vulos-office/fly.toml DATABASE_URL=postgres://...
+#
+# ── SSO session introspection (cloud / multi-user) ────────────────────────────
+# Office holds NO session-signing power. In cloud it validates the browser's
+# `vc_session` cookie against the control plane by introspection. Set as secrets:
+#   fly secrets set -c vulos-office/fly.toml \
+#     IDENTITY_URL=https://cp.vulos.to \
+#     VULOS_CP_TOKEN=<the CP shared secret (== CP_SHARED_SECRET)>
+# With IDENTITY_URL UNSET the SSO path is disabled and Office keeps its local
+# single-identity behavior (self-host appliance). VULOS_CP_TOKEN is the same
+# service-auth secret Office already presents for API-key/entitlements calls —
+# it is NOT a signing key.
 
 # The server writes app data under ./data (i.e. /srv/data, since the image
 # WORKDIR is /srv). Persist that path with the volume. Uploads land in

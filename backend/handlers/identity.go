@@ -26,6 +26,15 @@ func requesterID(c *gin.Context) string {
 		}
 	}
 
+	// SSO session path (multi-user cloud): identity was resolved by introspecting
+	// the vc_session cookie against the identity provider, which returned a
+	// tenantId (= the account id). ALL data — ownership, ACLs, storage keys — is
+	// scoped to the tenant so a user only ever sees their own tenant's data. The
+	// tenant scope takes precedence over the raw user id for keying.
+	if tenant := c.GetString(middleware.CtxTenantID); tenant != "" {
+		return tenant
+	}
+
 	if uid != "" {
 		return uid
 	}

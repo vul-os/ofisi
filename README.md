@@ -262,7 +262,8 @@ storage:
 | `VULOS_USERAUTH_DB` | Override the credential SQLite store path |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Enable OpenTelemetry trace export |
 | `VULOS_CP_BASE_URL` | **Opt-in** vulos-cloud control plane URL (enables the cloud seam) |
-| `VULOS_CP_TOKEN` | Outbound service token for the control plane |
+| `VULOS_CP_TOKEN` | Outbound service token for the control plane. Also the shared secret Office presents to the identity provider for SSO session introspection (== the provider's `CP_SHARED_SECRET`). **Not a signing key** — Office never signs sessions. |
+| `IDENTITY_URL` | **Opt-in** identity provider base URL for **SSO session introspection** (the sovereign box in self-host, the CP in cloud). When SET, Office validates the browser's `vc_session` cookie by calling `POST {IDENTITY_URL}/api/session/introspect` (fail-closed). When **UNSET** (self-host single-user appliance), the SSO path is disabled and the existing local single-identity behavior is unchanged. |
 | `VULOS_ORG_ID` | Tenant / org scoping (used by the cloud adapter and storage) |
 
 #### Postgres shared-database setup (cloud / Neon)
@@ -297,6 +298,22 @@ Full standalone instructions, the seam contract, and the optional cloud integrat
 ### Optional: the vulos-cloud seam
 
 Setting `VULOS_CP_BASE_URL` selects the `backend/integration/cloud` adapter, which implements the same `seam` interfaces against the [vulos-cloud](https://vulos.org) control plane for multi-tenant identity, entitlements, and usage. Entitlement fetches **fail open** on a transient outage. Leave it unset and Office is 100% standalone.
+
+### Optional: SSO session introspection (`IDENTITY_URL`)
+
+Office holds **no session-signing power**. In a multi-user deployment, a user's browser carries a `vc_session` cookie minted by a configurable **identity provider** — the sovereign box in self-host, or the vulos-cloud control plane in cloud. Office only ever **verifies** that session by introspecting it:
+
+```
+POST {IDENTITY_URL}/api/session/introspect
+  X-Relay-Auth: <shared service secret == VULOS_CP_TOKEN>
+  { "session": "<vc_session cookie value>" }
+  → { "valid": true, "userId": "...", "tenantId": "<account id>", "expiresAt": 1720000000 }
+```
+
+- **`IDENTITY_URL` UNSET** (self-host single-user / appliance): the SSO path is **disabled**; behavior is byte-for-byte the existing local single-identity mode. This is the correct posture for a sovereign single-user box.
+- **`IDENTITY_URL` SET** (cloud / multi-user): a request bearing `vc_session` (and not already authed by the product-JWT or `vk_` paths) is introspected. On `{valid:true}` the request is scoped to the resolved **user + tenant** (`tenantId` = the account id everything is keyed by); on `{valid:false}` or any transport error → **401, fail-closed**. Office never falls open to a shared identity when `IDENTITY_URL` is configured.
+
+The shared secret is the **existing service-auth secret** (`VULOS_CP_TOKEN`, equal to the provider's `CP_SHARED_SECRET`) — **not a signing key**. Introspection results are cached in-process for a short TTL (~45s, further bounded by the session's own `expiresAt`) so this is not a round-trip per request. This SSO path is **additive**: the per-product JWT (`VULOS_OFFICE_JWT_SECRET`), the `vk_` API-key path, and the CP `X-Relay-Auth` introspection paths all still work.
 
 ---
 

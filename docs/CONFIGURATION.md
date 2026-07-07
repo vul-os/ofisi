@@ -41,6 +41,22 @@ storage:
 | `VULOS_OFFICE_JWT_SECRET` | HS256 signing secret — **required** when `auth.enabled: true` | — |
 | `VULOS_OFFICE_REGISTRATION_TOKEN` | Static fallback registration token (prefer invite tokens) | — |
 
+### SSO session introspection (multi-user)
+
+Office holds **no session-signing power**. When an identity provider is configured it validates the browser's `vc_session` cookie by introspection instead of verifying a signature Office minted.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `IDENTITY_URL` | Identity-provider base URL (sovereign box in self-host, CP in cloud). **SET** → Office introspects `vc_session` at `POST {IDENTITY_URL}/api/session/introspect` and fails **closed** (401) on invalid/expired/unreachable. **UNSET** → SSO disabled; existing local single-identity behavior unchanged. | — (unset) |
+| `VULOS_CP_TOKEN` | Shared service-auth secret presented as `X-Relay-Auth` on the introspection call (== the provider's `CP_SHARED_SECRET`). Reused from the existing API-key / entitlements path — **not a signing key**. | — |
+
+Precedence (first match wins): `vk_` API key → per-product session JWT → SSO `vc_session` introspection → 401. On a valid session the request is scoped to the resolved **user + tenant** (`tenantId` = account id); results are cached in-process for ~45s (bounded by the session's `expiresAt`) so it is not a round-trip per request.
+
+**Operator quick-reference**
+
+- Self-host single-user box: leave `IDENTITY_URL` unset. Nothing else to do.
+- Cloud / multi-user: set `IDENTITY_URL=https://cp.vulos.to` and `VULOS_CP_TOKEN=<CP shared secret>` (plus `auth.enabled: true` / `VULOS_OFFICE_JWT_SECRET` if you also keep native JWT logins).
+
 ### Database paths (SQLite)
 
 | Variable | Description | Default |

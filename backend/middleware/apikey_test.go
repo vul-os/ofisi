@@ -30,7 +30,7 @@ func (s stubIntrospector) Introspect(_ context.Context, _ string) (apikey.Result
 func v1TestRouter(cfg *config.Config, intro apikey.Introspector) *gin.Engine {
 	r := gin.New()
 	g := r.Group("/v1")
-	g.Use(V1Auth(cfg, intro))
+	g.Use(V1Auth(cfg, intro, nil))
 	g.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"user":   c.GetString(CtxUserID),
