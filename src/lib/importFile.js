@@ -2,7 +2,7 @@ import { marked } from 'marked'
 import mammoth from 'mammoth'
 import { api } from './api'
 import { useFilesStore } from '../store/filesStore'
-import { assertFileSize, ImportError } from './importBounds'
+import { assertFileSize, assertArchiveBounds, ImportError } from './importBounds'
 import { workbookToSheets } from '../apps/sheets/sheetsImport'
 import { csvToSheet } from '../apps/sheets/csvImport'
 import { odtToHtml } from '../apps/docs/odtImport'
@@ -102,6 +102,10 @@ async function convertDocFromBuffer(ext, buf, text) {
   if (ext === 'txt') return docFromText(text)
   if (ext === 'docx') {
     assertFileSize(buf.byteLength, 'document')
+    // Zip-bomb guard BEFORE mammoth's own unbounded inflate: reject a lying-CD /
+    // oversize .docx while it is still a validated, bounded archive (see
+    // assertArchiveBounds). mammoth then re-inflates safe, capped bytes.
+    await assertArchiveBounds(buf, 'document')
     const result = await mammoth.convertToHtml({ arrayBuffer: buf }, MAMMOTH_OPTS)
     return { type: 'doc', _html: result.value || '<p></p>', content: [{ type: 'paragraph' }] }
   }
@@ -113,7 +117,7 @@ async function convertDocFromBuffer(ext, buf, text) {
   return docFromText(text)
 }
 
-async function convertToDocContent(file) {
+export async function convertToDocContent(file) {
   const ext = (file.name.split('.').pop() || '').toLowerCase()
   // Binary formats need the ArrayBuffer; text formats need the decoded text.
   if (['docx', 'odt'].includes(ext)) {
@@ -125,7 +129,7 @@ async function convertToDocContent(file) {
 
 // ── Sheets ──────────────────────────────────────────────────────────────────
 
-async function convertToSheetContent(file) {
+export async function convertToSheetContent(file) {
   const ext = (file.name.split('.').pop() || '').toLowerCase()
   if (ext === 'csv' || ext === 'tsv') {
     const text = await fileToText(file)
@@ -134,6 +138,14 @@ async function convertToSheetContent(file) {
   }
   // xlsx / xls / ods
   const buf = await fileToArrayBuffer(file)
+  // .xlsx and .ods are zip archives that SheetJS inflates itself — run the
+  // zip-bomb pre-check before handing raw bytes to it (see assertArchiveBounds).
+  // Legacy .xls is an OLE compound binary, not a zip, so it is not archive-checked
+  // here (its SheetJS parse stays bounded by the file-size gate + cell caps in
+  // workbookToSheets).
+  if (ext === 'xlsx' || ext === 'ods') {
+    await assertArchiveBounds(buf, file.name)
+  }
   return workbookToSheets(buf, file.name)
 }
 

@@ -33,10 +33,15 @@ The sections below are **priority-ordered**.
 
 The foundation, and what ships today: a clean, single-binary suite that opens in
 the browser with no account required. Documents are edited with TipTap (rich
-text, tables, task lists, images, links), Sheets with Fortune Sheet (formulas,
-multi-sheet, formatting), Slides with Reveal.js, and PDFs with an annotate-and-
-sign canvas. Files autosave to local JSON by default (PostgreSQL for multi-user),
-and everything exports to `.docx`, `.xlsx`, `.pptx`, `.pdf`, and Markdown. Before
+text, tables, task lists, images, links, pagination, headers/footers, equations),
+Sheets with Fortune Sheet (a comprehensive formula engine, multi-sheet,
+formatting, charts, pivots), Slides on a **from-scratch positioned-object
+canvas** (free drag/resize/rotate of text, shapes, and images in normalized slide
+space — not a Reveal.js document; Reveal.js survives only as the full-screen
+*present* surface that hosts the same positioned objects), and PDFs with an
+annotate-and-sign canvas. Files autosave to local JSON by default (PostgreSQL for
+multi-user), and everything imports from / exports to Microsoft (`.docx`/`.xlsx`/
+`.pptx`) and ODF (`.odt`/`.ods`/`.odp`) plus `.pdf`, `.csv`, and Markdown. Before
 we network the suite, the single-player experience must be solid, lossless, and
 trustworthy.
 
@@ -52,15 +57,27 @@ trustworthy.
 ### Concrete features
 
 - **Documents (TipTap):** headings, tables, lists, task lists, links, images,
-  text styling, highlight, alignment, typography, live word/character count.
-- **Sheets (Fortune Sheet):** formula grid, multi-sheet workbooks, cell
-  formatting, `.xlsx`/`.csv` export.
-- **Slides (Reveal.js):** slide authoring, speaker view, present-from-browser.
+  text styling, highlight, alignment, typography, live word/character count,
+  page pagination, headers/footers, and equations.
+- **Sheets (Fortune Sheet):** a comprehensive formula engine, multi-sheet
+  workbooks, cell formatting, number formats, conditional formatting, data
+  validation, charts, filters, pivot tables, named ranges, freeze panes, and
+  `.xlsx`/`.ods`/`.csv` export.
+- **Slides (from-scratch positioned-object canvas):** free-positioning authoring
+  — drag/resize/rotate text boxes, shapes, and images in normalized [0,1] slide
+  space (`SlideCanvas.jsx` / `slideObjects.js`), per-element entrance/emphasis/exit
+  **animations**, editable **master slides**, themes, **presenter view** (notes +
+  timer), and present-from-browser. The full-screen present overlay uses Reveal.js
+  purely as a slide-to-slide **transition host** that renders our positioned
+  objects — it is not the authoring model or the editor.
 - **PDF:** render, page thumbnails, zoom; place text, freehand draw, and
   signature/initial annotations; flatten and download via pdf-lib.
-- **Import / Export:** open from URL or local file; export `.docx`, `.xlsx`,
-  `.pptx`, `.pdf`, Markdown. Import `.pptx` via OOXML/JSZip (text + slide
-  structure extracted from `ppt/slides/*.xml`).
+- **Import / Export:** open from URL or local file. Export `.docx`, `.xlsx`,
+  `.pptx`, `.pdf`, and Markdown. Import Microsoft (`.docx` via mammoth, `.xlsx`
+  via SheetJS, `.pptx` via OOXML/JSZip) and ODF (`.odt`, `.ods`, `.odp`) — slide
+  decks import as positioned objects (text + geometry + embedded raster images).
+  Every import runs through one hardened trust boundary (`lib/importBounds.js`):
+  size + zip-bomb + zip-slip + XXE caps, then a per-app content sanitiser.
 - **Storage:** local JSON store; PostgreSQL backend for multi-user installs;
   optional password auth (JWT) off by default.
 - **Single binary + PWA:** the Go binary embeds the built frontend; installable
@@ -298,13 +315,30 @@ navigated. Coordinate with the multi-target build work above for OS launcher int
 
 - **Docs / Sheets / Slides / PDF** editing and signing are the core product, with
   comments, suggestions (track-changes), and version history.
+  - **Docs** (TipTap): rich text, tables, task lists, images, links, pagination,
+    headers/footers, and equations.
+  - **Sheets** (Fortune Sheet): a comprehensive formula engine, number/conditional
+    formatting, data validation, charts, filters, pivots, named ranges, freeze panes.
+  - **Slides**: the **from-scratch positioned-object canvas** — drag/resize/rotate
+    text, shapes, and images in normalized slide space, per-element animations,
+    master slides, themes, presenter view. Reveal.js is used only for the
+    full-screen *present* transition, not authoring.
 - **Calendar** and **Contacts** moved to the Vulos Mail/PIM product (vulos-mail
   CalDAV/CardDAV + lilmail `/v1/calendar` + `/v1/contacts`); Office is documents-only.
 - **Org-bucket wiring** (`OfficeBackendConfig`) is fully wired (`FIX-OFFICE-STORE-WIRE-01`):
   file CRUD and sealed PDFs read/write to the S3-compatible bucket (Tigris or MinIO)
   when `VULOS_ORG_ID` is set; falls back to local storage otherwise.
-- **PPTX import**: JSZip + OOXML XML parsing extracts slide text from `ppt/slides/*.xml`;
-  builds a slides-editor-compatible content model for both drag-and-drop and backend-served files.
+- **Import (MS + ODF)**: `.docx` (mammoth), `.xlsx`/`.ods` (SheetJS), and `.pptx`/`.odp`
+  (OOXML/ODF via JSZip) all import through one hardened trust boundary
+  (`lib/importBounds.js` — size, zip-bomb incl. lying-central-directory, zip-slip,
+  and XXE caps, then per-app sanitisers). Slide decks import as **positioned objects**
+  (text + geometry + embedded raster images), for both drag-and-drop and
+  backend-served files.
+  - **Honest fidelity ceiling**: imports target readable, editable content, not
+    pixel-perfect legacy layout. Known drops include non-raster/vector media, some
+    complex nested-table + merged-cell edge cases, slide transitions/SmartArt, and
+    character/paragraph styling beyond the supported subset. Macros/VBA are never
+    executed — a macro-laden file imports as inert data only.
 - **Deep-link routing**: per-document deep links + the `web+vulosoffice://` protocol
   handler registered on mount; `?goto=` param parsed and navigated.
 - **Security**: per-file ACLs, append-only signing audit trail.

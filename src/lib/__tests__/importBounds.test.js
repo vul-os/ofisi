@@ -147,7 +147,7 @@ describe('safeLoadZip / entryText / entryDataUri', () => {
 // reader aborts on real bytes, not on the (fake) declared size — and never after
 // fully decompressing.
 import zlib from 'node:zlib'
-import { inflateEntryBounded, MAX_SINGLE_ENTRY, MAX_TOTAL_UNCOMPRESSED } from '../importBounds.js'
+import { inflateEntryBounded, assertArchiveBounds, MAX_SINGLE_ENTRY, MAX_TOTAL_UNCOMPRESSED } from '../importBounds.js'
 
 function crc32(buf) {
   let c = ~0
@@ -239,5 +239,38 @@ describe('zip-bomb: lying central directory (actual-inflate bound)', () => {
   it('MAX_SINGLE_ENTRY is the default per-entry ceiling', () => {
     expect(MAX_SINGLE_ENTRY).toBeGreaterThan(0)
     expect(MAX_SINGLE_ENTRY).toBeLessThanOrEqual(MAX_TOTAL_UNCOMPRESSED)
+  })
+})
+
+// ── assertArchiveBounds: the pre-check for self-inflating importers (docx/xlsx) ─
+// mammoth (docx) and SheetJS (xlsx/ods) inflate the archive THEMSELVES, so the
+// entryText/entryDataUri mid-stream cap never protects them. assertArchiveBounds
+// runs first: the central-directory declared-size gate PLUS an actual-inflate
+// pass over every entry, so BOTH a declared-oversize bomb and a lying-CD
+// (declares small, inflates big) bomb are rejected before the library parses.
+describe('assertArchiveBounds (docx/xlsx zip-bomb pre-check)', () => {
+  it('passes an honest, in-bounds archive and returns the JSZip', async () => {
+    const jz = new JSZip()
+    jz.file('content.xml', '<r>ok</r>')
+    jz.file('Pictures/x.png', new Uint8Array([1, 2, 3, 4]))
+    const ab = await jz.generateAsync({ type: 'uint8array' })
+    const zip = await assertArchiveBounds(ab, 'ok.xlsx')
+    expect(Object.keys(zip.files)).toContain('content.xml')
+  })
+
+  it('rejects a central directory that DECLARES an oversize entry (no inflation needed)', async () => {
+    // CD lies that a tiny entry is 200 MB (> MAX_SINGLE_ENTRY): the declared-size
+    // gate in safeLoadZip fires first — rejected without inflating a byte.
+    const ab = buildLyingZip('content.xml', Buffer.from('<r>tiny</r>'), 200 * 1024 * 1024)
+    await expect(assertArchiveBounds(ab, 'bomb.xlsx')).rejects.toThrow(ImportError)
+  })
+
+  it('rejects a LYING central directory (declares 100 bytes, inflates megabytes) via the actual-inflate cap', async () => {
+    // 8 MB of 'A' declared as 100 bytes: the declared gate is fooled, so the
+    // actual-inflate pass is what must catch it. A 256 KB injected per-entry cap
+    // exercises that layer cheaply (production uses MAX_SINGLE_ENTRY).
+    const content = Buffer.alloc(8 * 1024 * 1024, 65)
+    const ab = buildLyingZip('content.xml', content, 100)
+    await expect(assertArchiveBounds(ab, 'liar.xlsx', 256 * 1024)).rejects.toThrow(ImportError)
   })
 })

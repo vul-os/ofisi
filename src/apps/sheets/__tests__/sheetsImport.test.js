@@ -5,6 +5,9 @@ import { describe, it, expect } from 'vitest'
 import * as XLSX from 'xlsx'
 import { workbookToSheets } from '../sheetsImport.js'
 import { buildCsv } from '../sheetsExport.js'
+import { convertToSheetContent } from '../../../lib/importFile.js'
+import { ImportError, MAX_SINGLE_ENTRY } from '../../../lib/importBounds.js'
+import { buildLyingZip } from '../../../lib/__tests__/zipBombFixture.js'
 
 // Build a workbook ArrayBuffer for a given bookType from a worksheet mutator.
 function buildBook(mutate, bookType = 'xlsx') {
@@ -96,5 +99,34 @@ describe('workbookToSheets — security', () => {
     // valid file).
     const buf = buildBook(() => {})
     expect(() => workbookToSheets(buf, 'ok.xlsx')).not.toThrow()
+  })
+})
+
+describe('sheets import — zip-bomb rejected BEFORE SheetJS parses', () => {
+  // .xlsx/.ods are zip archives SheetJS inflates itself, so the mid-stream
+  // inflate cap never sees them. convertToSheetContent must run the archive
+  // pre-check before XLSX.read, rejecting a bomb before the heavy parse.
+  //
+  // We can't vi.spyOn XLSX.read (ESM namespace is non-configurable), but SheetJS
+  // is LENIENT — XLSX.read never throws ImportError, it returns a bounded/garbage
+  // workbook (see "handles unexpected bytes gracefully" above). So an ImportError
+  // with the pre-check's decompressed-size message PROVES the guard fired and the
+  // parser was never reached: a malformed bomb that reached XLSX.read would have
+  // parsed to a (bounded) sheet array, not thrown.
+  it('rejects a lying-central-directory oversize .xlsx before the heavy parse', async () => {
+    const bomb = buildLyingZip('xl/worksheets/sheet1.xml', Buffer.from('<x/>'), 200 * 1024 * 1024)
+    expect(200 * 1024 * 1024).toBeGreaterThan(MAX_SINGLE_ENTRY)
+    const file = new File([bomb], 'bomb.xlsx')
+    const err = await convertToSheetContent(file).then(() => null, (e) => e)
+    expect(err).toBeInstanceOf(ImportError)
+    expect(err.message).toMatch(/decompress|too large|zip-bomb/i)  // from the pre-check, not SheetJS
+  })
+
+  it('rejects a lying-central-directory oversize .ods before the heavy parse', async () => {
+    const bomb = buildLyingZip('content.xml', Buffer.from('<x/>'), 200 * 1024 * 1024)
+    const file = new File([bomb], 'bomb.ods')
+    const err = await convertToSheetContent(file).then(() => null, (e) => e)
+    expect(err).toBeInstanceOf(ImportError)
+    expect(err.message).toMatch(/decompress|too large|zip-bomb/i)
   })
 })

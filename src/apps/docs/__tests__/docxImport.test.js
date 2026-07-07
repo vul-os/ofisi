@@ -7,10 +7,13 @@
  * through the SAME two steps, asserting the exec scheme is gone and the benign
  * content survives.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import JSZip from 'jszip'
 import mammoth from 'mammoth'
 import { sanitizeDocHtml } from '../../../lib/sanitize.js'
+import { convertToDocContent } from '../../../lib/importFile.js'
+import { ImportError, MAX_SINGLE_ENTRY } from '../../../lib/importBounds.js'
+import { buildLyingZip } from '../../../lib/__tests__/zipBombFixture.js'
 
 async function hostileDocx() {
   const zip = new JSZip()
@@ -48,5 +51,23 @@ describe('docx import — hostile input neutralised at the sanitizer boundary', 
     expect(clean).not.toMatch(/<script/i)
     expect(clean).toContain('Hello Doc Body')   // benign content survives
     expect(clean).toContain('clickme')          // link text kept, href neutralised
+  })
+})
+
+describe('docx import — zip-bomb rejected BEFORE mammoth parses', () => {
+  // The .docx path (mammoth) inflates the archive itself, so the odt/pptx
+  // mid-stream inflate cap never sees it. assertArchiveBounds must run first and
+  // reject a bomb before a single byte reaches mammoth (client-side DoS guard).
+  it('rejects a lying-central-directory oversize .docx before the heavy parse', async () => {
+    // A .docx whose central directory DECLARES a 200 MB entry (> MAX_SINGLE_ENTRY)
+    // while the real bytes are trivial: the CD pre-check rejects it without ever
+    // inflating, and mammoth is never invoked.
+    const bomb = buildLyingZip('word/document.xml', Buffer.from('<x/>'), 200 * 1024 * 1024)
+    expect(200 * 1024 * 1024).toBeGreaterThan(MAX_SINGLE_ENTRY)
+    const spy = vi.spyOn(mammoth, 'convertToHtml')
+    const file = new File([bomb], 'bomb.docx')
+    await expect(convertToDocContent(file)).rejects.toThrow(ImportError)
+    expect(spy).not.toHaveBeenCalled()   // parser never reached
+    spy.mockRestore()
   })
 })

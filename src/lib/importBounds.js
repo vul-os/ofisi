@@ -135,7 +135,7 @@ export async function safeLoadZip(arrayBuffer, filename = 'file') {
  * across MANY lying entries (each individually under the single-entry cap) still
  * cannot exceed the total-decompressed ceiling.
  */
-function inflateEntryBounded(zip, name, perEntryCap = MAX_SINGLE_ENTRY) {
+function inflateEntryBounded(zip, name, perEntryCap = MAX_SINGLE_ENTRY, discard = false) {
   const f = zip.files[name]
   if (!f) return Promise.resolve(null)
   const remaining = typeof zip.__inflatedRemaining === 'number'
@@ -150,6 +150,9 @@ function inflateEntryBounded(zip, name, perEntryCap = MAX_SINGLE_ENTRY) {
       reject(new ImportError(`entry "${name}" could not be read: ${e.message}`))
       return
     }
+    // `discard` mode (validation-only, used by assertArchiveBounds): enforce the
+    // cap on the streamed bytes but never accumulate them — so the bomb pre-check
+    // never allocates the (up to per-entry-cap) contiguous buffer it is guarding.
     const chunks = []
     let total = 0
     let settled = false
@@ -167,13 +170,14 @@ function inflateEntryBounded(zip, name, perEntryCap = MAX_SINGLE_ENTRY) {
         fail(`entry "${name}" exceeds the decompressed-size limit (possible zip-bomb).`)
         return
       }
-      chunks.push(chunk)
+      if (!discard) chunks.push(chunk)
     })
     stream.on('error', (e) => fail(`entry "${name}" could not be decompressed: ${(e && e.message) || e}`))
     stream.on('end', () => {
       if (settled) return
       settled = true
       zip.__inflatedRemaining = remaining - total
+      if (discard) { resolve(total); return }
       const out = new Uint8Array(total)
       let i = 0
       for (const c of chunks) { out.set(c, i); i += c.length }
@@ -181,6 +185,42 @@ function inflateEntryBounded(zip, name, perEntryCap = MAX_SINGLE_ENTRY) {
     })
     stream.resume()
   })
+}
+
+/**
+ * assertArchiveBounds — the zip-bomb pre-check for importers that do their OWN
+ * unbounded inflation instead of going through entryText/entryDataUri: the DOCX
+ * path (mammoth) and the XLSX/ODS path (SheetJS) both take the RAW archive bytes
+ * and inflate them internally, so the mid-stream inflateEntryBounded cap that
+ * protects the odt/pptx/odp path never sees their entries. Left unguarded, a
+ * lying-central-directory zip-bomb .docx/.xlsx could OOM the importer's tab.
+ *
+ * This runs BEFORE those libraries touch the bytes and enforces the full bounds:
+ *   1. safeLoadZip — central-directory pre-check: input size, entry count,
+ *      per-entry + cumulative DECLARED uncompressed size, and zip-slip names.
+ *   2. a streaming actual-inflate pass over EVERY file entry (inflateEntryBounded
+ *      in discard mode) — so a LYING central directory (declares 100 bytes while
+ *      the deflate stream inflates to gigabytes) is aborted mid-inflate and the
+ *      whole archive rejected, catching the case the declared-size gate cannot.
+ * Throws ImportError on any breach; returns the validated JSZip otherwise.
+ *
+ * RESIDUAL LIMIT (honest): mammoth/SheetJS then inflate the archive a SECOND time
+ * inside their own readers. That re-inflation is safe because THIS pass has
+ * already proven the entire archive stays within MAX_SINGLE_ENTRY and the
+ * MAX_TOTAL_UNCOMPRESSED cumulative budget — a bomb can no longer reach them. The
+ * cost is a one-time redundant inflate of an already-validated, bounded archive:
+ * the honest price of not forking those libraries' internal zip readers. (We also
+ * do not re-verify their per-part XML with parseXmlSafe — mammoth and SheetJS use
+ * their own entity-free XML readers; the no-network-fetch guarantee for both is
+ * covered by importNoFetch.test.js.)
+ */
+export async function assertArchiveBounds(arrayBuffer, filename = 'file', perEntryCap = MAX_SINGLE_ENTRY) {
+  const zip = await safeLoadZip(arrayBuffer, filename)
+  for (const name of Object.keys(zip.files)) {
+    if (zip.files[name]?.dir) continue
+    await inflateEntryBounded(zip, name, perEntryCap, true)
+  }
+  return zip
 }
 
 /**
