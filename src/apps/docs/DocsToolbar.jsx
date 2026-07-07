@@ -21,7 +21,7 @@ import {
   RemoveFormatting, ChevronDown, Minus, Download,
   Indent, Outdent, MoreHorizontal, Heading1, Heading2,
   Heading3, Heading4, Heading5, Heading6, Type,
-  ListTree, Printer, AlertCircle,
+  ListTree, Printer, AlertCircle, Sigma, FileText, PanelTop,
 } from 'lucide-react'
 import { api } from '../../lib/api'
 import { Menu, ToolbarButton, UrlPopover } from '../../components/ui'
@@ -279,7 +279,7 @@ function LineSpacingSelector({ editor }) {
 // ---------------------------------------------------------------------------
 // OverflowMenu — 3-dot menu for secondary commands
 // ---------------------------------------------------------------------------
-function OverflowMenu({ editor, title, onInsertToc }) {
+function OverflowMenu({ editor, title, onInsertToc, onPageSetup, onHeaderFooter, spellcheck, onToggleSpellcheck }) {
   return (
     <Dropdown
       trigger={
@@ -326,7 +326,18 @@ function OverflowMenu({ editor, title, onInsertToc }) {
       </MenuItem>
       <div className="my-1 border-t border-line" />
       <p className="px-3 py-1 text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">Insert</p>
-      <MenuItem onClick={onInsertToc}>
+      <MenuItem
+        onClick={() => {
+          // P5: insert the LIVE table-of-contents node (auto-refreshes from
+          // headings). Falls back to the static popover if the node isn't
+          // registered (shouldn't happen in Docs).
+          if (editor.commands.insertTableOfContents) {
+            editor.chain().focus().insertTableOfContents().run()
+          } else {
+            onInsertToc?.()
+          }
+        }}
+      >
         <ListTree size={13} /> Table of contents
       </MenuItem>
       <MenuItem
@@ -349,6 +360,18 @@ function OverflowMenu({ editor, title, onInsertToc }) {
         ).run()}
       >
         <Minus size={13} /> Page break
+      </MenuItem>
+      <div className="my-1 border-t border-line" />
+      <p className="px-3 py-1 text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">Page</p>
+      <MenuItem onClick={onPageSetup}>
+        <FileText size={13} /> Page setup…
+      </MenuItem>
+      <MenuItem onClick={onHeaderFooter}>
+        <PanelTop size={13} /> Headers &amp; footers…
+      </MenuItem>
+      <MenuItem active={spellcheck} onClick={onToggleSpellcheck}>
+        <span className="inline-block w-[13px] text-center">{spellcheck ? '✓' : ''}</span>
+        Spell check
       </MenuItem>
     </Dropdown>
   )
@@ -467,7 +490,11 @@ function InsertTableMenu({ editor }) {
 // ---------------------------------------------------------------------------
 // DocsToolbar (main export)
 // ---------------------------------------------------------------------------
-export default function DocsToolbar({ editor, title }) {
+export default function DocsToolbar({
+  editor, title, pageSetup, headerFooter,
+  onInsertEquation, onPageSetup, onHeaderFooter,
+  spellcheck, onToggleSpellcheck,
+}) {
   const imgInput = useRef(null)
   const [showToc, setShowToc] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
@@ -770,6 +797,15 @@ export default function DocsToolbar({ editor, title }) {
         {/* Table sub-menu (when cursor is inside table) */}
         {editor.isActive('table') && <TableSubMenu editor={editor} />}
 
+        {/* P4: Equation (KaTeX). Opens the LaTeX editor with live preview. */}
+        <Btn
+          title="Insert equation (KaTeX)"
+          onClick={onInsertEquation}
+          active={editor.isActive('mathInline') || editor.isActive('mathBlock')}
+        >
+          <Sigma size={15} />
+        </Btn>
+
         <Sep />
 
         {/* ── Overflow menu ──────────────────────────────────────────── */}
@@ -777,6 +813,10 @@ export default function DocsToolbar({ editor, title }) {
           editor={editor}
           title={title}
           onInsertToc={() => setShowToc((v) => !v)}
+          onPageSetup={onPageSetup}
+          onHeaderFooter={onHeaderFooter}
+          spellcheck={spellcheck}
+          onToggleSpellcheck={onToggleSpellcheck}
         />
 
         {/* ── Export ─────────────────────────────────────────────────── */}
@@ -795,7 +835,7 @@ export default function DocsToolbar({ editor, title }) {
             }
             wide
           >
-            <MenuItem onClick={() => exportToDocx(editor, title)}>
+            <MenuItem onClick={() => exportToDocx(editor, title, { pageSetup, headerFooter })}>
               <span className="text-2xs font-bold tracking-eyebrow text-accent w-9">DOCX</span>
               Word document
             </MenuItem>
@@ -807,7 +847,7 @@ export default function DocsToolbar({ editor, title }) {
               <span className="text-2xs font-bold tracking-eyebrow text-ink-faint w-9">MD</span>
               Markdown
             </MenuItem>
-            <MenuItem onClick={() => exportToHtml(editor, title)}>
+            <MenuItem onClick={() => exportToHtml(editor, title, { pageSetup, headerFooter })}>
               <span className="text-2xs font-bold tracking-eyebrow text-warning w-9">HTML</span>
               HTML file
             </MenuItem>

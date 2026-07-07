@@ -8,6 +8,8 @@
  * ========================================================================== */
 
 @import './design/tokens.css';
+/* P4: KaTeX equation styles (offline; fonts bundled by Vite from the package). */
+@import 'katex/dist/katex.min.css';
 
 @tailwind base;
 @tailwind components;
@@ -715,3 +717,125 @@
     animation: none !important;
   }
 }
+
+/* ============================================================================
+ * P4 — Equations (KaTeX math nodes)
+ * ========================================================================== */
+.tiptap .math-inline {
+  display: inline-block;
+  vertical-align: middle;
+  padding: 0 2px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.tiptap .math-block {
+  display: block;
+  text-align: center;
+  margin: 1rem 0;
+  padding: 0.35rem 0;
+  cursor: pointer;
+  overflow-x: auto;
+}
+.tiptap .math-inline:hover,
+.tiptap .math-block:hover { background: var(--accent-tint); }
+.tiptap .math-inline.ProseMirror-selectednode,
+.tiptap .math-block.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: var(--accent-tint-2);
+}
+.tiptap .math-empty {
+  color: var(--ink-faint);
+  font-style: italic;
+  font-size: 0.9em;
+}
+.tiptap .katex-error { color: var(--danger); font-family: monospace; }
+/* Keep KaTeX legible on the paper surface in dark theme (KaTeX inherits color). */
+.tiptap .katex { color: inherit; }
+
+/* ============================================================================
+ * P1 — Paginated view. Rendered page boundaries drawn as an overlay behind the
+ * text (a view concern — the document itself has no page-break nodes). Each
+ * break is a gap band with a hairline + "page N" label so pages read as real.
+ * ========================================================================== */
+.doc-pages { position: relative; }
+.doc-page-break {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.doc-page-break::before {
+  /* The inter-page gap: a shaded band spanning the page's bottom + top margins,
+     bleeding to the paper edges to read like two sheets meeting. */
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--page-pad-x, 3.5rem));
+  right: calc(-1 * var(--page-pad-x, 3.5rem));
+  top: calc(-1 * var(--page-gap, 40px) / 2);
+  height: var(--page-gap, 40px);
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  box-shadow: inset 0 6px 8px -8px rgba(0,0,0,0.25), inset 0 -6px 8px -8px rgba(0,0,0,0.25);
+}
+.doc-page-break > .doc-page-num {
+  position: absolute;
+  right: calc(-1 * var(--page-pad-x, 3.5rem) + 6px);
+  top: 2px;
+  font-size: 10px;
+  color: var(--ink-faint);
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.02em;
+}
+/* Header / footer band shown on the paper (per rendered page). */
+.doc-hf-band {
+  position: absolute;
+  left: 0; right: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 11px;
+  color: var(--ink-faint);
+  pointer-events: none;
+  z-index: 1;
+  padding: 0 2px;
+}
+.doc-hf-band > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-hf-band > span.hf-center { text-align: center; }
+.doc-hf-band > span.hf-right  { text-align: right; }
+
+/* ============================================================================
+ * P5 — Live table of contents node (auto-refreshes from headings)
+ * ========================================================================== */
+.tiptap .toc-block {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 1rem 0;
+  background: var(--bg-elev-2);
+  user-select: none;
+}
+.tiptap .toc-block.ProseMirror-selectednode { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tiptap .toc-block .toc-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  margin: 0 0 8px;
+}
+.tiptap .toc-block .toc-entry {
+  display: block;
+  color: var(--ink-muted);
+  text-decoration: none;
+  padding: 2px 0;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+.tiptap .toc-block .toc-entry:hover { color: var(--accent); text-decoration: underline; }
+.tiptap .toc-block .toc-empty { color: var(--ink-faint); font-style: italic; font-size: 0.85em; margin: 0; }

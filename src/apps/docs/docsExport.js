@@ -2,29 +2,80 @@ import { saveAs } from 'file-saver'
 import {
   Document, Packer, Paragraph, TextRun, HeadingLevel,
   Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun,
+  Header, Footer, PageNumber, AlignmentType,
 } from 'docx'
 import TurndownService from 'turndown'
 import { sanitizeDocHtml } from '../../lib/sanitize'
 import {
   computeFootnoteOrder, collectFootnoteRefIds, numberFootnotesInHtml,
 } from './footnotes.js'
+import { renderEquationHtml } from './equation.js'
+import { pageSetupToCssAtPage, normalizePageSetup, PAGE_SIZES } from './pageSetup.js'
+import { normalizeHeaderFooter, resolveFields } from './headerFooter.js'
+
+// P4: Render every math node in an exported HTML string with KaTeX, then hand
+// the result through sanitizeDocHtml. The doc HTML carries the LaTeX source in a
+// `data-latex` attribute on a `.math-inline` / `.math-block` element (see
+// equation.js renderHTML). We render KaTeX (trust:false — no href/script can be
+// produced) into those shells so an exported .html file shows real equations,
+// then the whole body is sanitised as the trust boundary.
+function renderMathInHtml(html) {
+  if (typeof html !== 'string' || !html.includes('data-latex')) return html
+  if (typeof DOMParser === 'undefined') return html
+  try {
+    const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
+    for (const el of Array.from(doc.querySelectorAll('[data-latex]'))) {
+      const latex = el.getAttribute('data-latex') || ''
+      const display = el.classList.contains('math-block') || el.getAttribute('data-math') === 'block'
+      // renderEquationHtml uses KaTeX trust:false → bounded, script-free markup.
+      el.innerHTML = renderEquationHtml(latex, display)
+    }
+    return doc.body.innerHTML
+  } catch {
+    return html
+  }
+}
 
 // HTML
-export function exportToHtml(editor, filename) {
+export function exportToHtml(editor, filename, opts = {}) {
   // Bake sequential footnote numbers into the markup (getHTML() alone omits
-  // them — they live in an editor decoration, not the document).
+  // them — they live in an editor decoration, not the document), render math
+  // (P4), then sanitise. Order: number footnotes → render KaTeX → sanitise, so
+  // the KaTeX markup passes THROUGH the sanitiser (the export trust boundary).
   // WAVE-52: run the exported markup through the doc sanitiser so a downloaded
-  // .html file can never carry a script / on*-handler / dangerous cell-style
-  // (defence-in-depth: the editor content is already clean, but export is a
-  // trust boundary — the file is opened outside our sanitised viewer).
-  const body = sanitizeDocHtml(numberFootnotesInHtml(editor.getHTML()))
+  // .html file can never carry a script / on*-handler / dangerous cell-style.
+  const headings = readHeadingsForExport(editor.getJSON())
+  // Footnote-number + ToC baking produce benign text/anchors → run BEFORE the
+  // sanitiser (the trust boundary). Equation rendering is done AFTER the
+  // sanitiser: the KaTeX shells (`<span data-latex>`) survive sanitisation, and
+  // we then paint OUR OWN trusted KaTeX (trust:false, script-free by
+  // construction) into them — this preserves KaTeX's dimensional inline styles
+  // (e.g. `top` for fraction bars) that the body style allow-list would strip,
+  // WITHOUT loosening the shared sanitiser for user-authored content. The math
+  // source is still a plain string; nothing user-controlled becomes live markup.
+  const sanitized = sanitizeDocHtml(renderTocInHtml(numberFootnotesInHtml(editor.getHTML()), headings))
+  const body = renderMathInHtml(sanitized)
+
+  // P3: @page geometry (size/orientation/margins) for print from the HTML file.
+  const setup = normalizePageSetup(opts.pageSetup)
+  const atPage = pageSetupToCssAtPage(setup)
+
+  // P2: header/footer rendered via CSS paged-media running elements so they
+  // repeat on every printed page. Fields resolved to text (page/pages need the
+  // print engine for live counts; {{page}}/{{pages}} use CSS counters here).
+  const hf = normalizeHeaderFooter(opts.headerFooter)
+  const { headerCss, footerCss } = hfToPrintCss(hf, filename)
+
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>${filename}</title>
+<title>${escapeHtml(filename)}</title>
 <style>
+  ${atPage}
+  ${headerCss}
+  ${footerCss}
   body { font-family: Georgia, serif; max-width: 760px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #1a1a1a; }
   h1, h2, h3, h4, h5, h6 { font-family: system-ui, sans-serif; }
   pre, code { font-family: "Courier New", monospace; background: #f5f5f5; padding: 2px 4px; border-radius: 3px; }
@@ -32,6 +83,8 @@ export function exportToHtml(editor, filename) {
   table { border-collapse: collapse; width: 100%; }
   th, td { border: 1px solid #ddd; padding: 8px; }
   blockquote { border-left: 3px solid #ccc; margin: 0; padding-left: 16px; color: #555; }
+  .math-block { text-align: center; margin: 1rem 0; }
+  .math-inline { display: inline-block; }
 </style>
 </head>
 <body>
@@ -39,6 +92,130 @@ ${body}
 </body>
 </html>`
   saveAs(new Blob([html], { type: 'text/html;charset=utf-8' }), `${filename}.html`)
+}
+
+// P5: bake the live heading outline into each empty ToC shell for export. The
+// live ToC node renders via a NodeView (not in getHTML()), so a cold export
+// carries only an empty `<div data-toc>`. We fill it with the current outline as
+// escaped-text anchors so the exported file shows the ToC. Runs BEFORE the
+// sanitiser (the anchors + text are benign; the sanitiser still vets them).
+function renderTocInHtml(html, headings) {
+  if (typeof html !== 'string' || !html.includes('data-toc')) return html
+  if (typeof DOMParser === 'undefined') return html
+  try {
+    const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
+    for (const shell of Array.from(doc.querySelectorAll('[data-toc]'))) {
+      shell.textContent = ''
+      const title = doc.createElement('p')
+      title.className = 'toc-title'
+      title.textContent = 'Table of Contents'
+      shell.appendChild(title)
+      for (const h of headings) {
+        const a = doc.createElement('a')
+        a.setAttribute('href', `#${h.slug}`)
+        a.className = 'toc-entry'
+        a.style.marginLeft = `${(h.level - 1) * 16}px`
+        a.style.display = 'block'
+        a.textContent = h.text || '(untitled heading)'
+        shell.appendChild(a)
+      }
+    }
+    return doc.body.innerHTML
+  } catch {
+    return html
+  }
+}
+
+// Read headings from doc JSON (export doesn't have a live editor state).
+function readHeadingsForExport(json) {
+  const out = []
+  const slugify = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  const textOf = (node) => {
+    let s = ''
+    const walk = (n) => {
+      if (n.type === 'text') s += n.text || ''
+      ;(n.content || []).forEach(walk)
+    }
+    walk(node)
+    return s
+  }
+  const walk = (n) => {
+    if (n.type === 'heading') {
+      const text = textOf(n)
+      out.push({ level: n.attrs?.level || 1, text, slug: slugify(text) })
+    }
+    ;(n.content || []).forEach(walk)
+  }
+  ;(json.content || []).forEach(walk)
+  return out
+}
+
+// Escape a string for safe interpolation into HTML text (title, header/footer
+// text — these are plain strings, not markup). Defence-in-depth: the body is
+// sanitised separately; this keeps a title/header from breaking the document
+// structure or smuggling markup into <title>/@page running elements.
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ))
+}
+
+// Build @page running-element CSS for headers/footers. {{page}}/{{pages}} map to
+// CSS `counter(page)` / `counter(pages)` so the print engine fills real numbers;
+// {{title}}/{{date}} are resolved to static (escaped) text at export time.
+function hfToPrintCss(hf, filename) {
+  if (!hf.enabled) return { headerCss: '', footerCss: '' }
+  const now = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  const cellContent = (text) => {
+    if (!text) return '""'
+    // Split on our field tokens, mapping page/pages to counters and quoting the
+    // literal (escaped) segments. Result is a CSS `content` value list.
+    const parts = []
+    const re = /\{\{\s*(page|pages|title|date)\s*\}\}/gi
+    let last = 0
+    let m
+    while ((m = re.exec(text))) {
+      const lit = text.slice(last, m.index)
+      if (lit) parts.push(`"${cssStr(lit)}"`)
+      const tok = m[1].toLowerCase()
+      if (tok === 'page') parts.push('counter(page)')
+      else if (tok === 'pages') parts.push('counter(pages)')
+      else if (tok === 'title') parts.push(`"${cssStr(filename)}"`)
+      else if (tok === 'date') parts.push(`"${cssStr(now)}"`)
+      last = m.index + m[0].length
+    }
+    const tail = text.slice(last)
+    if (tail) parts.push(`"${cssStr(tail)}"`)
+    return parts.length ? parts.join(' ') : '""'
+  }
+  const band = (band, region) => {
+    const rules = []
+    const map = { left: `${region}-left`, center: `${region}-center`, right: `${region}-right` }
+    for (const cell of ['left', 'center', 'right']) {
+      if (band[cell]) rules.push(`@${map[cell]} { content: ${cellContent(band[cell])}; font-family: Georgia, serif; font-size: 10pt; color: #555; }`)
+    }
+    return rules.join('\n  ')
+  }
+  return {
+    headerCss: `@page {\n  ${band(hf.header, 'top')}\n}`,
+    footerCss: `@page {\n  ${band(hf.footer, 'bottom')}\n}`,
+  }
+}
+
+// Escape a string for safe use inside a CSS double-quoted string literal THAT
+// LIVES INSIDE AN INLINE <style> BLOCK. Beyond the CSS string escapes (\ " and
+// newline), we must also neutralise `<` and `>`: the HTML tokenizer terminates a
+// <style> element at the first literal `</style>` REGARDLESS of CSS quoting, so
+// a value like `</style><script>…` would break out of the stylesheet and inject
+// live script into the exported file. CSS unicode escapes \3c /\3e render as the
+// literal characters in `content:` but can never form an HTML tag.
+function cssStr(s) {
+  return String(s ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/</g, '\\3c ')
+    .replace(/>/g, '\\3e ')
+    .replace(/\n/g, ' ')
 }
 
 // Markdown
@@ -88,18 +265,104 @@ export function exportToPdf(filename) {
 }
 
 // DOCX
-export async function exportToDocx(editor, filename) {
+export async function exportToDocx(editor, filename, opts = {}) {
   const json = editor.getJSON()
   // Derive the same sequential footnote numbering the editor shows so exported
   // refs/items read 1, 2, 3… (the numbers are decoration-only in the doc JSON).
   const fnOrder = computeFootnoteOrder(collectFootnoteRefIds(json))
+  // P5: carry the heading outline alongside fnOrder so the tableOfContents node
+  // case can render it (avoids threading a second param through every node fn).
+  try { fnOrder._tocHeadings = readHeadingsForExport(json) } catch { /* noop */ }
   const children = await nodesToDocx(json.content || [], fnOrder)
+
+  // P3: page size + margins → docx section properties. TWIPs = 1/20 pt = 1/1440 in.
+  const setup = normalizePageSetup(opts.pageSetup)
+  const size = PAGE_SIZES[setup.size]
+  let wIn = size.width, hIn = size.height
+  if (setup.orientation === 'landscape') { const t = wIn; wIn = hIn; hIn = t }
+  const IN = 1440
+  const page = {
+    size: {
+      width: Math.round(wIn * IN),
+      height: Math.round(hIn * IN),
+      orientation: setup.orientation,
+    },
+    margin: {
+      top: Math.round(setup.margins.top * IN),
+      right: Math.round(setup.margins.right * IN),
+      bottom: Math.round(setup.margins.bottom * IN),
+      left: Math.round(setup.margins.left * IN),
+    },
+  }
+
+  // P2: headers & footers → docx Header/Footer with a PageNumber field for
+  // {{page}}/{{pages}}. Field tokens resolve to docx PageNumber children so Word
+  // fills live page numbers; {{title}}/{{date}} resolve to static text here.
+  const hf = normalizeHeaderFooter(opts.headerFooter)
+  const section = { properties: { page }, children }
+  if (hf.enabled) {
+    const ctx = { title: filename }
+    if (bandHasContent(hf.header)) section.headers = { default: new Header({ children: [bandParagraph(hf.header, ctx)] }) }
+    if (bandHasContent(hf.footer)) section.footers = { default: new Footer({ children: [bandParagraph(hf.footer, ctx)] }) }
+  }
+
   const doc = new Document({
     styles: { default: { document: { run: { font: 'Calibri', size: 24 } } } },
-    sections: [{ children }],
+    sections: [section],
   })
   const blob = await Packer.toBlob(doc)
   saveAs(blob, `${filename}.docx`)
+}
+
+function bandHasContent(band) {
+  return !!(band && (band.left || band.center || band.right))
+}
+
+// Build a single tab-separated docx paragraph for a header/footer band. Left is
+// flush-left, center centered, right flush-right — approximated with tab stops
+// so a three-cell band reads correctly in Word. Field tokens become live docx
+// runs ({{page}}/{{pages}} → PageNumber) or resolved text.
+function bandParagraph(band, ctx) {
+  const runsFor = (text) => fieldTextToRuns(text, ctx)
+  const children = []
+  // Left cell.
+  children.push(...runsFor(band.left))
+  children.push(new TextRun({ text: '\t' }))
+  // Center cell.
+  children.push(...runsFor(band.center))
+  children.push(new TextRun({ text: '\t' }))
+  // Right cell.
+  children.push(...runsFor(band.right))
+  return new Paragraph({
+    alignment: AlignmentType.LEFT,
+    tabStops: [
+      { type: 'center', position: 4680 },   // ~mid of a Letter content width
+      { type: 'right', position: 9360 },     // ~right edge
+    ],
+    children,
+  })
+}
+
+// Convert a header/footer cell string into docx runs, mapping {{page}}/{{pages}}
+// to live PageNumber fields and {{title}}/{{date}} to static resolved text.
+function fieldTextToRuns(text, ctx) {
+  if (typeof text !== 'string' || !text) return [new TextRun('')]
+  const runs = []
+  const re = /\{\{\s*(page|pages|title|date)\s*\}\}/gi
+  let last = 0
+  let m
+  while ((m = re.exec(text))) {
+    const lit = text.slice(last, m.index)
+    if (lit) runs.push(new TextRun({ text: lit }))
+    const tok = m[1].toLowerCase()
+    if (tok === 'page') runs.push(new TextRun({ children: [PageNumber.CURRENT] }))
+    else if (tok === 'pages') runs.push(new TextRun({ children: [PageNumber.TOTAL_PAGES] }))
+    else runs.push(new TextRun({ text: resolveFields(m[0], ctx) }))
+    last = m.index + m[0].length
+  }
+  const tail = text.slice(last)
+  if (tail) runs.push(new TextRun({ text: tail }))
+  return runs.length ? runs : [new TextRun('')]
 }
 
 async function nodesToDocx(nodes, fnOrder) {
@@ -202,6 +465,32 @@ async function nodeToDocx(node, fnOrder) {
       }
       return []
     }
+    case 'tableOfContents': {
+      // P5: bake the live outline into the DOCX as a titled list of heading
+      // paragraphs (indented by level). Word users can regenerate a field-based
+      // ToC; this gives a readable static outline that matches the editor.
+      const headings = fnOrder?._tocHeadings || []
+      const out = [new Paragraph({ children: [new TextRun({ text: 'Table of Contents', bold: true })] })]
+      for (const h of headings) {
+        out.push(new Paragraph({
+          indent: { left: (h.level - 1) * 360 },
+          children: [new TextRun({ text: h.text || '(untitled heading)' })],
+        }))
+      }
+      return out
+    }
+    case 'mathBlock': {
+      // P4 DOCX (best-effort fidelity): docx has no built-in LaTeX→OMML path and
+      // we can't synchronously rasterise KaTeX at export time, so a display
+      // equation is exported as its LaTeX source in a monospace, centred
+      // paragraph (readable + round-trips as text). Documented as best-effort;
+      // the HTML export renders true KaTeX. See DOCX-fidelity note.
+      const latex = node.attrs?.latex || ''
+      return [new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun({ text: latex, font: 'Cambria Math', italics: true })],
+      })]
+    }
     case 'footnotesList': {
       // Render the footnotes section: a rule, then one numbered paragraph per
       // footnote item (number derived from the ref order in the body).
@@ -233,6 +522,11 @@ function inlineNodes(nodes, fnOrder) {
     if (node.type === 'footnoteRef') {
       const num = fnOrder?.get(node.attrs?.id)
       return new TextRun({ text: num ? String(num) : '*', superScript: true })
+    }
+    // P4: inline equation → its LaTeX source in Cambria Math (best-effort; see
+    // the mathBlock note above and the DOCX-fidelity note).
+    if (node.type === 'mathInline') {
+      return new TextRun({ text: node.attrs?.latex || '', font: 'Cambria Math', italics: true })
     }
     if (node.type !== 'text') return new TextRun('')
     const marks = node.marks || []

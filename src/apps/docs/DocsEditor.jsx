@@ -82,6 +82,14 @@ import {
   FootnotesList,
   FootnoteNumberingExtension,
 } from './footnotes.js'
+import { MathInline, MathBlock } from './equation.js'
+import { TableOfContentsNode } from './tableOfContents.js'
+import EquationEditor from './components/EquationEditor.jsx'
+import PageSetupDialog from './components/PageSetupDialog.jsx'
+import HeaderFooterDialog from './components/HeaderFooterDialog.jsx'
+import { normalizePageSetup, pageDimensions } from './pageSetup.js'
+import { normalizeHeaderFooter, bandsForPage } from './headerFooter.js'
+import { measurePageBreaks, createDebouncedMeasure } from './pagination.js'
 
 // Imported files may carry _html; use that as editor content.
 // WAVE-52: _html is user/peer-supplied markup (imported .html/.docx, restored
@@ -127,7 +135,12 @@ function docHasStructuredNodes(editor) {
   let found = false
   try {
     editor.state.doc.descendants((node) => {
-      if (node.type.name === 'table' || node.type.name === 'image') { found = true; return false }
+      // P4: math nodes are atomic leaf nodes carrying no plain text — treat them
+      // as structured (like image/table) so a text-offset patch can't clobber them.
+      if (node.type.name === 'table' || node.type.name === 'image' ||
+          node.type.name === 'mathInline' || node.type.name === 'mathBlock') {
+        found = true; return false
+      }
       return true
     })
   } catch { /* non-fatal */ }
@@ -299,8 +312,22 @@ export default function DocsEditor() {
   const [findMode, setFindMode] = useState(null) // null | 'find' | 'replace'
   // Word count modal
   const [showWordCount, setShowWordCount] = useState(false)
-  // Page count (debounced)
+  // Page count (measured — P1 pagination)
   const [pageCount, setPageCount] = useState(1)
+  // P1: measured page-break y-offsets (px, relative to content top). View-only.
+  const [pageBreaks, setPageBreaks] = useState([])
+  // P3: page setup (size / orientation / margins). Document metadata.
+  const [pageSetup, setPageSetup] = useState(normalizePageSetup(null))
+  const [showPageSetup, setShowPageSetup] = useState(false)
+  // P2: headers & footers. Document metadata.
+  const [headerFooter, setHeaderFooter] = useState(normalizeHeaderFooter(null))
+  const [showHeaderFooter, setShowHeaderFooter] = useState(false)
+  // P4: equation editor dialog state.
+  const [equationEditor, setEquationEditor] = useState(null) // null | { latex, display, editing }
+  // P5: native spellcheck toggle (browser dictionary). Persisted per-browser.
+  const [spellcheck, setSpellcheck] = useState(() => {
+    try { return localStorage.getItem('docs_spellcheck') !== 'off' } catch { return true }
+  })
   // OFFICE-27: suggestion / track-changes mode
   const [suggestionMode, setSuggestionMode] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -403,6 +430,12 @@ export default function DocsEditor() {
       FootnoteItem,
       FootnotesList,
       FootnoteNumberingExtension,
+      // P4: KaTeX-rendered equations (inline + block). Source LaTeX is a plain
+      // text attr; KaTeX renders client-side with trust:false (see equation.js).
+      MathInline,
+      MathBlock,
+      // P5: live-updating table of contents (auto-refreshes from headings).
+      TableOfContentsNode,
     ],
     content: resolveContent(file?.content),
     // WAVE-57: paste / drop a raster image → embed it as a bounded base64 data:
@@ -410,6 +443,10 @@ export default function DocsEditor() {
     // capped, SVG refused) — the exact same gate as the toolbar picker, so no
     // insert path can smuggle an SVG/oversized/non-image data: URI into the doc.
     editorProps: {
+      // P5: native browser spellcheck on the editable surface. The browser's own
+      // dictionary underlines misspellings + offers corrections — no dependency,
+      // works offline per the platform. Toggle updates the live DOM attr below.
+      attributes: { spellcheck: 'true' },
       handlePaste: (view, event) => {
         const files = Array.from(event.clipboardData?.files || [])
         const img = files.find(isEmbeddableImage)
@@ -512,14 +549,27 @@ export default function DocsEditor() {
     },
   })
 
+  // P2/P3: hydrate page-setup + header/footer from the file's stored content.
+  // They ride the doc content object as sibling keys (see doSave) so they persist
+  // with the same authoritative save/load as the doc JSON — NOT over the text CRDT.
+  const loadDocMeta = useCallback((content) => {
+    if (content && typeof content === 'object') {
+      if (content.pageSetup) setPageSetup(normalizePageSetup(content.pageSetup))
+      if (content.headerFooter) setHeaderFooter(normalizeHeaderFooter(content.headerFooter))
+    }
+  }, [])
+
   // Load file from API if not in store cache
   useEffect(() => {
     if (!file && id) {
       api.getFile(id).then((f) => {
         setFile(f)
         setTitle(f.name)
+        loadDocMeta(f.content)
         setPendingContent(resolveContent(f.content))
       }).catch(() => navigate('/docs'))
+    } else if (file) {
+      loadDocMeta(file.content)
     }
   }, [id])
 
@@ -599,6 +649,15 @@ export default function DocsEditor() {
       collabRef.current = null
     }
   }, [id])
+
+  // P5: reflect the spellcheck toggle onto the editable DOM + persist it.
+  useEffect(() => {
+    if (!editor) return
+    try {
+      editor.view.dom.setAttribute('spellcheck', spellcheck ? 'true' : 'false')
+      localStorage.setItem('docs_spellcheck', spellcheck ? 'on' : 'off')
+    } catch { /* non-fatal */ }
+  }, [editor, spellcheck])
 
   // Keep a ref to the editor instance for use inside the collab event handler.
   const editorRef = useRef(null)
@@ -881,29 +940,66 @@ export default function DocsEditor() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
-  // ── Page count (debounced update every 200ms) ─────────────────────────────
-  const pageCountTimer = useRef(null)
+  // ── P1: real pagination — measure rendered page breaks (debounced) ─────────
+  // Pagination is a VIEW concern: we measure the laid-out block heights against
+  // the page-setup content height and compute break y-offsets. Nothing is written
+  // to the document or synced over the CRDT (two peers can page differently with
+  // zero divergence). Debounced off requestAnimationFrame so it never reflows on
+  // every keystroke.
+  const contentHeightPx = pageDimensions(pageSetup).contentHeightPx
+  const contentHeightPxRef = useRef(contentHeightPx)
+  contentHeightPxRef.current = contentHeightPx
   useEffect(() => {
     if (!editor) return
-    const update = () => {
-      clearTimeout(pageCountTimer.current)
-      pageCountTimer.current = setTimeout(() => {
-        const words = editor.storage.characterCount?.words() ?? 0
-        setPageCount(Math.max(1, Math.ceil(words / WORDS_PER_PAGE)))
-      }, 200)
+    const measure = () => {
+      const contentEl = scrollRef.current?.querySelector('.tiptap')
+      if (!contentEl) return
+      const { breaks, pageCount: pc } = measurePageBreaks(contentEl, contentHeightPxRef.current)
+      setPageBreaks(breaks)
+      setPageCount(pc)
     }
-    editor.on('update', update)
-    update() // initial
+    const debounced = createDebouncedMeasure(measure, 250)
+    editor.on('update', debounced)
+    // Re-measure on window resize (block widths → heights change).
+    window.addEventListener('resize', debounced)
+    // Initial measurement after first paint.
+    const t = setTimeout(() => debounced.flush(), 120)
     return () => {
-      editor.off('update', update)
-      clearTimeout(pageCountTimer.current)
+      editor.off('update', debounced)
+      window.removeEventListener('resize', debounced)
+      debounced.cancel()
+      clearTimeout(t)
     }
   }, [editor])
+
+  // Re-measure when the page geometry changes (size/orientation/margins).
+  useEffect(() => {
+    const contentEl = scrollRef.current?.querySelector('.tiptap')
+    if (!contentEl) return
+    const { breaks, pageCount: pc } = measurePageBreaks(contentEl, contentHeightPx)
+    setPageBreaks(breaks)
+    setPageCount(pc)
+  }, [contentHeightPx])
+
+  // Keep page-setup / header-footer in refs so doSave (a stable callback) always
+  // serialises the latest metadata without being re-created on every change.
+  const pageSetupRef = useRef(pageSetup)
+  pageSetupRef.current = pageSetup
+  const headerFooterRef = useRef(headerFooter)
+  headerFooterRef.current = headerFooter
 
   const doSave = useCallback(async (retryNum = 0) => {
     if (!editor || !id) return
     try {
-      await saveFileWithDraft(id, titleRef.current, editor.getJSON())
+      // P2/P3: persist page setup + headers/footers as sibling keys on the doc
+      // content object. TipTap's setContent ignores unknown top-level keys, so
+      // this round-trips cleanly (load reads them back via loadDocMeta).
+      const content = {
+        ...editor.getJSON(),
+        pageSetup: pageSetupRef.current,
+        headerFooter: headerFooterRef.current,
+      }
+      await saveFileWithDraft(id, titleRef.current, content)
       setRetryCount(0)
     } catch {
       // Schedule retry with backoff (up to 3 retries)
@@ -923,6 +1019,58 @@ export default function DocsEditor() {
     setRetryCount(0)
     doSave()
   }
+
+  // ── P3: page setup ────────────────────────────────────────────────────────
+  const applyPageSetup = useCallback((next) => {
+    setPageSetup(normalizePageSetup(next))
+    markDirty(id)
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => doSave(), 800)
+  }, [id, markDirty, doSave])
+
+  // ── P2: headers & footers ─────────────────────────────────────────────────
+  const applyHeaderFooter = useCallback((next) => {
+    setHeaderFooter(normalizeHeaderFooter(next))
+    markDirty(id)
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => doSave(), 800)
+  }, [id, markDirty, doSave])
+
+  // ── P4: equations ─────────────────────────────────────────────────────────
+  // Open the equation editor. When a math node is selected, edit it in place;
+  // otherwise open a blank editor to insert a new one.
+  const openEquationEditor = useCallback(() => {
+    if (!editor) return
+    if (editor.isActive('mathInline') || editor.isActive('mathBlock')) {
+      const display = editor.isActive('mathBlock')
+      const attrs = editor.getAttributes(display ? 'mathBlock' : 'mathInline')
+      setEquationEditor({ latex: attrs.latex || '', display, editing: true })
+    } else {
+      setEquationEditor({ latex: '', display: false, editing: false })
+    }
+  }, [editor])
+
+  const submitEquation = useCallback(({ latex, display }) => {
+    if (!editor) return
+    const editing = equationEditor?.editing
+    if (editing) {
+      // Update the selected node. If the display mode flipped, replace the node
+      // type; otherwise just update the latex attr.
+      const wasBlock = editor.isActive('mathBlock')
+      if (wasBlock === display) {
+        editor.chain().focus().updateAttributes(display ? 'mathBlock' : 'mathInline', { latex }).run()
+      } else {
+        editor.chain().focus().deleteSelection().run()
+        if (display) editor.chain().focus().insertMathBlock(latex).run()
+        else editor.chain().focus().insertMathInline(latex).run()
+      }
+    } else if (display) {
+      editor.chain().focus().insertMathBlock(latex).run()
+    } else {
+      editor.chain().focus().insertMathInline(latex).run()
+    }
+    setEquationEditor(null)
+  }, [editor, equationEditor])
 
   const handleTitleChange = (newTitle) => {
     setTitle(newTitle)
@@ -946,8 +1094,12 @@ export default function DocsEditor() {
 
   const wordCount = editor?.storage.characterCount?.words() ?? 0
   const charCount = editor?.storage.characterCount?.characters() ?? 0
-  // Estimate page count (debounced in onUpdate, mirrors WordCountModal logic)
-  const WORDS_PER_PAGE = 250
+
+  // P1/P3: concrete page geometry for the paper card + break overlay.
+  const geo = pageDimensions(pageSetup)
+  // P2: the header/footer bands for page 1 (the page visible in-editor). Full
+  // per-page resolution happens in export/print (docsExport paginate*).
+  const firstPageBands = bandsForPage(headerFooter, 1, { title, pages: pageCount })
 
   // Discreet save status — a meta-line, never a banner. Rendered via the shared
   // <SaveStatus> (a breathing dot + quiet label). We only compute the retry text
@@ -1157,7 +1309,17 @@ export default function DocsEditor() {
         </div>
       )}
 
-      <DocsToolbar editor={editor} title={title} />
+      <DocsToolbar
+        editor={editor}
+        title={title}
+        pageSetup={pageSetup}
+        headerFooter={headerFooter}
+        onInsertEquation={openEquationEditor}
+        onPageSetup={() => setShowPageSetup(true)}
+        onHeaderFooter={() => setShowHeaderFooter(true)}
+        spellcheck={spellcheck}
+        onToggleSpellcheck={() => setSpellcheck((v) => !v)}
+      />
 
       {/* Editor canvas + side panels */}
       <div className="flex-1 flex overflow-hidden bg-bg">
@@ -1185,14 +1347,58 @@ export default function DocsEditor() {
               onClose={() => setFindMode(null)}
             />
           )}
+          {/*
+            P1/P3: the paper card's width now derives from the page-setup
+            geometry (Letter/A4/Legal, portrait/landscape) rather than a fixed
+            760px, and horizontal padding tracks the configured L/R margins so
+            the writing column matches the real page. Page BREAKS are drawn as an
+            absolutely-positioned overlay inside the article (a view concern —
+            the document has no page-break nodes). Header/footer bands (P2) sit
+            in the top/bottom margins of the first rendered page.
+          */}
           <article
-            className="paper-grain mx-auto bg-paper border border-line rounded-lg shadow-e2 px-14 py-16"
-            style={{ maxWidth: '760px' }}
+            className="doc-pages paper-grain mx-auto bg-paper border border-line rounded-lg shadow-e2 relative"
+            style={{
+              maxWidth: `${geo.pageWidthPx}px`,
+              paddingLeft: `${geo.marginLeftPx}px`,
+              paddingRight: `${geo.marginRightPx}px`,
+              paddingTop: `${geo.marginTopPx}px`,
+              paddingBottom: `${geo.marginBottomPx}px`,
+              '--page-pad-x': `${geo.marginLeftPx}px`,
+            }}
           >
+            {/* P2: first-page header/footer bands (rendered inside the margins).
+                Full per-page bands are drawn in export/print; in-editor we show
+                the page-1 band as an at-a-glance affordance. */}
+            {firstPageBands && (firstPageBands.header.left || firstPageBands.header.center || firstPageBands.header.right) && (
+              <div className="doc-hf-band" style={{ top: `${Math.max(8, geo.marginTopPx / 2 - 6)}px` }} aria-hidden="true">
+                <span>{firstPageBands.header.left}</span>
+                <span className="hf-center">{firstPageBands.header.center}</span>
+                <span className="hf-right">{firstPageBands.header.right}</span>
+              </div>
+            )}
             <div className="tiptap-cursor-host relative animate-fade-in">
               <EditorContent editor={editor} className="tiptap" />
               <DocsCursorLayer editor={editor} remoteCursors={remoteCursors} />
+              {/* P1: rendered page-break separators. Positioned by measured
+                  y-offsets; purely visual, never part of the document. */}
+              {pageBreaks.map((y, i) => (
+                <div
+                  key={`${y}-${i}`}
+                  className="doc-page-break"
+                  style={{ top: `${y}px`, '--page-gap': '40px', '--page-pad-x': `${geo.marginLeftPx}px` }}
+                >
+                  <span className="doc-page-num">page {i + 2}</span>
+                </div>
+              ))}
             </div>
+            {firstPageBands && (firstPageBands.footer.left || firstPageBands.footer.center || firstPageBands.footer.right) && (
+              <div className="doc-hf-band" style={{ bottom: `${Math.max(8, geo.marginBottomPx / 2 - 6)}px` }} aria-hidden="true">
+                <span>{firstPageBands.footer.left}</span>
+                <span className="hf-center">{firstPageBands.footer.center}</span>
+                <span className="hf-right">{firstPageBands.footer.right}</span>
+              </div>
+            )}
           </article>
         </div>
 
@@ -1292,6 +1498,33 @@ export default function DocsEditor() {
         links={p2p.links}
         roomId={p2p.roomId}
         onRotate={() => p2p.rotate()}
+      />
+
+      {/* P4: equation editor (LaTeX input + live KaTeX preview) */}
+      {equationEditor && (
+        <EquationEditor
+          open
+          initialLatex={equationEditor.latex}
+          initialDisplay={equationEditor.display}
+          onSubmit={submitEquation}
+          onClose={() => setEquationEditor(null)}
+        />
+      )}
+
+      {/* P3: page setup (size / orientation / margins) */}
+      <PageSetupDialog
+        open={showPageSetup}
+        value={pageSetup}
+        onApply={applyPageSetup}
+        onClose={() => setShowPageSetup(false)}
+      />
+
+      {/* P2: headers & footers */}
+      <HeaderFooterDialog
+        open={showHeaderFooter}
+        value={headerFooter}
+        onApply={applyHeaderFooter}
+        onClose={() => setShowHeaderFooter(false)}
       />
     </div>
   )
