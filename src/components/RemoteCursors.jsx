@@ -164,25 +164,14 @@ export function DocsCursorLayer({ editor, remoteCursors }) {
             }}
           />
 
-          {/* Name label — serif italic per design system */}
+          {/* Name label — crisp sans caplet, flag-tab shape, token shadow */}
           <span
+            className="rc-flag"
             style={{
               position: 'absolute',
               top:  top - 20,
               left: left - 1,
               background: peer.color,
-              color: '#fff',
-              fontFamily: 'var(--font-serif)',
-              fontStyle: 'italic',
-              fontSize: 11,
-              fontWeight: 500,
-              letterSpacing: 'var(--tracking-tight)',
-              lineHeight: '16px',
-              padding: '1px 6px',
-              borderRadius: '4px 4px 4px 0',
-              whiteSpace: 'nowrap',
-              userSelect: 'none',
-              boxShadow: '0 1px 2px rgba(36,28,16,0.18)',
             }}
           >
             {peer.displayName || initials(peer.displayName)}
@@ -245,25 +234,14 @@ export function SheetsCursorLayer({ remoteCursors, getCellRect }) {
                 boxSizing: 'border-box',
               }}
             />
-            {/* Name badge — serif italic per design system */}
+            {/* Name badge — crisp sans caplet, flag-tab shape */}
             <span
+              className="rc-flag"
               style={{
                 position: 'absolute',
                 top:  rect.top - 18,
                 left: rect.left,
                 background: peer.color,
-                color: '#fff',
-                fontFamily: 'var(--font-serif)',
-                fontStyle: 'italic',
-                fontSize: 11,
-                fontWeight: 500,
-                letterSpacing: 'var(--tracking-tight)',
-                lineHeight: '16px',
-                padding: '1px 6px',
-                borderRadius: '4px 4px 4px 0',
-                whiteSpace: 'nowrap',
-                userSelect: 'none',
-                boxShadow: '0 1px 2px rgba(36,28,16,0.18)',
               }}
             >
               {peer.displayName || '?'}

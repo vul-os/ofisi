@@ -16,7 +16,7 @@ import {
   ChevronUp, ChevronDown, Download, EyeOff, MessageSquare,
   Bold, Italic, Underline as UnderlineIcon, Strikethrough, Link as LinkIcon,
   AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Image as ImageIcon,
-  Check, Circle, AlertCircle, StickyNote, Palette, Layout, Highlighter, RemoveFormatting,
+  StickyNote, Palette, Layout, Highlighter, RemoveFormatting,
   Copy, FileText, GripVertical, Monitor, Zap, Undo, Redo,
   ChevronDown as ChevronDownIcon, Type as TypeIcon, LayoutGrid, X,
 } from 'lucide-react'
@@ -34,7 +34,7 @@ import PresenceBar from '../../components/PresenceBar.jsx'
 import ConnectionPill from '../../components/ConnectionPill.jsx'
 import { useCollabFabric } from '../../lib/collab/useCollabFabric.js'
 import { getCollabIdentity, identityColor, deriveStatusPill, countLivePeers } from '../../lib/collab/presenceCommon.js'
-import { Button, IconButton, Tooltip, Topbar, Menu, UrlPopover, LoadingState } from '../../components/ui'
+import { Button, IconButton, Tooltip, Topbar, Menu, UrlPopover, LoadingState, SaveStatus } from '../../components/ui'
 import ThemeGallery from './ThemeGallery.jsx'
 import MasterSlideEditor from './MasterSlideEditor.jsx'
 import TransitionPanel from './TransitionPanel.jsx'
@@ -600,12 +600,7 @@ export default function SlidesEditor() {
     )
   }
 
-  const statusInfo = (() => {
-    if (saving)  return { text: 'Saving',  tone: 'muted',   icon: Loader2,       spin: true  }
-    if (saved)   return { text: 'Saved',   tone: 'success', icon: Check,         spin: false }
-    return         { text: 'Unsaved', tone: 'muted',   icon: Circle,        spin: false }
-  })()
-  const StatusIcon = statusInfo.icon
+  const saveStatusKind = saving ? 'saving' : saved ? 'saved' : 'dirty'
 
   const currentTheme = slidesData.customTheme
     ? { ...getTheme(slidesData.themeId || 'obsidian'), ...slidesData.customTheme }
@@ -639,18 +634,7 @@ export default function SlidesEditor() {
         }
         meta={
           <>
-            <span
-              role="status"
-              aria-live="polite"
-              className={[
-                'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
-                statusInfo.tone === 'success' ? 'text-success' :
-                statusInfo.tone === 'danger'  ? 'text-danger' : 'text-ink-faint',
-              ].join(' ')}
-            >
-              <StatusIcon size={11} aria-hidden className={statusInfo.spin ? 'animate-spin' : ''} />
-              {statusInfo.text}
-            </span>
+            <SaveStatus status={saveStatusKind} />
             {/* WAVE-27: collaboration presence — roster + connection pill */}
             <PresenceBar roster={roster} className="ml-1" />
             <ConnectionPill pill={collabPill} peerCount={livePeerCount} />
@@ -1097,7 +1081,7 @@ export default function SlidesEditor() {
 
               {/* Formatting toolbar + Insert panel */}
               <div
-                className="flex items-center gap-0.5 px-2 sm:px-3 h-auto min-h-10 py-1 bg-paper border-b border-line flex-wrap"
+                className="toolbar-surface flex items-center gap-0.5 px-2 sm:px-3 h-auto min-h-10 py-1 flex-wrap"
                 role="toolbar"
                 aria-label="Slide formatting"
               >

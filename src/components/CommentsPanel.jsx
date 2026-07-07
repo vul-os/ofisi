@@ -23,7 +23,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { X, MessageSquare, CheckCircle, RotateCcw, Trash2, Send, ChevronDown, ChevronUp, Crosshair } from 'lucide-react'
 import { api } from '../lib/api'
 import { getCommentStore } from '../lib/crdt/comments'
-import { IconButton, Tabs, LoadingState } from './ui'
+import { IconButton, Tabs, LoadingState, EmptyState } from './ui'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -526,9 +526,12 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
           <LoadingState size="sm" label="Loading comments…" className="py-6" />
         )}
         {!loading && filtered.length === 0 && (
-          <p className="text-xs text-ink-faint text-center py-8 font-serif italic">
-            {filter === 'all' ? 'No comments yet.' : `No ${filter} comments.`}
-          </p>
+          <EmptyState
+            size="sm"
+            icon={MessageSquare}
+            title={filter === 'all' ? 'No comments yet.' : `No ${filter} comments.`}
+            hint={filter === 'all' ? 'Select text in the document to leave the first note.' : undefined}
+          />
         )}
         {filtered.map((item) => (
           <CommentItem

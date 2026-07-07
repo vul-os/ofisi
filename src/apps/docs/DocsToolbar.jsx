@@ -21,7 +21,7 @@ import {
   RemoveFormatting, ChevronDown, Minus, Download,
   Indent, Outdent, MoreHorizontal, Heading1, Heading2,
   Heading3, Heading4, Heading5, Heading6, Type,
-  ListTree, Printer,
+  ListTree, Printer, AlertCircle,
 } from 'lucide-react'
 import { api } from '../../lib/api'
 import { Menu, ToolbarButton, UrlPopover } from '../../components/ui'
@@ -510,7 +510,7 @@ export default function DocsToolbar({ editor, title }) {
 
   return (
     <div
-      className="bg-paper border-b border-line relative"
+      className="toolbar-surface relative"
       role="toolbar"
       aria-label="Document formatting"
     >
@@ -834,9 +834,10 @@ export default function DocsToolbar({ editor, title }) {
 
       {/* Inline error (image too large / wrong type). */}
       {imgErr && (
-        <div className="px-3 py-1.5 text-xs text-danger bg-danger/10 border-t border-line" role="alert">
-          {imgErr}
-          <button className="ml-2 underline" onClick={() => setImgErr('')}>dismiss</button>
+        <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-danger bg-danger-bg border-t border-line animate-slide-in-left" role="alert">
+          <AlertCircle size={13} className="flex-shrink-0" aria-hidden />
+          <span className="flex-1">{imgErr}</span>
+          <button className="underline hover:no-underline text-ink-muted" onClick={() => setImgErr('')}>dismiss</button>
         </div>
       )}
 
@@ -859,19 +860,20 @@ function ImageSubMenu({ editor }) {
   const setAttr = (patch) => editor.chain().focus().updateAttributes('image', patch).run()
   const align = attrs.align || 'left'
   return (
-    <div className="flex items-center gap-1 px-3 py-1.5 border-t border-line bg-surface-subtle text-xs">
-      <span className="text-ink-faint mr-1">Image</span>
+    <div className="flex items-center gap-1 px-3 py-1.5 border-t border-line bg-bg-elev2 text-xs animate-slide-in-left">
+      <span className="mono-label mr-1.5">Image</span>
       {/* Width presets + custom */}
       {['25%', '50%', '75%', '100%'].map((w) => (
         <button
           key={w}
-          className={`h-6 px-2 rounded border border-line hover:border-line-strong ${attrs.width === w ? 'bg-accent/10 text-accent border-accent' : ''}`}
+          className={`h-6 px-2 rounded-sm border tabular-nums transition-colors duration-fast ${attrs.width === w ? 'bg-accent-tint-2 text-accent-press border-accent' : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'}`}
           onClick={() => setAttr({ width: w })}
           title={`Set width ${w}`}
+          aria-pressed={attrs.width === w}
         >{w}</button>
       ))}
       <button
-        className="h-6 px-2 rounded border border-line hover:border-line-strong"
+        className="h-6 px-2 rounded-sm border border-line text-ink-muted hover:border-line-strong hover:text-ink transition-colors duration-fast"
         onClick={() => setAttr({ width: null })}
         title="Reset width (original size)"
       >Auto</button>
@@ -880,16 +882,16 @@ function ImageSubMenu({ editor }) {
 
       {/* Alignment */}
       <button
-        className={`h-6 w-6 grid place-items-center rounded border border-line ${align === 'left' ? 'bg-accent/10 text-accent border-accent' : ''}`}
-        onClick={() => setAttr({ align: 'left' })} title="Align left"
+        className={`h-6 w-6 grid place-items-center rounded-sm border transition-colors duration-fast ${align === 'left' ? 'bg-accent-tint-2 text-accent-press border-accent' : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'}`}
+        onClick={() => setAttr({ align: 'left' })} title="Align left" aria-pressed={align === 'left'}
       ><AlignLeft size={13} /></button>
       <button
-        className={`h-6 w-6 grid place-items-center rounded border border-line ${align === 'center' ? 'bg-accent/10 text-accent border-accent' : ''}`}
-        onClick={() => setAttr({ align: 'center' })} title="Align center"
+        className={`h-6 w-6 grid place-items-center rounded-sm border transition-colors duration-fast ${align === 'center' ? 'bg-accent-tint-2 text-accent-press border-accent' : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'}`}
+        onClick={() => setAttr({ align: 'center' })} title="Align center" aria-pressed={align === 'center'}
       ><AlignCenter size={13} /></button>
       <button
-        className={`h-6 w-6 grid place-items-center rounded border border-line ${align === 'right' ? 'bg-accent/10 text-accent border-accent' : ''}`}
-        onClick={() => setAttr({ align: 'right' })} title="Align right"
+        className={`h-6 w-6 grid place-items-center rounded-sm border transition-colors duration-fast ${align === 'right' ? 'bg-accent-tint-2 text-accent-press border-accent' : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'}`}
+        onClick={() => setAttr({ align: 'right' })} title="Align right" aria-pressed={align === 'right'}
       ><AlignRight size={13} /></button>
 
       <Sep />

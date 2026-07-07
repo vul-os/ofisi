@@ -9,7 +9,7 @@ import { useFilesStore } from '../store/filesStore'
 import { useLocalFilesStore } from '../store/localFilesStore'
 import NewFileModal from './NewFileModal'
 import { importFromUrl, importFile } from '../lib/importFile'
-import { Button, IconButton, Input, Card, Tooltip, useToast } from './ui'
+import { Button, IconButton, Input, Card, Tooltip, useToast, DocThumb, Skeleton } from './ui'
 
 // ─── Token-aligned config ─────────────────────────────────────────────────────
 const CONFIG = {
@@ -201,9 +201,33 @@ export default function AppHome({ type }) {
         {/* ── Cloud files ── */}
         <section>
           {loading && (
-            <div className="flex justify-center py-16">
-              <Loader2 size={18} className="animate-spin text-accent" />
-            </div>
+            viewMode === 'grid' ? (
+              <div
+                className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
+                role="status"
+                aria-label={`Loading ${cfg.label.toLowerCase()}`}
+              >
+                {Array.from({ length: 8 }, (_, i) => (
+                  <div key={i} className="rounded-lg border border-line overflow-hidden bg-paper">
+                    <Skeleton className="h-28" rounded="rounded-none" />
+                    <div className="p-3 space-y-2">
+                      <Skeleton className="h-3 w-3/4" />
+                      <Skeleton className="h-2.5 w-1/3" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Card role="status" aria-label={`Loading ${cfg.label.toLowerCase()}`}>
+                {Array.from({ length: 6 }, (_, i) => (
+                  <div key={i} className={`flex items-center gap-3 px-4 py-3 ${i < 5 ? 'border-b border-line' : ''}`}>
+                    <Skeleton className="w-8 h-8" />
+                    <Skeleton className="h-3 flex-1 max-w-[40%]" />
+                    <Skeleton className="h-2.5 w-16 ml-auto" />
+                  </div>
+                ))}
+              </Card>
+            )
           )}
 
           {!loading && myFiles.length === 0 && (
@@ -243,6 +267,7 @@ export default function AppHome({ type }) {
                   file={file}
                   cfg={cfg}
                   Icon={Icon}
+                  type={type}
                   renaming={renaming}
                   renameValue={renameValue}
                   setRenaming={setRenaming}
@@ -346,19 +371,21 @@ export default function AppHome({ type }) {
 
 // ─── FileCard ─────────────────────────────────────────────────────────────────
 function FileCard({
-  file, cfg, Icon, renaming, renameValue, setRenaming, setRenameValue,
+  file, cfg, Icon, type, renaming, renameValue, setRenaming, setRenameValue,
   menuOpen, setMenuOpen, onOpen, onRename, onRenameCommit, onDelete,
 }) {
   return (
-    <div className="group bg-paper rounded-lg border border-line hover:border-line-strong hover:shadow-e1 transition-all cursor-pointer overflow-hidden">
-      {/* Thumbnail */}
+    <div className="group bg-paper rounded-lg border border-line hover:border-line-strong hover:shadow-e2 hover:-translate-y-0.5 transition-[transform,box-shadow,border-color] duration-base ease-out cursor-pointer overflow-hidden">
+      {/* Thumbnail — a crafted per-type preview, not a flat tinted box */}
       <div
-        className={`h-28 ${cfg.bgCn} flex items-center justify-center relative`}
+        className="h-28 relative border-b border-line"
         onClick={onOpen}
       >
-        <Icon size={32} className={`${cfg.iconCn} opacity-25`} />
-        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <ArrowUpRight size={13} className="text-ink-faint" />
+        <DocThumb type={type} className="h-full" />
+        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 translate-y-0.5 group-hover:translate-y-0 transition-[opacity,transform] duration-fast">
+          <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-bg-elevated/80 backdrop-blur-sm border border-line">
+            <ArrowUpRight size={13} className="text-ink-muted" />
+          </span>
         </div>
       </div>
       {/* Meta */}

@@ -45,7 +45,7 @@ const TableHeader = TableHeaderBase.extend({
     return ['th', { ...HTMLAttributes, scope: HTMLAttributes.scope || 'col' }, 0]
   },
 })
-import { ArrowLeft, Save, Loader2, AlertCircle, History, Users, MessageSquare, Activity, GitBranch, Check, Circle, Search, Type as TypeIcon, ListTree, Share2, Eye } from 'lucide-react'
+import { ArrowLeft, Save, Loader2, AlertCircle, History, Users, MessageSquare, Activity, GitBranch, Search, Type as TypeIcon, ListTree, Share2, Eye } from 'lucide-react'
 import FindReplace from './components/FindReplace'
 import WordCountModal from './components/WordCountModal'
 import DocumentOutline from './components/DocumentOutline'
@@ -65,7 +65,7 @@ import P2PShareModal from './components/P2PShareModal.jsx'
 import { getSuggestionStore } from '../../lib/crdt/suggestions.js'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { DocsCursorLayer } from '../../components/RemoteCursors.jsx'
-import { Button, IconButton, Tooltip, Topbar, LoadingState } from '../../components/ui'
+import { Button, IconButton, Tooltip, Topbar, LoadingState, SaveStatus, AvatarStack } from '../../components/ui'
 import { Skeleton } from '../../components/ui/LoadingState'
 import { getCommentStore } from '../../lib/crdt/comments'
 import {
@@ -949,28 +949,11 @@ export default function DocsEditor() {
   // Estimate page count (debounced in onUpdate, mirrors WordCountModal logic)
   const WORDS_PER_PAGE = 250
 
-  // Discreet save status — a meta-line, never a banner.
-  // We render an icon + text inline with the title; colour is intentionally
-  // muted (the user shouldn't keep scanning to see "Saved" all the time).
-  const statusInfo = (() => {
-    switch (saveStatus.status) {
-      case 'saving':
-        return { text: 'Saving',  tone: 'muted',   icon: Loader2,     spin: true  }
-      case 'saved':
-        return { text: 'Saved',   tone: 'success', icon: Check,       spin: false }
-      case 'error':
-        return {
-          text: retryCount > 0 ? `Retrying ${retryCount}/3` : 'Save failed',
-          tone: 'danger',
-          icon: AlertCircle,
-          spin: false,
-        }
-      case 'dirty':
-        return { text: 'Unsaved', tone: 'muted',   icon: Circle,      spin: false }
-      default:
-        return null
-    }
-  })()
+  // Discreet save status — a meta-line, never a banner. Rendered via the shared
+  // <SaveStatus> (a breathing dot + quiet label). We only compute the retry text
+  // override here; the component owns the crafted visual + a11y announcement.
+  const saveStatusText =
+    saveStatus.status === 'error' && retryCount > 0 ? `Retrying ${retryCount}/3` : undefined
 
   if (!editor) {
     // Paper-shaped skeleton (not a bare spinner) so the open feels like a
@@ -989,8 +972,11 @@ export default function DocsEditor() {
 
   const peerCount = Object.values(collabPeers)
     .filter((s) => s === 'connected' || s === 'relay').length
+  // Live collaborators (from the cursor layer) → crafted avatar stack.
+  const collaborators = Array.from(remoteCursors?.values?.() || [])
+    .filter((p) => p && p.accountId)
+    .map((p) => ({ id: p.accountId, name: p.displayName || 'Guest', color: p.color }))
   const pendingSuggestions = suggestions.filter((s) => s.state === 'pending').length
-  const StatusIcon = statusInfo?.icon
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg">
@@ -1037,29 +1023,18 @@ export default function DocsEditor() {
         }
         meta={
           <>
-            {statusInfo && (
-              <span
-                role="status"
-                aria-live="polite"
-                className={[
-                  'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
-                  statusInfo.tone === 'success' ? 'text-success' :
-                  statusInfo.tone === 'danger'  ? 'text-danger' :
-                                                  'text-ink-faint',
-                ].join(' ')}
-                title={saveStatus.error || ''}
-              >
-                {StatusIcon && (
-                  <StatusIcon
-                    size={11}
-                    className={statusInfo.spin ? 'animate-spin' : ''}
-                    aria-hidden
-                  />
-                )}
-                {statusInfo.text}
-              </span>
+            {saveStatus.status && (
+              <SaveStatus
+                status={saveStatus.status}
+                text={saveStatusText}
+                title={saveStatus.error || undefined}
+              />
             )}
-            {peerCount > 0 && (
+            {collaborators.length > 0 ? (
+              <Tooltip label={`${collaborators.length} editing now`}>
+                <AvatarStack people={collaborators} size={22} max={4} />
+              </Tooltip>
+            ) : peerCount > 0 && (
               <span
                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-pill bg-accent-tint text-accent-press"
                 title={`${peerCount} peer(s) connected`}
@@ -1285,11 +1260,16 @@ export default function DocsEditor() {
         )}
       </div>
 
-      <footer className="flex items-center justify-end gap-4 px-4 h-7 bg-paper border-t border-line text-2xs text-ink-faint tracking-tightish">
+      <footer className="status-bar justify-end">
+        {p2p.readOnly && (
+          <span className="status-item text-ink-faint mr-auto">
+            <Eye size={11} aria-hidden /> View only
+          </span>
+        )}
         <button
           onClick={() => setShowWordCount(true)}
           title="Word count details"
-          className="flex items-center gap-2 hover:text-ink transition-colors"
+          className="status-item"
           aria-label="Open word count details"
         >
           <span>{wordCount} words</span>

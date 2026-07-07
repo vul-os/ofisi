@@ -8,7 +8,7 @@ import { useFilesStore } from '../store/filesStore'
 import { useLocalFilesStore } from '../store/localFilesStore'
 import { importFromUrl } from '../lib/importFile'
 import NewFileModal from './NewFileModal'
-import { Card, Button, Tooltip, useToast } from './ui'
+import { Card, Button, Tooltip, useToast, Skeleton, DocThumb } from './ui'
 
 // ─── Per-app tint map — shares the rail's tokens so content ↔ sidebar agree ──
 const typeInfo = {
@@ -128,9 +128,18 @@ export default function Home() {
 
         {/* ── Recent documents ── */}
         {filesLoading && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={18} className="animate-spin text-accent" />
-          </div>
+          <section aria-label="Loading recent documents" role="status">
+            <p className="mono-label mb-3.5">Recent</p>
+            <Card>
+              {Array.from({ length: 4 }, (_, i) => (
+                <div key={i} className={`flex items-center gap-3 px-4 py-2.5 ${i < 3 ? 'border-b border-line' : ''}`}>
+                  <Skeleton className="w-8 h-8" />
+                  <Skeleton className="h-3 flex-1 max-w-[45%]" />
+                  <Skeleton className="h-2.5 w-14 ml-auto" />
+                </div>
+              ))}
+            </Card>
+          </section>
         )}
 
         {!filesLoading && recentFiles.length > 0 && (
@@ -169,11 +178,19 @@ export default function Home() {
           </section>
         )}
 
-        {/* ── Empty state — gentle serif tagline ── */}
+        {/* ── Empty state — gentle serif tagline over a crafted preview trio ── */}
         {!filesLoading && recentFiles.length === 0 && (
-          <section className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-16 h-16 rounded-full bg-accent-tint flex items-center justify-center mb-5">
-              <FileText size={28} className="text-accent opacity-60" />
+          <section className="flex flex-col items-center justify-center py-14 text-center">
+            <div className="relative h-24 w-48 mb-6" aria-hidden>
+              <div className="absolute left-1/2 top-1 -translate-x-1/2 -rotate-6 w-20 h-24 rounded-lg border border-line overflow-hidden shadow-e1 opacity-70">
+                <DocThumb type="sheet" className="h-full" />
+              </div>
+              <div className="absolute left-1/2 top-0 -translate-x-1/2 rotate-6 translate-x-8 w-20 h-24 rounded-lg border border-line overflow-hidden shadow-e1 opacity-70">
+                <DocThumb type="slide" className="h-full" />
+              </div>
+              <div className="absolute left-1/2 top-0 -translate-x-1/2 w-20 h-24 rounded-lg border border-line overflow-hidden shadow-e2">
+                <DocThumb type="doc" className="h-full" />
+              </div>
             </div>
             <p className="font-serif text-xl text-ink leading-snug mb-2">
               Your workspace awaits.

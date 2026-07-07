@@ -17,7 +17,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { History, RotateCcw, Loader2, AlertCircle, Bookmark, X } from 'lucide-react'
 import { api } from '../lib/api'
-import { Button, IconButton, Modal, LoadingState } from './ui'
+import { Button, IconButton, Modal, LoadingState, EmptyState } from './ui'
 
 function formatRelative(dateStr) {
   const d = new Date(dateStr)
@@ -173,20 +173,22 @@ export default function HistoryPanel({ fileId, onRestore, onClose }) {
           )}
 
           {error && !loading && (
-            <div className="flex flex-col items-center gap-2 py-10 px-4 text-center">
-              <AlertCircle size={18} className="text-danger" />
-              <p className="text-xs text-danger">{error}</p>
-              <Button variant="link" size="sm" onClick={load}>Retry</Button>
+            <div className="flex flex-col items-center gap-2 py-10 px-4 text-center animate-fade-in">
+              <div className="w-11 h-11 rounded-full bg-danger-bg flex items-center justify-center">
+                <AlertCircle size={18} className="text-danger" aria-hidden />
+              </div>
+              <p className="text-xs text-danger max-w-[16rem]">{error}</p>
+              <Button variant="secondary" size="sm" onClick={load}>Retry</Button>
             </div>
           )}
 
           {!loading && !error && versions.length === 0 && (
-            <div className="py-12 px-4 text-center">
-              <p className="font-serif text-sm text-ink-muted italic">No saved versions yet.</p>
-              <p className="text-2xs text-ink-faint mt-1.5 leading-snug">
-                Versions are created automatically on each save.
-              </p>
-            </div>
+            <EmptyState
+              size="sm"
+              icon={History}
+              title="No saved versions yet."
+              hint="Versions are created automatically on each save."
+            />
           )}
 
           {!loading && !error && versions.length > 0 && (

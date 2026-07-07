@@ -17,8 +17,8 @@
  */
 
 import { useState } from 'react'
-import { Check, XCircle, Type, Trash2, ChevronDown, ChevronUp, X } from 'lucide-react'
-import { Tabs, Button, IconButton } from './ui'
+import { Check, XCircle, Type, Trash2, ChevronDown, ChevronUp, X, GitBranch } from 'lucide-react'
+import { Tabs, Button, IconButton, EmptyState } from './ui'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -202,9 +202,12 @@ export default function SuggestionPanel({
       {/* ── List ── */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {filtered.length === 0 && (
-          <p className="text-sm text-ink-faint font-serif italic text-center py-8">
-            {filter === 'pending' ? 'No pending suggestions.' : `No ${filter} suggestions.`}
-          </p>
+          <EmptyState
+            size="sm"
+            icon={GitBranch}
+            title={filter === 'pending' ? 'No pending suggestions.' : `No ${filter} suggestions.`}
+            hint={filter === 'pending' ? 'Turn on Suggesting mode to propose edits others can review.' : undefined}
+          />
         )}
         {filtered.map(item => (
           <SuggestionItem

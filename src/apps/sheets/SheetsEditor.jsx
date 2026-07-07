@@ -4,7 +4,7 @@ import { Workbook } from '@fortune-sheet/react'
 import '@fortune-sheet/react/dist/index.css'
 import {
   ArrowLeft, Save, Loader2, Download, Upload, AlertCircle, MessageSquare,
-  Check, Circle, ChevronDown, BarChart2, Filter, Table2, Tag, Sliders, Keyboard, Search,
+  ChevronDown, BarChart2, Filter, Table2, Tag, Sliders, Keyboard, Search,
   Lock, MessageSquarePlus, X, MoreHorizontal, ListChecks,
 } from 'lucide-react'
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
@@ -21,7 +21,7 @@ import PresenceBar from '../../components/PresenceBar.jsx'
 import ConnectionPill from '../../components/ConnectionPill.jsx'
 import { useCollabFabric } from '../../lib/collab/useCollabFabric.js'
 import { getCollabIdentity, identityColor, deriveStatusPill, countLivePeers } from '../../lib/collab/presenceCommon.js'
-import { Button, IconButton, Tooltip, Topbar, Menu, useToast, useDialogA11y } from '../../components/ui'
+import { Button, IconButton, Tooltip, Topbar, Menu, useToast, useDialogA11y, SaveStatus } from '../../components/ui'
 import { useSheetKeyboardShortcuts, KeyboardShortcutsHelp, useShortcutsHelp } from './KeyboardShortcuts.jsx'
 import SheetsFindReplace from './SheetsFindReplace.jsx'
 import NumberFormatMenu from './NumberFormatMenu.jsx'
@@ -710,20 +710,9 @@ export default function SheetsEditor() {
     }))
   }, [])
 
-  // ── Save status display ─────────────────────────────────────────────────────
-  const statusInfo = (() => {
-    switch (saveStatus.status) {
-      case 'saving': return { text: 'Saving',  tone: 'muted',   icon: Loader2,    spin: true  }
-      case 'saved':  return { text: 'Saved',   tone: 'success', icon: Check,      spin: false }
-      case 'error':  return {
-        text: retryCount > 0 ? `Retrying ${retryCount}/3` : 'Save failed',
-        tone: 'danger', icon: AlertCircle, spin: false,
-      }
-      case 'dirty': return { text: 'Unsaved', tone: 'muted',   icon: Circle,     spin: false }
-      default:      return null
-    }
-  })()
-  const StatusIcon = statusInfo?.icon
+  // ── Save status display ─── rendered via the shared <SaveStatus> below.
+  const saveStatusText =
+    saveStatus.status === 'error' && retryCount > 0 ? `Retrying ${retryCount}/3` : undefined
 
   // Only one side panel open at a time (except comments). Close the OTHER
   // panels — never the one being toggled: closing self inside this setter's own
@@ -781,20 +770,12 @@ export default function SheetsEditor() {
         }
         meta={
           <>
-            {statusInfo && (
-              <span
-                role="status"
-                aria-live="polite"
-                className={[
-                  'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm',
-                  statusInfo.tone === 'success' ? 'text-success' :
-                  statusInfo.tone === 'danger'  ? 'text-danger'  : 'text-ink-faint',
-                ].join(' ')}
-                title={saveStatus.error || ''}
-              >
-                {StatusIcon && <StatusIcon size={11} aria-hidden className={statusInfo.spin ? 'animate-spin' : ''} />}
-                {statusInfo.text}
-              </span>
+            {saveStatus.status && (
+              <SaveStatus
+                status={saveStatus.status}
+                text={saveStatusText}
+                title={saveStatus.error || undefined}
+              />
             )}
             {/* WAVE-27: collaboration presence — roster + connection pill */}
             <PresenceBar roster={roster} className="ml-1" />

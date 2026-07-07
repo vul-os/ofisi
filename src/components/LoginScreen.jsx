@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Lock, Eye, EyeOff, AlertCircle } from 'lucide-react'
+import { Lock, Eye, EyeOff, AlertCircle, Loader2 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 
 /*
@@ -30,11 +30,21 @@ export default function LoginScreen() {
         className="absolute -top-32 -right-32 w-[420px] h-[420px] rounded-full opacity-40 pointer-events-none"
         style={{ background: 'radial-gradient(closest-side, var(--accent-tint-2), transparent 70%)' }}
       />
+      <div
+        aria-hidden
+        className="absolute -bottom-40 -left-40 w-[460px] h-[460px] rounded-full opacity-25 pointer-events-none"
+        style={{ background: 'radial-gradient(closest-side, var(--brand-subtle), transparent 70%)' }}
+      />
       <div className="relative w-full max-w-sm mx-4 animate-rise-in">
-        <div className="bg-paper rounded-xl border border-line shadow-e2 p-8">
+        <div className="bg-paper rounded-xl border border-line shadow-e3 p-8">
           <div className="flex flex-col items-start mb-7">
-            <span className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase mb-2">
-              Vulos Office
+            <span className="inline-flex items-center gap-2 mb-4">
+              <span className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center shadow-e1">
+                <span className="font-mono text-sm font-bold text-white leading-none">V</span>
+              </span>
+              <span className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
+                Vulos Office
+              </span>
             </span>
             <h1 className="font-serif text-3xl text-ink leading-tight">
               Welcome back.
@@ -91,7 +101,7 @@ export default function LoginScreen() {
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
-                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <Loader2 size={15} className="animate-spin" aria-hidden />
                   Signing in
                 </span>
               ) : 'Sign in'}
