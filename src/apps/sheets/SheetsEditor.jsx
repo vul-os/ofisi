@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, lazy, Suspense } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Workbook } from '@fortune-sheet/react'
 import '@fortune-sheet/react/dist/index.css'
@@ -30,6 +30,24 @@ import NumberFormatMenu from './NumberFormatMenu.jsx'
 // (WAVE-55: a hostile peer must not be able to inject a non-string title or
 // non-finite geometry that would crash/escape the renderer).
 import { makeChart, chartsBySheetId, mergeCharts, clampCharts } from './charts.js'
+// WAVE-63: register the high-value formulas Fortune-Sheet lacks (XLOOKUP,
+// TEXTJOIN, IFS, SWITCH, LET, XMATCH, FILTER/SORT/UNIQUE) into the shared
+// formula-parser Parser prototype so they evaluate live + recalc on dependency
+// change, exactly like a native function. Idempotent + install-guarded; done at
+// module load (before any Workbook mounts its parser). Pure data transforms —
+// no eval/DOM/fetch (see formulaFunctions.js SECURITY note).
+import { Parser as FormulaParser } from '@fortune-sheet/formula-parser'
+import { installCustomFormulas } from './formulaFunctions.js'
+installCustomFormulas(FormulaParser)
+// WAVE-63: reactive pivots — makePivot is the fail-closed ingress clamp for a
+// peer-supplied pivot descriptor (allow-listed agg, coerced/capped strings,
+// normalised range) exactly like makeChart. clampPivots re-clamps on load.
+import { makePivot, getPivots, clampPivots, pivotsBySheetId, mergePivots } from './pivot.js'
+// WAVE-63: CF color scales + data bars — makeColorScale is the fail-closed
+// ingress clamp (allow-listed kind, hex-validated colours) for a peer-supplied
+// rule; clampColorScales re-clamps on load; merge preserves the overlay.
+import { makeColorScale, clampColorScales, colorScalesBySheetId, mergeColorScales, buildNativeConditionFormat } from './colorScales.js'
+import { parseRange as parseRangeFS } from './ConditionalFormatPanel.jsx'
 
 // Side panels — lazily loaded so they don't bloat the initial bundle.
 const PivotPanel              = lazy(() => import('./PivotPanel.jsx'))
@@ -37,6 +55,8 @@ const FilterPanel             = lazy(() => import('./FilterPanel.jsx'))
 const ConditionalFormatPanel  = lazy(() => import('./ConditionalFormatPanel.jsx'))
 const ChartWizard             = lazy(() => import('./ChartWizard.jsx'))
 const ChartLayer              = lazy(() => import('./ChartLayer.jsx'))
+const PivotLayer              = lazy(() => import('./PivotLayer.jsx'))
+const ColorScaleLayer         = lazy(() => import('./ColorScaleLayer.jsx'))
 const NamedRangesPanel        = lazy(() => import('./NamedRangesPanel.jsx'))
 const DataValidationPanel     = lazy(() => import('./DataValidationPanel.jsx'))
 
@@ -65,6 +85,14 @@ function normalizeSheets(sheets) {
     row: sh.row || 100,
     column: sh.column || 26,
   }))
+}
+
+// loadContent — the single UNTRUSTED-ORIGIN normalise+clamp used by every load
+// path (initial state, api.getFile, XLSX import, draft restore). Runs charts AND
+// pivots through their fail-closed clamps so a corrupt/legacy/poisoned record
+// can never reach render with an unsafe descriptor (WAVE-61/63 defence-in-depth).
+function loadContent(content) {
+  return clampColorScales(clampPivots(clampCharts(normalizeSheets(content))))
 }
 
 // Shared trigger styling for the Import / Export menus.
@@ -320,7 +348,7 @@ export default function SheetsEditor() {
   // clampCharts re-clamps any persisted chart geometry through makeChart so a
   // corrupt/legacy local descriptor can never reach render with NaN layout
   // (WAVE-61 defence-in-depth; the wave-55 peer-ingress clamp is separate).
-  const [data, setData] = useState(() => clampCharts(normalizeSheets(file?.content)))
+  const [data, setData] = useState(() => loadContent(file?.content))
   const [saveStatus, setSaveStatus] = useState(getSaveState(id))
   const [draft, setDraft] = useState(null)
   const [retryCount, setRetryCount] = useState(0)
@@ -337,6 +365,7 @@ export default function SheetsEditor() {
   const [selectedChartId,   setSelectedChartId]   = useState(null)   // WAVE-54: floating chart selection
   const [showFindReplace,   setShowFindReplace]   = useState(false)
   const [showDataValidation, setShowDataValidation] = useState(false)
+  const [editingPivotId,    setEditingPivotId]    = useState(null)   // WAVE-63: pivot being edited (null = insert)
 
   const [activeCell,      setActiveCell]      = useState({ row: 0, col: 0 })
   const [selectionRect,   setSelectionRect]   = useState(null) // {r0,r1,c0,c1} 0-indexed inclusive
@@ -442,6 +471,64 @@ export default function SheetsEditor() {
         markDirty(id)
         return
       }
+      // WAVE-63: a pivot op carries a pivot descriptor; merge into sheet.pivots
+      // (LWW-by-id). SAME WAVE-55 posture as charts: the descriptor arrives from
+      // an UNTRUSTED peer, so NEVER merge it raw — run it through makePivot so the
+      // aggregation is allow-listed, strings are coerced/capped, and the range is
+      // normalised (blocks a non-string field → React-child crash, and a
+      // pathological range that computePivot would otherwise iterate → DoS).
+      // Fail-closed: a pivot with no usable string id is dropped.
+      if (detail && (detail.pivot || detail.pivotId)) {
+        const safePivot = detail.pivot ? makePivot(detail.pivot) : null
+        if (detail.pivot && (typeof detail.pivot.id !== 'string' || !detail.pivot.id)) {
+          return // no stable id ⇒ cannot LWW-merge deterministically
+        }
+        setData((prev) => (prev || []).map((sheet, idx) => {
+          if (idx !== 0) return sheet
+          const pivots = Array.isArray(sheet.pivots) ? sheet.pivots : []
+          if (detail.pivotAction === 'delete') {
+            return { ...sheet, pivots: pivots.filter((p) => p.id !== detail.pivotId) }
+          }
+          if (safePivot) {
+            const exists = pivots.some((p) => p.id === safePivot.id)
+            const next = exists
+              ? pivots.map((p) => (p.id === safePivot.id ? safePivot : p))
+              : [...pivots, safePivot]
+            return { ...sheet, pivots: next }
+          }
+          return sheet
+        }))
+        markDirty(id)
+        return
+      }
+      // WAVE-63: a cs_op carries a colour-scale/data-bar rule; merge into
+      // sheet.colorScales (LWW-by-id). SAME WAVE-55 posture: run the untrusted
+      // peer rule through makeColorScale (allow-listed kind, hex-validated
+      // colours) so a hostile rule can't inject a url()/expression() colour or a
+      // non-string field. Fail-closed: a rule with no usable string id is dropped.
+      if (detail && (detail.colorScale || detail.colorScaleId)) {
+        const safeRule = detail.colorScale ? makeColorScale(detail.colorScale) : null
+        if (detail.colorScale && (typeof detail.colorScale.id !== 'string' || !detail.colorScale.id)) {
+          return
+        }
+        setData((prev) => (prev || []).map((sheet, idx) => {
+          if (idx !== 0) return sheet
+          const rules = Array.isArray(sheet.colorScales) ? sheet.colorScales : []
+          if (detail.colorScaleAction === 'delete') {
+            return { ...sheet, colorScales: rules.filter((r) => r.id !== detail.colorScaleId) }
+          }
+          if (safeRule) {
+            const exists = rules.some((r) => r.id === safeRule.id)
+            const next = exists
+              ? rules.map((r) => (r.id === safeRule.id ? safeRule : r))
+              : [...rules, safeRule]
+            return { ...sheet, colorScales: next }
+          }
+          return sheet
+        }))
+        markDirty(id)
+        return
+      }
       const crdtCells = session.cells()
       if (crdtCells.length === 0) return
       setData((prev) => {
@@ -480,7 +567,7 @@ export default function SheetsEditor() {
       api.getFile(id).then((f) => {
         setFile(f)
         setTitle(f.name)
-        setData(clampCharts(normalizeSheets(f.content)))
+        setData(loadContent(f.content))
       }).catch(() => {
         showToast('Could not open this spreadsheet.', 'error')
         navigate('/sheets')
@@ -524,6 +611,25 @@ export default function SheetsEditor() {
     } catch { return null }
   }, [])
 
+  // WAVE-63: a monotonic tick that bumps whenever the grid scrolls or the window
+  // resizes, so the DOM-measured overlays (color scales / data bars) re-measure
+  // their cell rects and stay aligned. Throttled to animation frames.
+  const [scrollTick, setScrollTick] = useState(0)
+  useEffect(() => {
+    const container = workbookWrapRef.current
+    if (!container) return
+    let raf = 0
+    const bump = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => setScrollTick((t) => t + 1)) }
+    // Scroll events inside the grid bubble to the container (capture=true).
+    container.addEventListener('scroll', bump, true)
+    window.addEventListener('resize', bump)
+    return () => {
+      cancelAnimationFrame(raf)
+      container.removeEventListener('scroll', bump, true)
+      window.removeEventListener('resize', bump)
+    }
+  }, [])
+
   // ── Save / autosave ─────────────────────────────────────────────────────────
   const doSave = useCallback(async (contentOverride, retryNum = 0) => {
     if (!id) return
@@ -543,6 +649,18 @@ export default function SheetsEditor() {
   }, [id, saveFileWithDraft])
 
   const handleChange = (newData, opts = {}) => {
+    // WAVE-63: the Workbook is fed `renderData`, which injects derived
+    // __fromColorScale band rules into luckysheet_conditionformat_save for the
+    // canvas to paint. Those are RENDER-ONLY — strip them here so they never
+    // enter the authoritative model / save payload (else they'd accumulate and
+    // round-trip). The user's own CF rules (no marker) are kept.
+    if (Array.isArray(newData)) {
+      newData = newData.map((sheet) => {
+        const cf = sheet?.luckysheet_conditionformat_save
+        if (!Array.isArray(cf) || !cf.some((r) => r?.__fromColorScale)) return sheet
+        return { ...sheet, luckysheet_conditionformat_save: cf.filter((r) => !r?.__fromColorScale) }
+      })
+    }
     // WAVE-61 DATA-LOSS FIX ─────────────────────────────────────────────────
     // FortuneSheet's <Workbook onChange> re-emits its INTERNAL, normalised
     // `luckysheetfile` array (see @fortune-sheet/react → onChange(context
@@ -558,10 +676,16 @@ export default function SheetsEditor() {
     // via opts.chartsAuthoritative). Functional setData so we always merge
     // against the CURRENT charts, never a stale closure. This makes charts
     // survive grid init, cell edits, and round-trips.
+    // WAVE-63: pivots are a second app-owned overlay (sheet.pivots) that
+    // FortuneSheet's onChange also drops — merge them back the same way charts
+    // are, so a plain cell edit never clobbers a live pivot. An authoritative
+    // overlay update (chart OR pivot insert/edit) already carries its own array.
     setData((prev) => {
       if (!Array.isArray(newData)) return newData
-      if (opts.chartsAuthoritative) return newData
-      return mergeCharts(newData, chartsBySheetId(prev))
+      if (opts.overlaysAuthoritative) return newData
+      const withCharts = opts.chartsAuthoritative ? newData : mergeCharts(newData, chartsBySheetId(prev))
+      const withPivots = mergePivots(withCharts, pivotsBySheetId(prev))
+      return mergeColorScales(withPivots, colorScalesBySheetId(prev))
     })
     markDirty(id)
     clearTimeout(saveTimer.current)
@@ -591,12 +715,15 @@ export default function SheetsEditor() {
       }
       session.saveLocal()
     }
-    // Persist the MERGED content (charts included). newData from a plain grid
-    // edit lacks charts; merge them in for the save PUT too so charts reload
-    // with the sheet. A chart-authoritative update already carries them.
-    const toSave = (Array.isArray(newData) && !opts.chartsAuthoritative)
-      ? mergeCharts(newData, chartsBySheetId(dataRef.current))
-      : newData
+    // Persist the MERGED content (charts + pivots included). newData from a
+    // plain grid edit lacks both overlays; merge them in for the save PUT too so
+    // they reload with the sheet. An authoritative update already carries them.
+    let toSave = newData
+    if (Array.isArray(newData) && !opts.overlaysAuthoritative) {
+      toSave = opts.chartsAuthoritative ? newData : mergeCharts(newData, chartsBySheetId(dataRef.current))
+      toSave = mergePivots(toSave, pivotsBySheetId(dataRef.current))
+      toSave = mergeColorScales(toSave, colorScalesBySheetId(dataRef.current))
+    }
     saveTimer.current = setTimeout(() => doSave(toSave), AUTOSAVE_DELAY_MS)
   }
 
@@ -636,6 +763,56 @@ export default function SheetsEditor() {
     setShowChartWizard(true)
   }, [])
 
+  // ── Pivots (WAVE-63) ──────────────────────────────────────────────────────
+  // A pivot insert/edit/delete already produced the new workbook data (pivot.js
+  // op over the FULL data, so charts are preserved). Save it via the normal path
+  // AND broadcast a pivot_op so live collaborators merge the same descriptor. We
+  // diff the pivots array to know which pivot to upsert/remove on the fabric.
+  const handlePivotChange = useCallback((nextData) => {
+    const prevPivots = Array.isArray(dataRef.current?.[0]?.pivots) ? dataRef.current[0].pivots : []
+    const nextPivots = Array.isArray(nextData?.[0]?.pivots) ? nextData[0].pivots : []
+    // overlaysAuthoritative: nextData was derived from the full current data via
+    // a pivot.js op, so it already carries the definitive charts AND pivots — do
+    // NOT let handleChange re-merge stale overlays over it.
+    handleChange(nextData, { overlaysAuthoritative: true })
+    const session = gridSessionRef.current
+    if (session) {
+      const prevIds = new Set(prevPivots.map((p) => p.id))
+      const nextIds = new Set(nextPivots.map((p) => p.id))
+      for (const p of nextPivots) {
+        const before = prevPivots.find((x) => x.id === p.id)
+        if (!before || JSON.stringify(before) !== JSON.stringify(p)) session.upsertPivot(p)
+      }
+      for (const pid of prevIds) if (!nextIds.has(pid)) session.removePivot(pid)
+    }
+  }, [handleChange])
+
+  const handleEditPivot = useCallback((pivotId) => {
+    setEditingPivotId(pivotId)
+    setShowPivot(true)
+  }, [])
+
+  // ── CF color scales / data bars (WAVE-63) ─────────────────────────────────
+  // The CF panel produces the new workbook data (colorScales.js op over the FULL
+  // data, charts/pivots preserved). Save it authoritatively (do NOT let the
+  // merge resurrect a just-deleted rule) AND broadcast cs_ops so collaborators
+  // converge. We diff the rules to know which to upsert/remove on the fabric.
+  const handleColorScaleChange = useCallback((nextData) => {
+    const prevRules = Array.isArray(dataRef.current?.[0]?.colorScales) ? dataRef.current[0].colorScales : []
+    const nextRules = Array.isArray(nextData?.[0]?.colorScales) ? nextData[0].colorScales : []
+    handleChange(nextData, { overlaysAuthoritative: true })
+    const session = gridSessionRef.current
+    if (session) {
+      const prevIds = new Set(prevRules.map((r) => r.id))
+      const nextIds = new Set(nextRules.map((r) => r.id))
+      for (const r of nextRules) {
+        const before = prevRules.find((x) => x.id === r.id)
+        if (!before || JSON.stringify(before) !== JSON.stringify(r)) session.upsertColorScale(r)
+      }
+      for (const rid of prevIds) if (!nextIds.has(rid)) session.removeColorScale(rid)
+    }
+  }, [handleChange])
+
   const handleTitleChange = (newTitle) => {
     setTitle(newTitle)
     markDirty(id)
@@ -651,7 +828,7 @@ export default function SheetsEditor() {
   // path (initial useState, api.getFile, XLSX import) runs clampCharts →
   // makeChart; the restore path must too, or it reopens the wave-55 render-DoS
   // through the load door. Normalise + clamp fail-closed before it reaches data.
-  const handleRestoreDraft  = () => { if (!draft) return; setData(clampCharts(normalizeSheets(draft.content))); if (draft.name) setTitle(draft.name); setDraft(null); markDirty(id) }
+  const handleRestoreDraft  = () => { if (!draft) return; setData(loadContent(draft.content)); if (draft.name) setTitle(draft.name); setDraft(null); markDirty(id) }
   const handleDiscardDraft  = () => { clearDraft(id); setDraft(null) }
 
   // ── Import CSV ──────────────────────────────────────────────────────────────
@@ -687,7 +864,7 @@ export default function SheetsEditor() {
       if (res.ok) {
         // Reload file content from server.
         const updated = await api.getFile(id)
-        setData(clampCharts(normalizeSheets(updated.content)) || data)
+        setData(loadContent(updated.content) || data)
         showToast(`Imported “${file.name}”`, 'success')
       } else {
         console.error('XLSX import failed:', await res.text())
@@ -718,6 +895,30 @@ export default function SheetsEditor() {
   // panels — never the one being toggled: closing self inside this setter's own
   // functional update raced the `return !v` and left the panel stuck closed
   // after the Fortune-Sheet grid re-initialized (data-validation wouldn't open).
+  // WAVE-63: render-time data for the Workbook. FortuneSheet renders on a CANVAS
+  // (no DOM cells to overlay), and its native colorGradation/dataBar compute is
+  // buggy — so we paint color scales / data bars by expanding each rule into
+  // FortuneSheet-native `between` BAND rules (buildNativeConditionFormat) and
+  // injecting them into luckysheet_conditionformat_save AT RENDER TIME ONLY. The
+  // saved model (`data`) keeps just the clean colorScales + user rules; the
+  // derived bands are marked __fromColorScale and are recomputed reactively from
+  // the current cell values, so the gradient re-buckets live as data changes.
+  const renderData = useMemo(() => {
+    const scales = data?.[0]?.colorScales
+    // Fast path: no colour scales ⇒ return `data` unchanged (zero cost on the
+    // vast majority of workbooks that use no gradients/bars).
+    if (!Array.isArray(scales) || scales.length === 0) return data
+    // With rules, rebuild the derived bands. This must re-run whenever a source
+    // cell in ANY rule's range changes (to re-bucket the gradient) — detecting
+    // that requires a scan anyway, so we rebuild on any data-identity change.
+    // Cost is O(scanned rule cells + NATIVE_BANDS×ruleCount) per edit, bounded
+    // by buildNativeConditionFormat's own caps; negligible for typical use.
+    return data.map((sheet, idx) => {
+      if (idx !== 0) return sheet
+      return { ...sheet, luckysheet_conditionformat_save: buildNativeConditionFormat(sheet, parseRangeFS) }
+    })
+  }, [data])
+
   const panelSetters = [setShowPivot, setShowFilter, setShowCondFormat, setShowNamedRanges, setShowDataValidation]
   const closeAllPanels = () => { for (const s of panelSetters) s(false) }
   const togglePanel = (setter) => () => {
@@ -811,7 +1012,7 @@ export default function SheetsEditor() {
                 </IconButton>
               </Tooltip>
               <Tooltip label="Pivot table (Insert → Pivot table)">
-                <IconButton size="sm" active={showPivot} onClick={togglePanel(setShowPivot)}>
+                <IconButton size="sm" active={showPivot} onClick={() => { setEditingPivotId(null); togglePanel(setShowPivot)() }}>
                   <Table2 size={14} />
                 </IconButton>
               </Tooltip>
@@ -864,7 +1065,7 @@ export default function SheetsEditor() {
                 <Menu.Item active={showCellComment} onClick={() => setShowCellComment((v) => !v)}>
                   <MessageSquarePlus size={14} /> Cell comment
                 </Menu.Item>
-                <Menu.Item active={showPivot} onClick={togglePanel(setShowPivot)}>
+                <Menu.Item active={showPivot} onClick={() => { setEditingPivotId(null); togglePanel(setShowPivot)() }}>
                   <Table2 size={14} /> Pivot table
                 </Menu.Item>
                 <Menu.Item active={showFilter} onClick={togglePanel(setShowFilter)}>
@@ -962,7 +1163,7 @@ export default function SheetsEditor() {
         >
           <Workbook
             ref={workbookRef}
-            data={data}
+            data={renderData}
             onChange={handleChange}
             showFormulaBar={true}
             defaultFontSize={11}
@@ -983,6 +1184,14 @@ export default function SheetsEditor() {
               },
             }}
           />
+          {/* WAVE-63: CF color scales + data bars are painted on the FS canvas
+              via native band rules (see renderData / buildNativeConditionFormat).
+              The DOM-overlay ColorScaleLayer is kept for environments/exports
+              where cell rects ARE measurable (getCellRect resolves); on the
+              canvas grid it self-disables (no rects) rather than mis-aligning. */}
+          <Suspense fallback={null}>
+            <ColorScaleLayer data={data} getCellRect={getCellRect} scrollTick={scrollTick} />
+          </Suspense>
           <SheetsCursorLayer remoteCursors={remoteCursors} getCellRect={getCellRect} />
           {/* WAVE-54: floating live charts over the grid */}
           <Suspense fallback={null}>
@@ -992,6 +1201,14 @@ export default function SheetsEditor() {
               selectedId={selectedChartId}
               onSelect={setSelectedChartId}
               onEdit={handleEditChart}
+            />
+          </Suspense>
+          {/* WAVE-63: floating live pivot tables over the grid */}
+          <Suspense fallback={null}>
+            <PivotLayer
+              data={data}
+              onChange={handlePivotChange}
+              onEdit={handleEditPivot}
             />
           </Suspense>
           {showCellComment && (
@@ -1019,8 +1236,11 @@ export default function SheetsEditor() {
           {showPivot && (
             <PivotPanel
               data={data}
-              onClose={() => setShowPivot(false)}
-              onInsert={(next) => { handleChange(next) }}
+              pivot={editingPivotId ? getPivots(data).find((p) => p.id === editingPivotId) : null}
+              selectionRect={selectionRect}
+              onClose={() => { setShowPivot(false); setEditingPivotId(null) }}
+              onInsert={(next) => { handlePivotChange(next) }}
+              onInsertStatic={(next) => { handleChange(next) }}
             />
           )}
           {showFilter && (
@@ -1035,6 +1255,7 @@ export default function SheetsEditor() {
               data={data}
               onClose={() => setShowCondFormat(false)}
               onChange={(next) => { handleChange(next) }}
+              onColorScaleChange={(next) => { handleColorScaleChange(next) }}
             />
           )}
           {showNamedRanges && (

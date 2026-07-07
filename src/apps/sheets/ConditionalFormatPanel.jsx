@@ -11,8 +11,11 @@
  *   onChange   {fn(data)}  — called with updated workbook after a rule is saved
  */
 import { useState } from 'react'
-import { X, Plus, Trash2, ChevronUp, ChevronDown, Pencil } from 'lucide-react'
+import { X, Plus, Trash2, ChevronUp, ChevronDown, Pencil, Palette, BarChartHorizontal } from 'lucide-react'
 import { Button, IconButton } from '../../components/ui'
+import {
+  getColorScales, insertColorScale, updateColorScale, deleteColorScale,
+} from './colorScales.js'
 
 const RULE_TYPES = [
   { value: 'cell_value',  label: 'Cell value is' },
@@ -108,13 +111,45 @@ const DEFAULT_RULE = {
   format: { bgColor: '#FFFF00', textColor: '', bold: false },
 }
 
-export default function ConditionalFormatPanel({ data, onClose, onChange }) {
+export default function ConditionalFormatPanel({ data, onClose, onChange, onColorScaleChange }) {
+  // Color-scale/data-bar rules are authoritative overlay writes (deletions must
+  // stick), so they go through onColorScaleChange when provided, falling back to
+  // onChange for standalone use.
+  const pushColorScale = onColorScaleChange || onChange
   const sheetRules = data?.[0]?.luckysheet_conditionformat_save || []
   const [rules,    setRules]    = useState(sheetRules)
   const [editIdx,  setEditIdx]  = useState(null)
   const [editRule, setEditRule] = useState(null)
   const [range,    setRange]    = useState('A1:Z100')
   const [dirty,    setDirty]    = useState(false)
+
+  // WAVE-63: color-scale / data-bar rules live in sheet.colorScales (a separate
+  // app-owned overlay painted by ColorScaleLayer). Kept distinct from the 4
+  // native rule types above so neither panel path regresses the other.
+  const colorScales = getColorScales(data)
+  const [csEdit, setCsEdit] = useState(null) // {id?, kind, range, min, mid, max, barColor}
+
+  function startColorScale(kind) {
+    setCsEdit({
+      id: null, kind, range: 'A1:A10',
+      min: '#f8696b', mid: '#ffeb84', max: '#63be7b', barColor: '#638ec6',
+    })
+  }
+  function startEditColorScale(rule) {
+    setCsEdit({ ...rule })
+  }
+  function saveColorScale() {
+    if (!csEdit || !pushColorScale) return
+    const next = csEdit.id
+      ? updateColorScale(data, csEdit.id, csEdit)
+      : insertColorScale(data, csEdit)
+    pushColorScale(next)
+    setCsEdit(null)
+  }
+  function removeColorScale(id) {
+    if (!pushColorScale) return
+    pushColorScale(deleteColorScale(data, id))
+  }
 
   function startNew() {
     setEditRule({ ...DEFAULT_RULE, id: Math.random().toString(36).slice(2) })
@@ -225,6 +260,106 @@ export default function ConditionalFormatPanel({ data, onClose, onChange }) {
             <Button variant="secondary" size="sm" onClick={startNew} className="w-full">
               <Plus size={11} className="mr-1" /> Add rule
             </Button>
+
+            {/* ── Color scales & data bars (WAVE-63) ─────────────────────── */}
+            {csEdit === null && (
+              <div className="border-t border-line pt-3 space-y-2">
+                <p className="font-medium text-ink-muted">Color scales &amp; data bars</p>
+
+                {colorScales.length === 0 && (
+                  <p className="text-ink-faint">Add a gradient or bar that updates live with your data.</p>
+                )}
+                {colorScales.map((r) => (
+                  <div key={r.id} className="flex items-center gap-1.5 border border-line rounded-md px-2 py-1.5">
+                    <span
+                      className="w-6 h-4 rounded-sm border border-line flex-shrink-0"
+                      style={r.kind === 'dataBar'
+                        ? { background: r.barColor }
+                        : { background: `linear-gradient(90deg, ${r.min}, ${r.kind === 'colorScale3' ? r.mid + ', ' : ''}${r.max})` }}
+                    />
+                    <span className="flex-1 truncate text-ink">
+                      {r.kind === 'dataBar' ? 'Data bar' : r.kind === 'colorScale3' ? '3-color scale' : '2-color scale'} · {r.range}
+                    </span>
+                    <button onClick={() => startEditColorScale(r)} aria-label="Edit color rule" className="text-ink-faint hover:text-ink rounded-sm focus-visible:outline-none focus-visible:shadow-focus"><Pencil size={11} /></button>
+                    <button onClick={() => removeColorScale(r.id)} aria-label="Delete color rule" className="text-ink-faint hover:text-danger rounded-sm focus-visible:outline-none focus-visible:shadow-focus"><Trash2 size={11} /></button>
+                  </div>
+                ))}
+
+                <div className="flex gap-1.5">
+                  <Button variant="secondary" size="sm" onClick={() => startColorScale('colorScale2')} className="flex-1">
+                    <Palette size={11} className="mr-1" /> Color scale
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => startColorScale('dataBar')} className="flex-1">
+                    <BarChartHorizontal size={11} className="mr-1" /> Data bar
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Color-scale / data-bar editor */}
+            {csEdit !== null && (
+              <div className="border-t border-line pt-3 space-y-3">
+                <div className="space-y-1">
+                  <label className="block text-ink-muted font-medium">Type</label>
+                  <select
+                    value={csEdit.kind}
+                    onChange={(e) => setCsEdit((c) => ({ ...c, kind: e.target.value }))}
+                    className={selCls}
+                  >
+                    <option value="colorScale2">2-color scale</option>
+                    <option value="colorScale3">3-color scale</option>
+                    <option value="dataBar">Data bar</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-ink-muted font-medium">Apply to range</label>
+                  <input
+                    value={csEdit.range}
+                    onChange={(e) => setCsEdit((c) => ({ ...c, range: e.target.value }))}
+                    className={inputCls}
+                    placeholder="e.g. A1:A20"
+                  />
+                </div>
+
+                {csEdit.kind === 'dataBar' ? (
+                  <div className="flex items-center gap-2">
+                    <label className="text-ink-muted w-20">Bar color</label>
+                    <input type="color" value={csEdit.barColor}
+                      onChange={(e) => setCsEdit((c) => ({ ...c, barColor: e.target.value }))}
+                      className="h-6 w-10 rounded border border-line cursor-pointer" />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-ink-muted w-20">Min color</label>
+                      <input type="color" value={csEdit.min}
+                        onChange={(e) => setCsEdit((c) => ({ ...c, min: e.target.value }))}
+                        className="h-6 w-10 rounded border border-line cursor-pointer" />
+                    </div>
+                    {csEdit.kind === 'colorScale3' && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-ink-muted w-20">Mid color</label>
+                        <input type="color" value={csEdit.mid}
+                          onChange={(e) => setCsEdit((c) => ({ ...c, mid: e.target.value }))}
+                          className="h-6 w-10 rounded border border-line cursor-pointer" />
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <label className="text-ink-muted w-20">Max color</label>
+                      <input type="color" value={csEdit.max}
+                        onChange={(e) => setCsEdit((c) => ({ ...c, max: e.target.value }))}
+                        className="h-6 w-10 rounded border border-line cursor-pointer" />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <Button variant="primary"   size="sm" onClick={saveColorScale}      className="flex-1">Save</Button>
+                  <Button variant="secondary" size="sm" onClick={() => setCsEdit(null)} className="flex-1">Cancel</Button>
+                </div>
+              </div>
+            )}
           </>
         )}
 

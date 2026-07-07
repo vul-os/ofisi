@@ -33,11 +33,15 @@
 import { parseRange } from './ConditionalFormatPanel.jsx'
 
 export const CHART_TYPES = [
-  { value: 'column', label: 'Column', icon: '▮' },
-  { value: 'bar',    label: 'Bar',    icon: '▬' },
-  { value: 'line',   label: 'Line',   icon: '╱' },
-  { value: 'area',   label: 'Area',   icon: '△' },
-  { value: 'pie',    label: 'Pie',    icon: '◔' },
+  { value: 'column',  label: 'Column',  icon: '▮' },
+  { value: 'bar',     label: 'Bar',     icon: '▬' },
+  { value: 'line',    label: 'Line',    icon: '╱' },
+  { value: 'area',    label: 'Area',    icon: '△' },
+  { value: 'pie',     label: 'Pie',     icon: '◔' },
+  // WAVE-63 additional types:
+  { value: 'scatter', label: 'Scatter', icon: '⣿' },  // X/Y points (2 numeric series)
+  { value: 'combo',   label: 'Combo',   icon: '▮╱' }, // 1st series bars, rest lines
+  { value: 'bubble',  label: 'Bubble',  icon: '◍' },  // X/Y + size (3 numeric series)
 ]
 
 const CHART_TYPE_SET = new Set(CHART_TYPES.map((t) => t.value))

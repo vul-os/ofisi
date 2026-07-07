@@ -51,12 +51,43 @@ describe('ChartSvg escaping', () => {
 
   it('renders each chart type without error', () => {
     const sheet = sheetWith({ '0_1': 'V', '1_0': 'a', '1_1': 3, '2_0': 'b', '2_1': 7 })
-    for (const type of ['column', 'bar', 'line', 'area', 'pie']) {
+    // WAVE-63: scatter/combo/bubble added.
+    for (const type of ['column', 'bar', 'line', 'area', 'pie', 'scatter', 'combo', 'bubble']) {
       const chart = makeChart({ type, range: 'A1:B3', options: { headerRow: true, headerCol: true } })
       const { container, unmount } = render(<ChartSvg chart={chart} sheet={sheet} width={360} height={240} />)
       expect(container.querySelector('svg')).toBeTruthy()
       unmount()
     }
+  })
+
+  // WAVE-63: scatter/bubble plot numeric X/Y (and size) columns as points.
+  it('renders scatter and bubble as <circle> points, no innerHTML', () => {
+    // 3 numeric columns: X, Y, Size — headerCol off so col 0 is X, not labels.
+    const sheet = sheetWith({
+      '0_0': 'X', '0_1': 'Y', '0_2': 'Size',
+      '1_0': 1, '1_1': 10, '1_2': 5,
+      '2_0': 2, '2_1': 20, '2_2': 15,
+      '3_0': 3, '3_1': 15, '3_2': 8,
+    })
+    for (const type of ['scatter', 'bubble']) {
+      const chart = makeChart({ type, range: 'A1:C4', options: { headerRow: true, headerCol: false } })
+      const { container, unmount } = render(<ChartSvg chart={chart} sheet={sheet} width={360} height={240} />)
+      expect(container.querySelector('circle')).toBeTruthy() // points drawn
+      expect(container.querySelector('script')).toBeNull()
+      unmount()
+    }
+  })
+
+  it('combo draws both a <rect> (bars) and a <path> (line)', () => {
+    const sheet = sheetWith({
+      '0_0': 'Cat', '0_1': 'Bars', '0_2': 'Line',
+      '1_0': 'a', '1_1': 5, '1_2': 3,
+      '2_0': 'b', '2_1': 8, '2_2': 6,
+    })
+    const chart = makeChart({ type: 'combo', range: 'A1:C3', options: { headerRow: true, headerCol: true } })
+    const { container } = render(<ChartSvg chart={chart} sheet={sheet} width={360} height={240} />)
+    expect(container.querySelector('rect')).toBeTruthy() // series[0] bars
+    expect(container.querySelector('path')).toBeTruthy() // series[1] line
   })
 
   // WAVE-55 regression: a HOSTILE chart descriptor from a CRDT peer — non-string

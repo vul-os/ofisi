@@ -98,7 +98,7 @@ export default function ChartWizard({ data, chart, selectionRect, onClose, onCha
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 text-xs">
           <div className="space-y-2">
             <p className="text-ink-muted font-medium">Chart type</p>
-            <div className="grid grid-cols-5 gap-1.5" role="radiogroup" aria-label="Chart type">
+            <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Chart type">
               {CHART_TYPES.map((ct) => (
                 <button
                   key={ct.value}
@@ -117,6 +117,13 @@ export default function ChartWizard({ data, chart, selectionRect, onClose, onCha
                 </button>
               ))}
             </div>
+            {(chartType === 'scatter' || chartType === 'bubble') && (
+              <p className="text-2xs text-ink-faint">
+                {chartType === 'scatter'
+                  ? 'Scatter plots the 1st column as X and the 2nd as Y.'
+                  : 'Bubble plots columns as X, Y and bubble size.'} Turn off “First column is labels” below.
+              </p>
+            )}
           </div>
 
           <div className="space-y-1">

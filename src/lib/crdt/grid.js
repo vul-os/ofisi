@@ -223,6 +223,52 @@ export class GridSession extends EventTarget {
   }
 
   // -------------------------------------------------------------------------
+  // Pivot objects (WAVE-63) — plain-data descriptors, LWW-per-pivot-id.
+  //
+  // Same shape/discipline as chart ops: a pivot descriptor is structured
+  // overlay data (not cells), so it rides a separate op stream carrying a
+  // Lamport OpID for total order. The editor owns the pivots array in file
+  // content; this stream just propagates live-collab edits immediately. The
+  // ingress (SheetsEditor onRemote) MUST validate/clamp via makePivot — an
+  // untrusted peer descriptor is never merged raw (WAVE-55 posture).
+  // -------------------------------------------------------------------------
+
+  /** Broadcast an upsert of a pivot descriptor (plain data). */
+  upsertPivot(pivot) {
+    if (!pivot || typeof pivot.id !== 'string') return
+    const id = this._clock.tick()
+    this._broadcast({ type: 'pivot_op', session: this._session, opId: id, action: 'upsert', pivot })
+  }
+
+  /** Broadcast a pivot deletion by id. */
+  removePivot(pivotId) {
+    if (typeof pivotId !== 'string') return
+    const id = this._clock.tick()
+    this._broadcast({ type: 'pivot_op', session: this._session, opId: id, action: 'delete', pivotId })
+  }
+
+  // -------------------------------------------------------------------------
+  // Color-scale / data-bar CF rules (WAVE-63) — plain-data, LWW-per-rule-id.
+  // Same discipline as chart/pivot ops. The editor ingress validates each
+  // descriptor via makeColorScale (allow-listed kind, hex-validated colours) —
+  // an untrusted peer rule is never merged raw.
+  // -------------------------------------------------------------------------
+
+  /** Broadcast an upsert of a colour-scale rule (plain data). */
+  upsertColorScale(rule) {
+    if (!rule || typeof rule.id !== 'string') return
+    const id = this._clock.tick()
+    this._broadcast({ type: 'cs_op', session: this._session, opId: id, action: 'upsert', rule })
+  }
+
+  /** Broadcast a colour-scale rule deletion by id. */
+  removeColorScale(ruleId) {
+    if (typeof ruleId !== 'string') return
+    const id = this._clock.tick()
+    this._broadcast({ type: 'cs_op', session: this._session, opId: id, action: 'delete', ruleId })
+  }
+
+  // -------------------------------------------------------------------------
   // Query
   // -------------------------------------------------------------------------
 
@@ -316,6 +362,25 @@ export class GridSession extends EventTarget {
       }
       this.dispatchEvent(new CustomEvent('remoteOp', {
         detail: { chart: msg.chart, chartId: msg.chartId, action: msg.action, opId: msg.opId },
+      }))
+    } else if (msg.type === 'pivot_op') {
+      // Advance clock past the remote op id, then surface a pivot event. The
+      // editor owns the pivots array; we relay the intent to merge (validated
+      // fail-closed at the ingress via makePivot).
+      if (msg.opId) {
+        const parts = String(msg.opId).split('_')
+        this._clock.observe(parseInt(parts[1], 10) || 0)
+      }
+      this.dispatchEvent(new CustomEvent('remoteOp', {
+        detail: { pivot: msg.pivot, pivotId: msg.pivotId, pivotAction: msg.action, opId: msg.opId },
+      }))
+    } else if (msg.type === 'cs_op') {
+      if (msg.opId) {
+        const parts = String(msg.opId).split('_')
+        this._clock.observe(parseInt(parts[1], 10) || 0)
+      }
+      this.dispatchEvent(new CustomEvent('remoteOp', {
+        detail: { colorScale: msg.rule, colorScaleId: msg.ruleId, colorScaleAction: msg.action, opId: msg.opId },
       }))
     } else if (msg.type === 'grid_snapshot_request') {
       // Send our current snapshot to the requester.

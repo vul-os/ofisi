@@ -11,12 +11,23 @@
  *   onChange  {fn(data)}  — called with updated data when ranges change
  */
 import { useState } from 'react'
-import { X, Plus, Trash2, Edit2 } from 'lucide-react'
+import { X, Plus, Trash2, Edit2, Copy, Check } from 'lucide-react'
 import { Button, IconButton } from '../../components/ui'
 
 function getNamedRanges(data) {
   // Stored on the first sheet's metadata for simplicity.
   return data?.[0]?.namedRanges || []
+}
+
+// Build the sheet-qualified A1 reference a named range expands to in a formula.
+// (Named ranges are made formula-usable by expanding them to this reference —
+// see namedRanges.js. FortuneSheet's grammar has no native name binding, so a
+// name is entered by referencing its range; this affordance copies exactly that
+// reference so the user can paste it into a formula.)
+function refFor(r) {
+  const needsQuote = !/^[A-Za-z_][A-Za-z0-9_]*$/.test(r.sheetName || '')
+  const sheet = needsQuote ? `'${String(r.sheetName).replace(/'/g, "''")}'` : r.sheetName
+  return r.sheetName ? `${sheet}!${r.range}` : r.range
 }
 
 export default function NamedRangesPanel({ data, onClose, onChange }) {
@@ -25,6 +36,14 @@ export default function NamedRangesPanel({ data, onClose, onChange }) {
   const [form,     setForm]     = useState({ name: '', range: '', sheetName: data?.[0]?.name || 'Sheet1' })
   const [editing,  setEditing]  = useState(false)
   const [error,    setError]    = useState('')
+  const [copiedIdx, setCopiedIdx] = useState(null)
+
+  function copyRef(i) {
+    const ref = refFor(ranges[i])
+    try { navigator.clipboard?.writeText(ref) } catch { /* clipboard blocked — ignore */ }
+    setCopiedIdx(i)
+    setTimeout(() => setCopiedIdx((c) => (c === i ? null : c)), 1200)
+  }
 
   const sheetNames = (data || []).map((s) => s.name || 'Sheet')
 
@@ -105,6 +124,9 @@ export default function NamedRangesPanel({ data, onClose, onChange }) {
                   <p className="font-semibold text-ink truncate">{r.name}</p>
                   <p className="text-ink-faint text-[10px] truncate">{r.sheetName}!{r.range}</p>
                 </div>
+                <button onClick={() => copyRef(i)} aria-label={`Copy formula reference for ${r.name}`} title="Copy reference to use in a formula" className="text-ink-faint hover:text-ink mt-0.5 rounded-sm focus-visible:outline-none focus-visible:shadow-focus">
+                  {copiedIdx === i ? <Check size={11} className="text-success" /> : <Copy size={11} />}
+                </button>
                 <button onClick={() => startEdit(i)} aria-label={`Edit named range ${r.name}`} className="text-ink-faint hover:text-ink mt-0.5 rounded-sm focus-visible:outline-none focus-visible:shadow-focus">
                   <Edit2 size={11} />
                 </button>

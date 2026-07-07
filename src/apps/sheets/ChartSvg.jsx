@@ -62,7 +62,12 @@ export function ChartSvg({ chart, sheet, width, height, extracted: extractedProp
     )
   } else if (chart.type === 'pie') {
     body = <Pie chart={chart} extracted={extracted} W={W} H={H} legendH={legendH} />
+  } else if (chart.type === 'scatter' || chart.type === 'bubble') {
+    // WAVE-63: X/Y scatter (2 series = x,y) and bubble (3rd series = size).
+    body = <ScatterChart chart={chart} extracted={extracted} plot={plot} bubble={chart.type === 'bubble'} />
   } else {
+    // column/bar/line/area/combo all share the cartesian renderer (combo draws
+    // the first series as bars and the rest as lines).
     body = (
       <CartesianChart chart={chart} extracted={extracted} plot={plot} W={W} H={H} legendH={legendH} />
     )
@@ -119,6 +124,7 @@ function CartesianChart({ chart, extracted, plot, W, H, legendH }) {
   const isBar = chart.type === 'bar' // horizontal
   const isLine = chart.type === 'line'
   const isArea = chart.type === 'area'
+  const isCombo = chart.type === 'combo' // series[0] = columns, series[1..] = lines
 
   // Compute max (stacked=false → grouped bars / independent lines).
   let dataMax = 0
@@ -212,12 +218,14 @@ function CartesianChart({ chart, extracted, plot, W, H, legendH }) {
       )
     })
   } else {
-    // Vertical grouped columns (default).
+    // Vertical grouped columns (default) — for COMBO, only series[0] is drawn as
+    // columns; the remaining series are overlaid as lines below.
+    const barSeries = isCombo ? series.slice(0, 1) : series
     const bandW = plot.w / nCat
     const groupPad = bandW * 0.18
-    const barW = (bandW - groupPad * 2) / series.length
+    const barW = (bandW - groupPad * 2) / Math.max(1, barSeries.length)
     categories.forEach((cat, ci) => {
-      series.forEach((s, sj) => {
+      barSeries.forEach((s, sj) => {
         const v = s.values[ci] || 0
         const len = maxV ? (v / maxV) * plot.h : 0
         const x = plot.x + ci * bandW + groupPad + sj * barW
@@ -236,6 +244,20 @@ function CartesianChart({ chart, extracted, plot, W, H, legendH }) {
         </text>
       )
     })
+    // COMBO line overlay: series[1..] drawn as lines across the band centres.
+    if (isCombo && series.length > 1) {
+      const cx = (ci) => plot.x + ci * bandW + bandW / 2
+      series.slice(1).forEach((s, sj) => {
+        const pts = s.values.map((v, ci) => [cx(ci), plot.y + plot.h - (maxV ? (v / maxV) * plot.h : 0)])
+        const d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0] + ' ' + p[1]).join(' ')
+        shapes.push(<path key={`combo-l-${sj}`} d={d} fill="none" stroke={s.color} strokeWidth="2" />)
+        pts.forEach((p, ci) => shapes.push(
+          <circle key={`combo-p-${sj}-${ci}`} cx={p[0]} cy={p[1]} r="2.5" fill={s.color}>
+            <title>{`${s.name} · ${categories[ci]}: ${s.values[ci]}`}</title>
+          </circle>
+        ))
+      })
+    }
   }
 
   return (
@@ -302,6 +324,77 @@ function Pie({ chart, extracted, W, H, legendH }) {
           </g>
         ))}
       </g>
+    </g>
+  )
+}
+
+/**
+ * ScatterChart (WAVE-63) — X/Y scatter and bubble. Interprets the extracted
+ * series as columns: series[0] = X values, series[1] = Y values, and (bubble)
+ * series[2] = point size. Points are aligned by category index. Pure SVG
+ * <circle> nodes; the only text is the numeric-tick / point tooltip (escaped).
+ */
+function ScatterChart({ chart, extracted, plot, bubble }) {
+  const { series } = extracted
+  const xs = series[0]?.values || []
+  const ys = series[1]?.values || []
+  const sizes = bubble ? (series[2]?.values || []) : []
+  const n = Math.min(xs.length, ys.length)
+  if (n === 0 || series.length < 2) {
+    return <text x={plot.x + plot.w / 2} y={plot.y + plot.h / 2} textAnchor="middle" fontSize="11" fill={AXIS}>
+      Need X and Y columns
+    </text>
+  }
+
+  let xMin = Infinity, xMax = -Infinity, yMax = 0, sMax = 0
+  for (let i = 0; i < n; i++) {
+    if (xs[i] < xMin) xMin = xs[i]
+    if (xs[i] > xMax) xMax = xs[i]
+    if (ys[i] > yMax) yMax = ys[i]
+    if (bubble && sizes[i] > sMax) sMax = sizes[i]
+  }
+  if (!isFinite(xMin)) xMin = 0
+  if (!isFinite(xMax) || xMax === xMin) xMax = xMin + 1
+  const yTop = niceMax(yMax)
+  const xColor = CHART_PALETTE[0]
+
+  const gridLines = []
+  const ticks = 4
+  for (let t = 0; t <= ticks; t++) {
+    const frac = t / ticks
+    const y = plot.y + plot.h - plot.h * frac
+    gridLines.push(
+      <g key={`gy-${t}`}>
+        <line x1={plot.x} y1={y} x2={plot.x + plot.w} y2={y} stroke={GRID} strokeWidth="1" />
+        <text x={plot.x - 6} y={y + 3} textAnchor="end" fontSize="9" fill={AXIS}>{formatTick(yTop * frac)}</text>
+      </g>
+    )
+    const x = plot.x + plot.w * frac
+    gridLines.push(
+      <text key={`gx-${t}`} x={x} y={plot.y + plot.h + 12} textAnchor="middle" fontSize="9" fill={AXIS}>
+        {formatTick(xMin + (xMax - xMin) * frac)}
+      </text>
+    )
+  }
+
+  const points = []
+  for (let i = 0; i < n; i++) {
+    const px = plot.x + ((xs[i] - xMin) / (xMax - xMin)) * plot.w
+    const py = plot.y + plot.h - (yTop ? (ys[i] / yTop) * plot.h : 0)
+    const r = bubble && sMax ? 3 + (Math.abs(sizes[i]) / sMax) * 14 : 3.5
+    points.push(
+      <circle key={`sp-${i}`} cx={px} cy={py} r={r} fill={xColor} fillOpacity={bubble ? 0.5 : 0.85} stroke={xColor}>
+        <title>{`(${xs[i]}, ${ys[i]}${bubble ? `, ${sizes[i] ?? 0}` : ''})`}</title>
+      </circle>
+    )
+  }
+
+  return (
+    <g>
+      {gridLines}
+      <line x1={plot.x} y1={plot.y} x2={plot.x} y2={plot.y + plot.h} stroke={AXIS} strokeWidth="1" />
+      <line x1={plot.x} y1={plot.y + plot.h} x2={plot.x + plot.w} y2={plot.y + plot.h} stroke={AXIS} strokeWidth="1" />
+      {points}
     </g>
   )
 }

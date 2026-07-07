@@ -1,162 +1,96 @@
 /**
- * src/apps/sheets/PivotPanel.jsx
+ * src/apps/sheets/PivotPanel.jsx  (WAVE-63 — reactive pivot)
  *
- * Pivot table side panel.
- * Reads Fortune Sheet celldata from the active sheet, lets the user configure
- * rows / columns / values (with aggregation), then renders the pivot result
- * into a new sheet appended to `data`.
+ * Pivot table configuration side panel. Instead of inserting a STATIC snapshot
+ * into a new sheet (which went stale the moment a source cell changed), it now
+ * builds a PIVOT DESCRIPTOR (plain structured data) that the PivotLayer renders
+ * LIVE — re-aggregating from its source range whenever those cells change, like
+ * the WAVE-54 charts. The descriptor is validated/clamped through makePivot at
+ * every entry point (and at the CRDT ingress in SheetsEditor).
  *
  * Props:
  *   data        {Sheet[]}  — current workbook sheets
+ *   pivot       {object?}  — existing descriptor when editing (null = insert)
+ *   selectionRect {object?}— {r0,r1,c0,c1} to seed the source range
  *   onClose     {fn}       — close the panel
- *   onInsert    {fn(Sheet[])} — replace workbook data with pivot sheet appended
+ *   onInsert    {fn(Sheet[])} — commit workbook data with the pivot upserted
  */
-import { useState, useMemo } from 'react'
-import { X, RefreshCw } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { X, RefreshCw, Table2 } from 'lucide-react'
 import { Button, IconButton } from '../../components/ui'
+import {
+  makePivot, insertPivot, updatePivot, computePivot, pivotHeaders, pivotToSheet, PIVOT_AGGS,
+} from './pivot.js'
 
-// ── Aggregation functions ─────────────────────────────────────────────────────
-
-const AGG = {
-  SUM:    (vals) => vals.reduce((a, b) => a + (Number(b) || 0), 0),
-  AVG:    (vals) => vals.length ? vals.reduce((a, b) => a + (Number(b) || 0), 0) / vals.length : 0,
-  COUNT:  (vals) => vals.length,
-  COUNTA: (vals) => vals.filter((v) => v !== '' && v !== null && v !== undefined).length,
-  MAX:    (vals) => vals.length ? Math.max(...vals.map(Number)) : 0,
-  MIN:    (vals) => vals.length ? Math.min(...vals.map(Number)) : 0,
+// Turn a 0-indexed selection rect into an A1 range string.
+function colToLetter(idx) {
+  let s = ''
+  let n = idx + 1
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26) }
+  return s
+}
+function rectToA1(rect) {
+  if (!rect) return ''
+  const { r0, r1, c0, c1 } = rect
+  return `${colToLetter(c0)}${r0 + 1}:${colToLetter(c1)}${r1 + 1}`
 }
 
-// ── Extract a 2D array from Fortune Sheet celldata ────────────────────────────
-
-function sheetToTable(sheet) {
-  const cells = sheet.celldata || []
-  let maxR = 0, maxC = 0
-  for (const { r, c } of cells) {
-    if (r > maxR) maxR = r
-    if (c > maxC) maxC = c
-  }
-  const grid = Array.from({ length: maxR + 1 }, () => new Array(maxC + 1).fill(''))
-  for (const { r, c, v } of cells) {
-    if (!v) continue
-    grid[r][c] = v.v !== undefined ? v.v : (v.m ?? '')
-  }
-  return grid
-}
-
-// ── Build pivot table ─────────────────────────────────────────────────────────
-
-function buildPivot(table, rowField, colField, valueField, aggFn) {
-  if (!table || table.length < 2) return null
-  const headers = table[0]
-  const rowIdx   = headers.indexOf(rowField)
-  const colIdx   = headers.indexOf(colField)
-  const valIdx   = headers.indexOf(valueField)
-  if (rowIdx < 0 || valIdx < 0) return null
-
-  const rows   = new Set()
-  const cols   = new Set()
-  const groups = {}
-
-  for (let i = 1; i < table.length; i++) {
-    const row = table[i]
-    const rv  = String(row[rowIdx] ?? '')
-    const cv  = colIdx >= 0 ? String(row[colIdx] ?? '') : '__value__'
-    const vv  = row[valIdx]
-    rows.add(rv)
-    cols.add(cv)
-    const key = `${rv}||${cv}`
-    if (!groups[key]) groups[key] = []
-    groups[key].push(vv)
-  }
-
-  const rowArr = [...rows].sort()
-  const colArr = [...cols].sort()
-
-  // Header row
-  const result = [[rowField, ...colArr, 'Total']]
-
-  for (const rv of rowArr) {
-    const dataRow = [rv]
-    let rowTotal = 0
-    for (const cv of colArr) {
-      const vals = groups[`${rv}||${cv}`] || []
-      const agg  = AGG[aggFn] ? AGG[aggFn](vals) : 0
-      dataRow.push(agg)
-      rowTotal += Number(agg) || 0
-    }
-    dataRow.push(rowTotal)
-    result.push(dataRow)
-  }
-
-  // Grand total row
-  const totRow = ['Total']
-  let grandTotal = 0
-  for (const cv of colArr) {
-    let colTotal = 0
-    for (const rv of rowArr) {
-      const vals = groups[`${rv}||${cv}`] || []
-      colTotal += AGG[aggFn] ? Number(AGG[aggFn](vals)) || 0 : 0
-    }
-    totRow.push(colTotal)
-    grandTotal += colTotal
-  }
-  totRow.push(grandTotal)
-  result.push(totRow)
-
-  return result
-}
-
-// ── Table → Fortune Sheet celldata ────────────────────────────────────────────
-
-function tableToCelldata(table) {
-  const celldata = []
-  for (let r = 0; r < table.length; r++) {
-    for (let c = 0; c < table[r].length; c++) {
-      const val = table[r][c]
-      if (val === '' || val === null || val === undefined) continue
-      const isNum = typeof val === 'number'
-      celldata.push({
-        r, c,
-        v: {
-          v: val,
-          m: String(val),
-          ct: { fa: 'General', t: isNum ? 'n' : 's' },
-          ...(r === 0 || c === 0 ? { bl: 1 } : {}),
-        },
-      })
-    }
-  }
-  return celldata
-}
-
-// ── Component ─────────────────────────────────────────────────────────────────
-
-export default function PivotPanel({ data, onClose, onInsert }) {
+export default function PivotPanel({ data, pivot: editPivot, selectionRect, onClose, onInsert, onInsertStatic }) {
   const activeSheet = data?.[0]
-  const table       = useMemo(() => sheetToTable(activeSheet || {}), [activeSheet])
-  const headers     = table.length > 0 ? table[0].map(String).filter(Boolean) : []
+  const isEditing = !!editPivot
 
-  const [rowField,   setRowField]   = useState(headers[0] || '')
-  const [colField,   setColField]   = useState(headers[1] || '')
-  const [valueField, setValueField] = useState(headers[2] || headers[1] || '')
-  const [aggFn,      setAggFn]      = useState('SUM')
-  const [preview,    setPreview]    = useState(null)
+  // Seed the source range: existing pivot → its range; else the selection; else
+  // a bounded default over the used area of the sheet.
+  const initialRange = useMemo(() => {
+    if (editPivot?.range) return editPivot.range
+    const sel = rectToA1(selectionRect)
+    if (sel) return sel
+    let maxR = 0, maxC = 0
+    for (const { r, c } of activeSheet?.celldata || []) { if (r > maxR) maxR = r; if (c > maxC) maxC = c }
+    return maxR || maxC ? `A1:${colToLetter(maxC)}${maxR + 1}` : 'A1:C10'
+  }, [editPivot, selectionRect, activeSheet])
 
-  function handlePreview() {
-    const result = buildPivot(table, rowField, colField, valueField, aggFn)
-    setPreview(result)
+  const [range, setRange] = useState(initialRange)
+  const [rowField, setRowField] = useState(editPivot?.rowField || '')
+  const [colField, setColField] = useState(editPivot?.colField || '')
+  const [valueField, setValueField] = useState(editPivot?.valueField || '')
+  const [agg, setAgg] = useState(editPivot?.agg || 'SUM')
+  const [title, setTitle] = useState(editPivot?.title || '')
+
+  // Headers available for the current range (live).
+  const headers = useMemo(
+    () => pivotHeaders(makePivot({ range }), activeSheet || {}),
+    [range, activeSheet]
+  )
+
+  // Default field selections when headers first resolve (insert flow only).
+  useEffect(() => {
+    if (isEditing || headers.length === 0) return
+    setRowField((v) => v || headers[0] || '')
+    setValueField((v) => v || headers[2] || headers[1] || '')
+  }, [headers, isEditing])
+
+  const draft = useMemo(
+    () => makePivot({ id: editPivot?.id, range, rowField, colField, valueField, agg, title }),
+    [editPivot, range, rowField, colField, valueField, agg, title]
+  )
+  const preview = useMemo(() => computePivot(draft, activeSheet || {}), [draft, activeSheet])
+
+  function handleCommit() {
+    const next = isEditing
+      ? updatePivot(data, editPivot.id, { range, rowField, colField, valueField, agg, title })
+      : insertPivot(data, { range, rowField, colField, valueField, agg, title })
+    onInsert(next)
+    onClose()
   }
 
-  function handleInsert() {
-    const result = buildPivot(table, rowField, colField, valueField, aggFn)
-    if (!result) return
-    const celldata = tableToCelldata(result)
-    const pivotSheet = {
-      name: `Pivot_${rowField}_${valueField}`.slice(0, 31),
-      celldata,
-      config: {},
-    }
-    onInsert([...data, pivotSheet])
+  // "Insert as static sheet" — materialise the CURRENT result into a real sheet
+  // (celldata) so it exports to XLSX / is formula-referenceable. Snapshot, not
+  // reactive; distinct from the live pivot above.
+  function handleInsertStatic() {
+    if (!onInsertStatic) return
+    const sheet = pivotToSheet(draft, activeSheet || {}, title)
+    if (sheet) onInsertStatic([...data, sheet])
     onClose()
   }
 
@@ -164,22 +98,27 @@ export default function PivotPanel({ data, onClose, onInsert }) {
 
   return (
     <div className="flex flex-col w-full sm:w-72 flex-shrink-0 h-full border-l border-line bg-paper overflow-y-auto">
-      {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-line">
-        <span className="text-xs font-semibold text-ink tracking-tightish">Pivot table</span>
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-ink tracking-tightish">
+          <Table2 size={13} /> {isEditing ? 'Edit pivot' : 'Pivot table'}
+        </span>
         <IconButton size="sm" title="Close" onClick={onClose}><X size={13} /></IconButton>
       </div>
 
       <div className="flex-1 px-3 py-3 space-y-4 text-xs">
-        {headers.length === 0 && (
-          <p className="text-ink-faint">No data in first sheet. Add headers and rows first.</p>
-        )}
+        <div className="space-y-1">
+          <label className="block text-ink-muted font-medium">Source range</label>
+          <input value={range} onChange={(e) => setRange(e.target.value)} className={sel} placeholder="e.g. A1:D100" />
+        </div>
 
-        {headers.length > 0 && (
+        {headers.length === 0 ? (
+          <p className="text-ink-faint">No headers found in that range. The first row of the range should hold column names.</p>
+        ) : (
           <>
             <div className="space-y-1">
               <label className="block text-ink-muted font-medium">Row field</label>
               <select value={rowField} onChange={(e) => setRowField(e.target.value)} className={sel}>
+                <option value="">— choose —</option>
                 {headers.map((h) => <option key={h} value={h}>{h}</option>)}
               </select>
             </div>
@@ -195,28 +134,39 @@ export default function PivotPanel({ data, onClose, onInsert }) {
             <div className="space-y-1">
               <label className="block text-ink-muted font-medium">Value field</label>
               <select value={valueField} onChange={(e) => setValueField(e.target.value)} className={sel}>
+                <option value="">— choose —</option>
                 {headers.map((h) => <option key={h} value={h}>{h}</option>)}
               </select>
             </div>
 
             <div className="space-y-1">
               <label className="block text-ink-muted font-medium">Aggregation</label>
-              <select value={aggFn} onChange={(e) => setAggFn(e.target.value)} className={sel}>
-                {Object.keys(AGG).map((k) => <option key={k} value={k}>{k}</option>)}
+              <select value={agg} onChange={(e) => setAgg(e.target.value)} className={sel}>
+                {PIVOT_AGGS.map((k) => <option key={k} value={k}>{k}</option>)}
               </select>
             </div>
 
-            <div className="flex gap-2">
-              <Button variant="secondary" size="sm" onClick={handlePreview} className="flex-1">
-                <RefreshCw size={11} className="mr-1" /> Preview
-              </Button>
-              <Button variant="primary" size="sm" onClick={handleInsert} className="flex-1">
-                Insert
-              </Button>
+            <div className="space-y-1">
+              <label className="block text-ink-muted font-medium">Title (optional)</label>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} className={sel} placeholder="Pivot title" />
             </div>
 
-            {preview && (
+            <div className="flex flex-col gap-1.5">
+              <Button variant="primary" size="sm" onClick={handleCommit} className="w-full" disabled={!preview}>
+                {isEditing ? 'Update pivot' : 'Insert live pivot'}
+              </Button>
+              {!isEditing && onInsertStatic && (
+                <Button variant="secondary" size="sm" onClick={handleInsertStatic} className="w-full" disabled={!preview}>
+                  Insert as static sheet (exportable)
+                </Button>
+              )}
+            </div>
+
+            {preview ? (
               <div className="overflow-auto border border-line rounded-md">
+                <div className="flex items-center gap-1 px-2 py-1 text-[10px] text-ink-faint border-b border-line">
+                  <RefreshCw size={9} /> Live preview — updates when source cells change
+                </div>
                 <table className="text-xs w-full border-collapse">
                   <thead>
                     <tr>
@@ -240,6 +190,8 @@ export default function PivotPanel({ data, onClose, onInsert }) {
                   </tbody>
                 </table>
               </div>
+            ) : (
+              <p className="text-ink-faint text-[11px]">Pick a Row field and a Value field that match header names to preview.</p>
             )}
           </>
         )}

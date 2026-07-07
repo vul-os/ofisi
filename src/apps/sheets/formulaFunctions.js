@@ -1,0 +1,355 @@
+/**
+ * src/apps/sheets/formulaFunctions.js  (WAVE-63 — comprehensive formulas)
+ *
+ * High-value spreadsheet functions that @formulajs/formulajs (the engine
+ * Fortune-Sheet's formula-parser falls back to) does NOT ship: XLOOKUP,
+ * TEXTJOIN, IFS, SWITCH, LET, XMATCH, and the scalar-safe subset of the dynamic
+ * array family (FILTER / SORT / UNIQUE).
+ *
+ * ── Integration seam ────────────────────────────────────────────────────────
+ * Fortune-Sheet evaluates a formula through a single `@fortune-sheet/formula
+ * -parser` Parser instance held on `ctx.formulaCache.parser`. When a function is
+ * called the parser resolves it in this order (see parser `_callFunction`):
+ *   1. `this.getFunction(name)`  — per-instance custom functions
+ *   2. `callFunction` listeners  — event override
+ *   3. `evaluateByOperator(name)` — falls through to `formulajs[name]`
+ * Unknown names throw `#NAME?`.
+ *
+ * The core creates its Parser internally and never exposes the instance to the
+ * app, so we register our functions by wrapping `Parser.prototype.getFunction`
+ * ONCE (idempotent, install-guarded). Every Parser the core constructs then
+ * resolves our names before falling through to the built-ins — so the functions
+ * evaluate LIVE and recalculate on dependency change exactly like a native
+ * function, with zero fork of the library. Built-ins are untouched (we only
+ * answer names we own; everything else defers to the original resolver).
+ *
+ * ── Argument shape (verified at runtime) ────────────────────────────────────
+ * The parser passes each function a single `params` array. A cell reference
+ * arrives as a scalar; a RANGE arrives as a 2-D array `[[..row..], ..]`; a
+ * literal arrives as-is. Errors bubble as strings like '#N/A'. We mirror
+ * formulajs conventions so mixed use composes cleanly.
+ *
+ * ── SECURITY ────────────────────────────────────────────────────────────────
+ * Nothing here evals code, builds HTML, fetches a URL, or touches the DOM. Every
+ * function is a pure data transform over already-parsed argument values. Text
+ * results are plain strings returned into a cell — they are React-escaped
+ * wherever rendered and pass the existing WAVE-14 sanitiser / CSV-injection
+ * guard on export. There is no new sink. LET does NOT create a general binding
+ * language — it only substitutes name→value pairs positionally (no code path),
+ * so it cannot smuggle execution.
+ */
+
+// ── low-level value helpers ──────────────────────────────────────────────────
+
+/** Standard spreadsheet error strings (mirror formula-parser / formulajs). */
+export const ERR = {
+  NA: '#N/A',
+  VALUE: '#VALUE!',
+  NAME: '#NAME?',
+  NUM: '#NUM!',
+  REF: '#REF!',
+  DIV0: '#DIV/0!',
+}
+const ERR_SET = new Set(Object.values(ERR))
+
+/** Is v one of the spreadsheet error sentinels? (so we propagate, not swallow) */
+export function isErr(v) {
+  return typeof v === 'string' && ERR_SET.has(v)
+}
+
+/**
+ * flatten — turn any argument (scalar, 1-D, or 2-D range array) into a flat
+ * list of scalar values, row-major. Ranges from the parser are `[[..],[..]]`.
+ */
+export function flatten(arg, out = []) {
+  if (Array.isArray(arg)) {
+    for (const v of arg) flatten(v, out)
+  } else {
+    out.push(arg)
+  }
+  return out
+}
+
+/** Coerce to a boolean the spreadsheet way (numbers: 0=false; strings TRUE/FALSE). */
+export function toBool(v) {
+  if (typeof v === 'boolean') return v
+  if (typeof v === 'number') return v !== 0
+  if (typeof v === 'string') {
+    const s = v.trim().toUpperCase()
+    if (s === 'TRUE') return true
+    if (s === 'FALSE' || s === '') return false
+    const n = Number(s)
+    return isFinite(n) ? n !== 0 : true
+  }
+  return !!v
+}
+
+/** Loose scalar equality used by lookup/match (number-aware, case-insensitive). */
+export function looseEqual(a, b) {
+  if (a === b) return true
+  const an = Number(a), bn = Number(b)
+  if (isFinite(an) && isFinite(bn) && String(a).trim() !== '' && String(b).trim() !== '') {
+    return an === bn
+  }
+  if (a == null || b == null) return false
+  return String(a).toLowerCase() === String(b).toLowerCase()
+}
+
+/** Numeric coercion; returns NaN when not a finite number. */
+function num(v) {
+  if (typeof v === 'number') return v
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v)
+    return isFinite(n) ? n : NaN
+  }
+  return NaN
+}
+
+/** Compare two scalars for SORT/XMATCH (numbers before strings; case-insensitive). */
+export function compareScalar(a, b) {
+  const an = num(a), bn = num(b)
+  const aNum = !Number.isNaN(an), bNum = !Number.isNaN(bn)
+  if (aNum && bNum) return an - bn
+  if (aNum) return -1
+  if (bNum) return 1
+  return String(a).toLowerCase() < String(b).toLowerCase() ? -1
+    : String(a).toLowerCase() > String(b).toLowerCase() ? 1 : 0
+}
+
+// ── TEXTJOIN(delimiter, ignore_empty, ...text) ──────────────────────────────
+// Joins all text arguments (and ranges) with a delimiter, optionally skipping
+// empty values. Excel/Sheets semantics.
+export function TEXTJOIN(params) {
+  if (!Array.isArray(params) || params.length < 2) return ERR.NA
+  const [delimiter, ignoreEmptyRaw, ...rest] = params
+  const delim = delimiter == null ? '' : String(delimiter)
+  const ignoreEmpty = toBool(ignoreEmptyRaw)
+  const vals = flatten(rest)
+  const out = []
+  for (const v of vals) {
+    if (isErr(v)) return v
+    const s = v == null ? '' : String(v)
+    if (ignoreEmpty && s === '') continue
+    out.push(s)
+  }
+  return out.join(delim)
+}
+
+// ── IFS(cond1, val1, cond2, val2, ...) ──────────────────────────────────────
+// Returns the value for the first TRUE condition. #N/A if none match.
+export function IFS(params) {
+  if (!Array.isArray(params) || params.length < 2) return ERR.NA
+  for (let i = 0; i + 1 < params.length; i += 2) {
+    const cond = params[i]
+    if (isErr(cond)) return cond
+    if (toBool(cond)) return params[i + 1]
+  }
+  return ERR.NA
+}
+
+// ── SWITCH(expr, case1, val1, [case2, val2, ...], [default]) ────────────────
+// Matches expr against each case; returns matching value or the optional
+// trailing default. #N/A if no match and no default.
+export function SWITCH(params) {
+  if (!Array.isArray(params) || params.length < 3) return ERR.NA
+  const expr = params[0]
+  if (isErr(expr)) return expr
+  const rest = params.slice(1)
+  let i = 0
+  for (; i + 1 < rest.length; i += 2) {
+    if (looseEqual(expr, rest[i])) return rest[i + 1]
+  }
+  // A trailing lone argument is the default.
+  if (i < rest.length) return rest[i]
+  return ERR.NA
+}
+
+// ── XLOOKUP(lookup, lookup_array, return_array, [if_not_found], [match_mode]) ─
+// A modern lookup: searches lookup_array for lookup and returns the aligned
+// value from return_array. match_mode: 0 exact (default), -1 exact-or-next
+// -smaller, 1 exact-or-next-larger. Falls back to if_not_found (or #N/A).
+export function XLOOKUP(params) {
+  if (!Array.isArray(params) || params.length < 3) return ERR.NA
+  const [lookup, lookupArrRaw, returnArrRaw, ifNotFound, matchModeRaw] = params
+  if (isErr(lookup)) return lookup
+  const lookupArr = flatten(lookupArrRaw)
+  const returnArr = flatten(returnArrRaw)
+  const matchMode = Number(matchModeRaw) || 0
+
+  // Exact match first (always).
+  for (let i = 0; i < lookupArr.length; i++) {
+    if (looseEqual(lookup, lookupArr[i])) {
+      return i < returnArr.length ? returnArr[i] : ERR.REF
+    }
+  }
+  // Approximate modes over numeric keys.
+  if (matchMode === -1 || matchMode === 1) {
+    const target = num(lookup)
+    if (!Number.isNaN(target)) {
+      let best = -1, bestDelta = Infinity
+      for (let i = 0; i < lookupArr.length; i++) {
+        const k = num(lookupArr[i])
+        if (Number.isNaN(k)) continue
+        if (matchMode === -1 && k <= target) {
+          const d = target - k
+          if (d < bestDelta) { bestDelta = d; best = i }
+        } else if (matchMode === 1 && k >= target) {
+          const d = k - target
+          if (d < bestDelta) { bestDelta = d; best = i }
+        }
+      }
+      if (best >= 0) return best < returnArr.length ? returnArr[best] : ERR.REF
+    }
+  }
+  return ifNotFound !== undefined ? ifNotFound : ERR.NA
+}
+
+// ── XMATCH(lookup, lookup_array, [match_mode]) ──────────────────────────────
+// Returns the 1-based position of lookup within lookup_array. match_mode as
+// XLOOKUP. #N/A when not found.
+export function XMATCH(params) {
+  if (!Array.isArray(params) || params.length < 2) return ERR.NA
+  const [lookup, lookupArrRaw, matchModeRaw] = params
+  if (isErr(lookup)) return lookup
+  const lookupArr = flatten(lookupArrRaw)
+  const matchMode = Number(matchModeRaw) || 0
+  for (let i = 0; i < lookupArr.length; i++) {
+    if (looseEqual(lookup, lookupArr[i])) return i + 1
+  }
+  if (matchMode === -1 || matchMode === 1) {
+    const target = num(lookup)
+    if (!Number.isNaN(target)) {
+      let best = -1, bestDelta = Infinity
+      for (let i = 0; i < lookupArr.length; i++) {
+        const k = num(lookupArr[i])
+        if (Number.isNaN(k)) continue
+        if (matchMode === -1 && k <= target && target - k < bestDelta) { bestDelta = target - k; best = i }
+        else if (matchMode === 1 && k >= target && k - target < bestDelta) { bestDelta = k - target; best = i }
+      }
+      if (best >= 0) return best + 1
+    }
+  }
+  return ERR.NA
+}
+
+// ── LET — NOT registered (deferred) ─────────────────────────────────────────
+// Excel LET binds names to values then returns a calculation referencing them.
+// This is NOT expressible on Fortune-Sheet's parser: the grammar EAGERLY
+// evaluates every argument before a function runs and has no lazy-binding hook,
+// so the bare name arguments (`x` in `LET(x, 5, x)`) are resolved as unknown
+// variables and throw #NAME? BEFORE our function is ever called. Implementing it
+// would require forking the parser grammar. LET is therefore intentionally
+// omitted from CUSTOM_FUNCTIONS (it cleanly reports #NAME? like any unknown
+// function) and listed in the deferred set. The pure helper below is kept only
+// as documentation of the intended semantics; it is not wired to the engine.
+export function LET(params) {
+  if (!Array.isArray(params) || params.length < 3) return ERR.NA
+  const calc = params[params.length - 1]
+  const bindings = new Map()
+  for (let i = 0; i + 1 < params.length - 1; i += 2) {
+    const name = params[i]
+    if (typeof name === 'string') bindings.set(name, params[i + 1])
+  }
+  if (typeof calc === 'string' && bindings.has(calc)) return bindings.get(calc)
+  return calc
+}
+
+// ── FILTER(array, include, [if_empty]) ──────────────────────────────────────
+// Dynamic-array FILTER. Fortune-Sheet has no spill, so we return a scalar-safe
+// result: a single kept value returns as a scalar; multiple kept values return
+// a comma-joined string (visible, non-crashing) — honest about the no-spill
+// limitation. `include` is a same-length mask (range of truthy/0).
+export function FILTER(params) {
+  if (!Array.isArray(params) || params.length < 2) return ERR.NA
+  const [arrayRaw, includeRaw, ifEmpty] = params
+  const arr = flatten(arrayRaw)
+  const mask = flatten(includeRaw)
+  const kept = []
+  for (let i = 0; i < arr.length; i++) {
+    if (isErr(arr[i])) return arr[i]
+    if (i < mask.length && toBool(mask[i])) kept.push(arr[i])
+  }
+  if (kept.length === 0) return ifEmpty !== undefined ? ifEmpty : ERR.NA
+  if (kept.length === 1) return kept[0]
+  return kept.join(', ')
+}
+
+// ── SORT(array, [sort_index], [sort_order]) ─────────────────────────────────
+// Scalar-safe SORT over a single flattened column/row. sort_order 1 asc
+// (default) / -1 desc. Returns a scalar when one value, else a comma-joined
+// string (no spill). sort_index is accepted for signature parity but a
+// flattened 1-D list has a single column.
+export function SORT(params) {
+  if (!Array.isArray(params) || params.length < 1) return ERR.NA
+  const [arrayRaw, , sortOrderRaw] = params
+  const arr = flatten(arrayRaw).filter((v) => v !== '' && v != null)
+  for (const v of arr) if (isErr(v)) return v
+  const order = Number(sortOrderRaw) === -1 ? -1 : 1
+  const sorted = [...arr].sort((a, b) => compareScalar(a, b) * order)
+  if (sorted.length === 0) return ERR.NA
+  if (sorted.length === 1) return sorted[0]
+  return sorted.join(', ')
+}
+
+// ── UNIQUE(array) ───────────────────────────────────────────────────────────
+// Scalar-safe UNIQUE. formulajs ships a UNIQUE but it treats its varargs
+// differently (each arg a value); ours accepts a range and de-dupes preserving
+// first-seen order. Single value → scalar; else comma-joined (no spill).
+export function UNIQUE(params) {
+  if (!Array.isArray(params) || params.length < 1) return ERR.NA
+  const arr = flatten(params[0]).filter((v) => v !== '' && v != null)
+  const seen = new Set()
+  const out = []
+  for (const v of arr) {
+    if (isErr(v)) return v
+    const key = typeof v === 'string' ? v.toLowerCase() : String(v)
+    if (!seen.has(key)) { seen.add(key); out.push(v) }
+  }
+  if (out.length === 0) return ERR.NA
+  if (out.length === 1) return out[0]
+  return out.join(', ')
+}
+
+// ── Registry ────────────────────────────────────────────────────────────────
+// Names we own. Each is `(params:Array) => value`. The parser calls with a
+// single params array (see argument-shape note above).
+// NOTE: LET is intentionally absent — Fortune-Sheet's eager grammar makes it
+// non-functional at the engine level (see the LET comment above). Registering it
+// would falsely advertise support while still returning #NAME?.
+export const CUSTOM_FUNCTIONS = {
+  TEXTJOIN,
+  IFS,
+  SWITCH,
+  XLOOKUP,
+  XMATCH,
+  FILTER,
+  SORT,
+  UNIQUE,
+}
+
+/**
+ * installCustomFormulas — idempotently wrap the formula-parser Parser so every
+ * instance the core constructs resolves our custom functions. Safe to call many
+ * times (guarded). Accepts the Parser class so the caller controls the exact
+ * module instance (avoids duplicate-module surprises under bundling/tests).
+ *
+ * We wrap `getFunction` (checked first in `_callFunction`) so we NEVER shadow a
+ * name we don't own: if the original resolver already has the function, we defer
+ * to it; only otherwise do we answer for names in CUSTOM_FUNCTIONS. Built-in
+ * formulajs functions still resolve through the untouched fall-through path.
+ */
+export function installCustomFormulas(ParserClass) {
+  if (!ParserClass || !ParserClass.prototype) return false
+  const proto = ParserClass.prototype
+  if (proto.__vulosCustomFormulasInstalled) return true
+  const original = proto.getFunction
+  proto.getFunction = function patchedGetFunction(name) {
+    const own = original ? original.call(this, name) : undefined
+    if (own) return own
+    const up = typeof name === 'string' ? name.toUpperCase() : ''
+    const fn = CUSTOM_FUNCTIONS[up]
+    return fn || undefined
+  }
+  proto.__vulosCustomFormulasInstalled = true
+  return true
+}
