@@ -9,8 +9,18 @@
  *   - TreeOpSetText — update slide content (LWW on value)
  *   - TreeOpDelete  — tombstone a slide
  *
- * Slide content is stored as a JSON-encoded value string per node
- * (matching how SlidesEditor represents each slide as an object).
+ * Slide content is stored per node. Historically it was one JSON-encoded value
+ * string mutated via a whole-slide LWW (TreeOpSetText). That clobbered
+ * concurrent edits to DIFFERENT objects on the SAME slide (last-writer-wins on
+ * the entire slide → one peer's move/edit lost). The node now carries an
+ * OBJECT-GRANULAR slide state (per-object LWW + per-scalar LWW) so two peers
+ * editing different objects converge to the union without loss:
+ *   - TreeOpSetSlide — carries only the CHANGED objects (each with its own
+ *     opId) and CHANGED scalar props (background/layout/…, each with its own
+ *     opId); merge reconciles at object/scalar granularity, per-entry
+ *     latest-wins. See TreeCRDT._slideState / applySetSlide below.
+ * TreeOpSetText is still accepted for back-compat (old snapshots / old peers):
+ * it folds in as a whole-slide LWW baseline that per-object ops then refine.
  *
  * Usage
  * -----
@@ -74,13 +84,201 @@ function opIdLess(a, b) {
 // TreeOp kinds (matches backend/crdt/tree.go)
 // ---------------------------------------------------------------------------
 
-const TREE_OP_INSERT   = 1
-const TREE_OP_MOVE     = 2
-const TREE_OP_SET_TEXT = 3
-const TREE_OP_DELETE   = 4
+const TREE_OP_INSERT    = 1
+const TREE_OP_MOVE      = 2
+const TREE_OP_SET_TEXT  = 3
+const TREE_OP_DELETE    = 4
+// P1 — object-granular slide edit. Carries only the changed objects + scalars,
+// each with its OWN opId, merged per-entry (latest-wins). This is what lets two
+// peers editing DIFFERENT objects on one slide converge to the union.
+const TREE_OP_SET_SLIDE = 5
 
 // The implicit root has this nodeId.
 const ROOT_ID = ''
+
+// ---------------------------------------------------------------------------
+// Slide value <-> object-granular state
+// ---------------------------------------------------------------------------
+//
+// A slide is { objects: [...], ...scalars } (title, content, background,
+// master, transition, animations, notes, …). The CRDT stores it as:
+//   objects : Map<objectId, { opId, obj }>          // per-object LWW
+//   objTomb : Map<objectId, opId>                    // per-object delete LWW
+//   scalars : Map<scalarKey, { opId, val }>          // per-scalar LWW
+// so concurrent edits to DIFFERENT objects/scalars both survive.
+
+// Keys that live at the top level of a slide but are NOT the objects[] array.
+// Everything except `objects` is a scalar prop with its own LWW stamp.
+const OBJECTS_KEY = 'objects'
+
+/** Deterministic JSON for equality checks (stable key order). */
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v)
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']'
+  const keys = Object.keys(v).sort()
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}'
+}
+
+function objectId(o, i) {
+  return o && typeof o === 'object' && typeof o.id === 'string' && o.id ? o.id : `_anon_${i}`
+}
+
+/**
+ * A per-node structured slide state. Reconstructs to the plain slide object and
+ * merges other states / ops per-object and per-scalar (latest opId wins).
+ */
+class SlideState {
+  constructor() {
+    this.objects = new Map()  // id → { opId, obj }
+    this.objTomb = new Map()  // id → opId (delete stamp)
+    this.scalars = new Map()  // key → { opId, val }
+  }
+
+  /** Apply a whole-slide LWW baseline (legacy SET_TEXT). Every field is stamped
+   * with the SAME opId; per-object/per-scalar ops with a higher opId refine it. */
+  applyWhole(opId, slide) {
+    if (!slide || typeof slide !== 'object') return
+    for (const [key, val] of Object.entries(slide)) {
+      if (key === OBJECTS_KEY) continue
+      this._setScalar(key, opId, val)
+    }
+    if (Array.isArray(slide.objects)) {
+      slide.objects.forEach((o, i) => this._setObject(objectId(o, i), opId, o))
+    }
+  }
+
+  applySetSlide(op) {
+    if (Array.isArray(op.objects)) {
+      for (const e of op.objects) {
+        if (!e || typeof e.id !== 'string') continue
+        if (e.obj === null || e.obj === undefined) this._tombObject(e.id, e.opId)
+        else this._setObject(e.id, e.opId, e.obj)
+      }
+    }
+    if (Array.isArray(op.scalars)) {
+      for (const e of op.scalars) {
+        if (!e || typeof e.key !== 'string') continue
+        this._setScalar(e.key, e.opId, e.val)
+      }
+    }
+  }
+
+  _setObject(id, opId, obj) {
+    const cur = this.objects.get(id)
+    if (cur && !opIdLess(cur.opId, opId)) return   // keep newer
+    this.objects.set(id, { opId, obj })
+    // A set with a strictly-newer opId revives a tombstoned object.
+    const t = this.objTomb.get(id)
+    if (t && opIdLess(t, opId)) this.objTomb.delete(id)
+  }
+
+  _tombObject(id, opId) {
+    const cur = this.objTomb.get(id)
+    if (cur && !opIdLess(cur, opId)) return
+    this.objTomb.set(id, opId)
+  }
+
+  _setScalar(key, opId, val) {
+    const cur = this.scalars.get(key)
+    if (cur && !opIdLess(cur.opId, opId)) return
+    this.scalars.set(key, { opId, val })
+  }
+
+  /** True if there is any content (used to distinguish an empty node). */
+  hasContent() {
+    return this.scalars.size > 0 || this.objects.size > 0
+  }
+
+  /** Reconstruct the plain slide object. Objects that are tombstoned (with a
+   * stamp >= their last set) are omitted. Objects[] is sorted by (z, id) so the
+   * reconstruction is deterministic across replicas. */
+  toSlide() {
+    const slide = {}
+    for (const [key, { val }] of this.scalars) slide[key] = val
+    const live = []
+    for (const [id, { obj }] of this.objects) {
+      const t = this.objTomb.get(id)
+      const setStamp = this.objects.get(id).opId
+      if (t && !opIdLess(t, setStamp)) continue   // tombstone wins → dropped
+      live.push(obj)
+    }
+    live.sort((a, b) => {
+      const za = (a && typeof a.z === 'number') ? a.z : 0
+      const zb = (b && typeof b.z === 'number') ? b.z : 0
+      if (za !== zb) return za - zb
+      const ia = objectId(a, 0), ib = objectId(b, 0)
+      return ia < ib ? -1 : ia > ib ? 1 : 0
+    })
+    if (this.objects.size > 0) slide[OBJECTS_KEY] = live
+    return slide
+  }
+
+  clone() {
+    const s = new SlideState()
+    s.objects = new Map(this.objects)
+    s.objTomb = new Map(this.objTomb)
+    s.scalars = new Map(this.scalars)
+    return s
+  }
+
+  snapshot() {
+    return {
+      objects: [...this.objects.entries()].map(([id, { opId, obj }]) => ({ id, opId, obj })),
+      objTomb: [...this.objTomb.entries()].map(([id, opId]) => ({ id, opId })),
+      scalars: [...this.scalars.entries()].map(([key, { opId, val }]) => ({ key, opId, val })),
+    }
+  }
+
+  static restore(snap) {
+    const s = new SlideState()
+    if (!snap || typeof snap !== 'object') return s
+    for (const e of snap.objects || []) if (e && typeof e.id === 'string') s.objects.set(e.id, { opId: e.opId, obj: e.obj })
+    for (const e of snap.objTomb || []) if (e && typeof e.id === 'string') s.objTomb.set(e.id, e.opId)
+    for (const e of snap.scalars || []) if (e && typeof e.key === 'string') s.scalars.set(e.key, { opId: e.opId, val: e.val })
+    return s
+  }
+
+  /** Max opId carried anywhere in this state (to seed the Lamport clock). */
+  maxOpId() {
+    let mx = ''
+    const consider = (id) => { if (id && (mx === '' || opIdLess(mx, id))) mx = id }
+    for (const { opId } of this.objects.values()) consider(opId)
+    for (const opId of this.objTomb.values()) consider(opId)
+    for (const { opId } of this.scalars.values()) consider(opId)
+    return mx
+  }
+}
+
+/**
+ * diffSlide — compare a prior reconstructed slide to the next slide and return
+ * the set of CHANGED objects (added/edited/deleted) + CHANGED scalars, each to
+ * be stamped with a fresh opId by the caller. Unchanged entries are omitted so
+ * a local edit to ONE object only broadcasts that object — never clobbering a
+ * concurrent peer edit to another object on the same slide.
+ */
+function diffSlide(prev, next) {
+  const prevObjs = new Map((Array.isArray(prev?.objects) ? prev.objects : []).map((o, i) => [objectId(o, i), o]))
+  const nextObjs = new Map((Array.isArray(next?.objects) ? next.objects : []).map((o, i) => [objectId(o, i), o]))
+
+  const objects = []
+  for (const [id, o] of nextObjs) {
+    const before = prevObjs.get(id)
+    if (!before || stableStringify(before) !== stableStringify(o)) objects.push({ id, obj: o })
+  }
+  for (const [id] of prevObjs) {
+    if (!nextObjs.has(id)) objects.push({ id, obj: null })   // deleted
+  }
+
+  const scalars = []
+  const keys = new Set([...Object.keys(prev || {}), ...Object.keys(next || {})])
+  keys.delete(OBJECTS_KEY)
+  for (const key of keys) {
+    const bv = prev ? prev[key] : undefined
+    const nv = next ? next[key] : undefined
+    if (stableStringify(bv) !== stableStringify(nv)) scalars.push({ key, val: nv })
+  }
+  return { objects, scalars }
+}
 
 // ---------------------------------------------------------------------------
 // TreeCRDT — in-memory LWW ordered tree
@@ -88,8 +286,17 @@ const ROOT_ID = ''
 
 class TreeCRDT {
   constructor() {
-    // nodeId (string) → { id, parent, ordKey, ordId, value, valueId, deleted }
+    // nodeId (string) → { id, parent, ordKey, ordId, slide:SlideState, deleted }
+    // (`slide` is the object-granular P1 state; the legacy value/valueId are
+    // folded INTO it via applyWhole so old ops/snapshots still converge.)
     this._nodes = new Map()
+  }
+
+  _newNode(over = {}) {
+    return {
+      id: '', parent: ROOT_ID, ordKey: '', ordId: '',
+      slide: new SlideState(), deleted: false, ...over,
+    }
   }
 
   apply(op) {
@@ -105,20 +312,18 @@ class TreeCRDT {
           }
           return
         }
-        this._nodes.set(op.id, {
+        this._nodes.set(op.id, this._newNode({
           id: op.id, parent: op.parent, ordKey: op.ordKey, ordId: op.id,
-          value: '', valueId: '', deleted: false,
-        })
+        }))
         break
       }
       case TREE_OP_MOVE: {
         let n = this._nodes.get(op.target)
         if (!n) {
           // Buffer node for late-arriving Insert.
-          this._nodes.set(op.target, {
+          this._nodes.set(op.target, this._newNode({
             id: op.target, parent: op.parent, ordKey: op.ordKey, ordId: op.id,
-            value: '', valueId: '', deleted: false,
-          })
+          }))
           return
         }
         // LWW: keep current if its ordId >= op.id.
@@ -136,23 +341,33 @@ class TreeCRDT {
         break
       }
       case TREE_OP_SET_TEXT: {
+        // Legacy whole-slide LWW (old peers / old snapshots). Fold the whole
+        // slide into the object-granular state stamped with op.id; per-object
+        // and per-scalar SET_SLIDE ops with a higher opId then refine it.
         let n = this._nodes.get(op.target)
         if (!n) {
-          n = { id: op.target, parent: ROOT_ID, ordKey: '', ordId: '', value: '', valueId: '', deleted: false }
+          n = this._newNode({ id: op.target })
           this._nodes.set(op.target, n)
         }
-        if (!n.valueId || opIdLess(n.valueId, op.id)) {
-          n.value   = op.value
-          n.valueId = op.id
+        let slide
+        try { slide = op.value ? JSON.parse(op.value) : {} } catch { slide = {} }
+        n.slide.applyWhole(op.id, slide)
+        break
+      }
+      case TREE_OP_SET_SLIDE: {
+        // P1 object-granular edit: merge changed objects/scalars per-entry LWW.
+        let n = this._nodes.get(op.target)
+        if (!n) {
+          n = this._newNode({ id: op.target })
+          this._nodes.set(op.target, n)
         }
+        n.slide.applySetSlide(op)
         break
       }
       case TREE_OP_DELETE: {
         let n = this._nodes.get(op.target)
         if (!n) {
-          this._nodes.set(op.target, {
-            id: op.target, parent: ROOT_ID, ordKey: '', ordId: '', value: '', valueId: '', deleted: true,
-          })
+          this._nodes.set(op.target, this._newNode({ id: op.target, deleted: true }))
           return
         }
         n.deleted = true
@@ -202,17 +417,54 @@ class TreeCRDT {
     }
   }
 
+  /** Return the reconstructed plain slide object for a node (or undefined). */
   value(id) {
     const n = this._nodes.get(id)
     if (!n || n.deleted) return undefined
-    return n.value
+    return n.slide.toSlide()
+  }
+
+  /** The raw SlideState for a node (used by TreeSession.setSlide diffing). */
+  slideState(id) {
+    const n = this._nodes.get(id)
+    return n ? n.slide : null
+  }
+
+  /**
+   * Merge a snapshot's per-object/per-scalar slide state into a node. This is a
+   * UNION merge (per-entry LWW) — NOT a replace — so a cold-joining peer that
+   * already holds its own concurrent object edits keeps them: the incoming state
+   * only wins for entries whose opId is strictly newer. `n.slide` (from a new
+   * peer's snapshot) is preferred; a legacy `value` is folded in via applyWhole.
+   */
+  mergeSlideSnapshot(id, snapNode) {
+    let n = this._nodes.get(id)
+    if (!n) { n = this._newNode({ id }); this._nodes.set(id, n) }
+    if (snapNode.slide) {
+      const incoming = SlideState.restore(snapNode.slide)
+      for (const [oid, { opId, obj }] of incoming.objects) n.slide._setObject(oid, opId, obj)
+      for (const [oid, opId] of incoming.objTomb) n.slide._tombObject(oid, opId)
+      for (const [key, { opId, val }] of incoming.scalars) n.slide._setScalar(key, opId, val)
+    } else if (snapNode.value !== undefined && snapNode.value !== '') {
+      let slide
+      try { slide = JSON.parse(snapNode.value) } catch { slide = {} }
+      n.slide.applyWhole(snapNode.valueId || snapNode.ordId || snapNode.id, slide)
+    }
   }
 
   snapshot() {
     const out = []
     for (const [, n] of this._nodes) {
-      out.push({ id: n.id, parent: n.parent, ordKey: n.ordKey, ordId: n.ordId,
-                 value: n.value, valueId: n.valueId, deleted: n.deleted })
+      out.push({
+        id: n.id, parent: n.parent, ordKey: n.ordKey, ordId: n.ordId,
+        deleted: n.deleted,
+        // Object-granular slide state (P1). `value`/`valueId` are kept for
+        // BACK-COMPAT so an OLD peer reading this snapshot still gets a whole
+        // slide; a new peer prefers `slide` and folds `value` in only if absent.
+        slide: n.slide.snapshot(),
+        value: JSON.stringify(n.slide.toSlide()),
+        valueId: n.slide.maxOpId(),
+      })
     }
     return out
   }
@@ -220,7 +472,18 @@ class TreeCRDT {
   restore(nodes) {
     this._nodes.clear()
     for (const n of nodes) {
-      this._nodes.set(n.id, { ...n })
+      const node = this._newNode({
+        id: n.id, parent: n.parent, ordKey: n.ordKey, ordId: n.ordId, deleted: !!n.deleted,
+      })
+      if (n.slide) {
+        node.slide = SlideState.restore(n.slide)
+      } else if (n.value !== undefined && n.value !== '') {
+        // Legacy snapshot: fold the whole-slide value in under its valueId.
+        let slide
+        try { slide = JSON.parse(n.value) } catch { slide = {} }
+        node.slide.applyWhole(n.valueId || n.ordId || n.id, slide)
+      }
+      this._nodes.set(n.id, node)
     }
   }
 }
@@ -316,20 +579,30 @@ export class TreeSession extends EventTarget {
     this._broadcast({ type: 'tree_op', session: this._session, op })
     this._persistOp(op)
 
-    // Set initial content.
-    if (data !== undefined) {
-      const setOp = { kind: TREE_OP_SET_TEXT, id: this._clock.tick(), target: id, value: JSON.stringify(data) }
-      this._crdt.apply(setOp)
-      this._broadcast({ type: 'tree_op', session: this._session, op: setOp })
-      this._persistOp(setOp)
-    }
+    // Set initial content — object-granular so it merges with concurrent edits.
+    if (data !== undefined) this.setSlide(id, data)
     return id
   }
 
-  /** Update the content of an existing slide node. */
+  /**
+   * Update a slide's content. P1: instead of a whole-slide LWW, diff against the
+   * CRDT's current reconstruction and broadcast ONLY the changed objects/scalars,
+   * each stamped with its own opId. Two peers editing DIFFERENT objects on the
+   * SAME slide therefore both survive (per-object LWW); two peers editing the
+   * SAME object is deterministic per-object LWW.
+   */
   setSlide(nodeId, data) {
-    const id = this._clock.tick()
-    const op = { kind: TREE_OP_SET_TEXT, id, target: nodeId, value: JSON.stringify(data) }
+    const prev = this._crdt.value(nodeId) || {}
+    const { objects, scalars } = diffSlide(prev, data || {})
+    if (objects.length === 0 && scalars.length === 0) return   // nothing changed
+
+    // Stamp every changed entry with its own fresh opId.
+    const objOps = objects.map((e) => ({ id: e.id, opId: this._clock.tick(), obj: e.obj }))
+    const scalarOps = scalars.map((e) => ({ key: e.key, opId: this._clock.tick(), val: e.val }))
+    const op = {
+      kind: TREE_OP_SET_SLIDE, id: this._clock.tick(), target: nodeId,
+      objects: objOps, scalars: scalarOps,
+    }
     this._crdt.apply(op)
     this._broadcast({ type: 'tree_op', session: this._session, op })
     this._persistOp(op)
@@ -363,9 +636,7 @@ export class TreeSession extends EventTarget {
    */
   orderedSlides() {
     return this._crdt.order().map((nodeId) => {
-      const raw = this._crdt.value(nodeId)
-      let data
-      try { data = raw ? JSON.parse(raw) : {} } catch { data = {} }
+      const data = this._crdt.value(nodeId) || {}
       return { nodeId, data }
     })
   }
@@ -387,7 +658,13 @@ export class TreeSession extends EventTarget {
         const nodes = JSON.parse(raw)
         this._crdt.restore(nodes)
         for (const n of nodes) {
-          for (const opId of [n.ordId, n.valueId]) {
+          const seedIds = [n.ordId, n.valueId]
+          if (n.slide) {
+            for (const e of n.slide.objects || []) seedIds.push(e.opId)
+            for (const e of n.slide.objTomb || []) seedIds.push(e.opId)
+            for (const e of n.slide.scalars || []) seedIds.push(e.opId)
+          }
+          for (const opId of seedIds) {
             if (opId) {
               const parts = opId.split('_')
               this._clock.observe(parseInt(parts[1], 10) || 0)
@@ -456,7 +733,16 @@ export class TreeSession extends EventTarget {
         // already holds, and the LWW guards (opIdLess on valueId/ordId) DROP the
         // joiner's edit — a slide text change or reorder silently reverts. The
         // tree_op path and _loadLocal already observe; this cold-join path must too.
-        for (const opId of [n.ordId, n.valueId]) {
+        // Seed from ordId + every per-object/per-scalar opId in the granular slide
+        // state (n.slide), plus the legacy valueId, so the joiner's first edit
+        // mints a strictly-higher opId than anything the node already holds.
+        const seedIds = [n.ordId, n.valueId]
+        if (n.slide) {
+          for (const e of n.slide.objects || []) seedIds.push(e.opId)
+          for (const e of n.slide.objTomb || []) seedIds.push(e.opId)
+          for (const e of n.slide.scalars || []) seedIds.push(e.opId)
+        }
+        for (const opId of seedIds) {
           if (opId && typeof opId === 'string') {
             const parts = opId.split('_')
             this._clock.observe(parseInt(parts[1], 10) || 0)
@@ -477,9 +763,11 @@ export class TreeSession extends EventTarget {
           if (n.ordId && n.ordId !== n.id) {
             this._crdt.apply({ kind: TREE_OP_MOVE, id: n.ordId, target: n.id, parent: n.parent, ordKey: n.ordKey })
           }
-        }
-        if (n.valueId && n.value) {
-          this._crdt.apply({ kind: TREE_OP_SET_TEXT, id: n.valueId, target: n.id, value: n.value })
+          // P1: UNION-merge the object-granular slide state (per-object/per-scalar
+          // LWW) instead of replaying a whole-slide SET_TEXT. A whole replay would
+          // clobber a joiner's own concurrent edit to a DIFFERENT object; the merge
+          // keeps both sides and only takes incoming entries that are strictly newer.
+          this._crdt.mergeSlideSnapshot(n.id, n)
         }
         if (n.deleted) {
           this._crdt.apply({ kind: TREE_OP_DELETE, id: n.ordId || n.id, target: n.id })

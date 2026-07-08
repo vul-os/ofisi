@@ -151,6 +151,7 @@ func (s *LocalStorage) GetFile(id string) (*models.File, error) {
 func (s *LocalStorage) CreateFile(file *models.File) error {
 	file.CreatedAt = time.Now()
 	file.UpdatedAt = time.Now()
+	file.Rev = 1 // first revision (P2 optimistic concurrency)
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return err
@@ -168,6 +169,14 @@ func (s *LocalStorage) UpdateFile(file *models.File) error {
 		return err
 	}
 
+	// P2 optimistic concurrency: if the caller supplied a rev (>0), it must match
+	// the stored rev — otherwise a concurrent writer already advanced it and this
+	// PUT is stale. Reject with ErrRevConflict (→ 409) rather than clobbering.
+	// A zero rev is an unconditional write (legacy client / explicit force).
+	if file.Rev > 0 && file.Rev != existing.Rev {
+		return ErrRevConflict
+	}
+
 	// Snapshot the current content before overwriting.
 	snap := &models.FileVersion{
 		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
@@ -181,6 +190,7 @@ func (s *LocalStorage) UpdateFile(file *models.File) error {
 
 	file.CreatedAt = existing.CreatedAt
 	file.UpdatedAt = time.Now()
+	file.Rev = existing.Rev + 1 // advance the revision on every committed write
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return err

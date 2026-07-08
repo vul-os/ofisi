@@ -11,12 +11,18 @@ const (
 )
 
 type File struct {
-	ID        string      `json:"id"`
-	Name      string      `json:"name"`
-	Type      FileType    `json:"type"`
-	Content   interface{} `json:"content"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	ID      string      `json:"id"`
+	Name    string      `json:"name"`
+	Type    FileType    `json:"type"`
+	Content interface{} `json:"content"`
+	// Rev is a monotonically increasing revision counter used for optimistic
+	// concurrency (P2). GET returns the current rev; a PUT must echo the rev it
+	// last read, and the store rejects a stale PUT with a conflict (compare-and-
+	// swap) so a concurrent editor's save can't silently overwrite a newer one.
+	// rev 0 means "unknown / force" (legacy clients that don't send it).
+	Rev       int64     `json:"rev"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // FileVersion is an immutable snapshot of a file's content taken before each save.
@@ -66,6 +72,11 @@ type CreateFileRequest struct {
 type UpdateFileRequest struct {
 	Name    string      `json:"name"`
 	Content interface{} `json:"content"`
+	// Rev is the revision the client last read (optimistic concurrency, P2). When
+	// > 0 the store performs a compare-and-swap and returns ErrRevConflict if the
+	// stored rev has moved on. When 0/omitted the write is unconditional (legacy
+	// clients / first-write-wins fallback) so existing callers keep working.
+	Rev int64 `json:"rev,omitempty"`
 }
 
 type LoginRequest struct {

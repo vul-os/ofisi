@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"log"
 	"os"
 	"strings"
@@ -8,6 +9,12 @@ import (
 	"vulos-office/backend/config"
 	"vulos-office/backend/models"
 )
+
+// ErrRevConflict is returned by UpdateFile when the caller supplied a stale rev
+// (optimistic-concurrency compare-and-swap failed). Handlers map it to 409
+// Conflict so the client can reload the latest and reconcile (P2). Compare with
+// errors.Is(err, ErrRevConflict).
+var ErrRevConflict = errors.New("revision conflict")
 
 // databaseURL returns the first non-empty value of DATABASE_URL or
 // VULOS_DATABASE_URL (in that order), or "" if neither is set.

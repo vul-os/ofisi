@@ -38,7 +38,10 @@ async function request(path, options = {}) {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw Object.assign(new Error(err.error || 'Request failed'), err)
+    // Attach the HTTP status so callers can branch (e.g. 409 Conflict → reload +
+    // reconcile for optimistic concurrency). `...err` carries any extra payload
+    // the server sent, e.g. the current file under `current` on a 409.
+    throw Object.assign(new Error(err.error || 'Request failed'), { status: res.status, ...err })
   }
   return res.json()
 }
@@ -64,8 +67,13 @@ export const api = {
   getFile: (id) => request(`/files/${id}`),
   createFile: (name, type, content) =>
     request('/files', { method: 'POST', body: JSON.stringify({ name, type, content }) }),
-  updateFile: (id, name, content) =>
-    request(`/files/${id}`, { method: 'PUT', body: JSON.stringify({ name, content }) }),
+  // P2 optimistic concurrency: pass the rev the client last read. The server
+  // rejects a stale PUT with 409 Conflict (compare-and-swap on rev); `request`
+  // surfaces that as an error whose `.status === 409` and `.current` is the
+  // newer stored file, so callers can reload + reconcile instead of losing the
+  // update. A rev of 0/undefined performs an unconditional (legacy) write.
+  updateFile: (id, name, content, rev = 0) =>
+    request(`/files/${id}`, { method: 'PUT', body: JSON.stringify({ name, content, rev }) }),
   deleteFile: (id) =>
     request(`/files/${id}`, { method: 'DELETE' }),
 

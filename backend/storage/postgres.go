@@ -79,9 +79,12 @@ func (s *PostgresStorage) migrate() error {
 			name        TEXT NOT NULL,
 			type        TEXT NOT NULL,
 			content     JSONB,
+			rev         BIGINT NOT NULL DEFAULT 1,
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);
+		-- Idempotent migration for pre-existing deployments (P2 optimistic concurrency).
+		ALTER TABLE files ADD COLUMN IF NOT EXISTS rev BIGINT NOT NULL DEFAULT 1;
 		CREATE TABLE IF NOT EXISTS file_versions (
 			id          TEXT NOT NULL,
 			file_id     TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -126,7 +129,7 @@ func (s *PostgresStorage) migrateSigningSchema() {
 
 func (s *PostgresStorage) ListFiles() ([]*models.File, error) {
 	rows, err := s.pool.Query(context.Background(),
-		`SELECT id, name, type, content, created_at, updated_at FROM files ORDER BY updated_at DESC`)
+		`SELECT id, name, type, content, rev, created_at, updated_at FROM files ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +139,7 @@ func (s *PostgresStorage) ListFiles() ([]*models.File, error) {
 	for rows.Next() {
 		var f models.File
 		var contentJSON []byte
-		if err := rows.Scan(&f.ID, &f.Name, &f.Type, &contentJSON, &f.CreatedAt, &f.UpdatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Type, &contentJSON, &f.Rev, &f.CreatedAt, &f.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if contentJSON != nil {
@@ -153,8 +156,8 @@ func (s *PostgresStorage) GetFile(id string) (*models.File, error) {
 	var f models.File
 	var contentJSON []byte
 	err := s.pool.QueryRow(context.Background(),
-		`SELECT id, name, type, content, created_at, updated_at FROM files WHERE id=$1`, id,
-	).Scan(&f.ID, &f.Name, &f.Type, &contentJSON, &f.CreatedAt, &f.UpdatedAt)
+		`SELECT id, name, type, content, rev, created_at, updated_at FROM files WHERE id=$1`, id,
+	).Scan(&f.ID, &f.Name, &f.Type, &contentJSON, &f.Rev, &f.CreatedAt, &f.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("file not found")
 	}
@@ -172,17 +175,29 @@ func (s *PostgresStorage) CreateFile(f *models.File) error {
 		return err
 	}
 	_, err = s.pool.Exec(context.Background(),
-		`INSERT INTO files (id, name, type, content) VALUES ($1, $2, $3, $4)`,
+		`INSERT INTO files (id, name, type, content, rev) VALUES ($1, $2, $3, $4, 1)`,
 		f.ID, f.Name, f.Type, contentJSON,
 	)
+	if err == nil {
+		f.Rev = 1
+	}
 	return err
 }
 
-// UpdateFile snapshots current content as a version before overwriting (OFFICE-08).
+// UpdateFile snapshots current content as a version before overwriting (OFFICE-08),
+// then commits with a rev compare-and-swap for optimistic concurrency (P2).
 func (s *PostgresStorage) UpdateFile(f *models.File) error {
 	existing, err := s.GetFile(f.ID)
 	if err != nil {
 		return err
+	}
+	// P2 optimistic concurrency: a caller-supplied rev (>0) must match the stored
+	// rev or the write is stale → ErrRevConflict (→ 409). The UPDATE below is
+	// ALSO guarded on rev so the check-and-swap is atomic even under a race (two
+	// PUTs that both read the same rev: exactly one UPDATE matches, the other
+	// affects 0 rows and is reported as a conflict). rev 0 = unconditional write.
+	if f.Rev > 0 && f.Rev != existing.Rev {
+		return ErrRevConflict
 	}
 	snap := &models.FileVersion{
 		ID:        fmt.Sprintf("%d", existing.UpdatedAt.UnixNano()),
@@ -198,16 +213,25 @@ func (s *PostgresStorage) UpdateFile(f *models.File) error {
 	if err != nil {
 		return err
 	}
+	// Guard the UPDATE on the rev we validated so a concurrent committer that
+	// slipped in between GetFile and here loses the race (0 rows → conflict).
+	newRev := existing.Rev + 1
 	cmd, err := s.pool.Exec(context.Background(),
-		`UPDATE files SET name=$2, content=$3, updated_at=NOW() WHERE id=$1`,
-		f.ID, f.Name, contentJSON,
+		`UPDATE files SET name=$2, content=$3, rev=$4, updated_at=NOW() WHERE id=$1 AND rev=$5`,
+		f.ID, f.Name, contentJSON, newRev, existing.Rev,
 	)
 	if err != nil {
 		return err
 	}
 	if cmd.RowsAffected() == 0 {
-		return fmt.Errorf("file not found")
+		// Either the row vanished or its rev advanced under us. Distinguish so the
+		// caller gets a precise 404 vs 409.
+		if _, gerr := s.GetFile(f.ID); gerr != nil {
+			return fmt.Errorf("file not found")
+		}
+		return ErrRevConflict
 	}
+	f.Rev = newRev
 	return nil
 }
 

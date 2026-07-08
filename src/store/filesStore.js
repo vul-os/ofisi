@@ -57,10 +57,47 @@ export const useFilesStore = create((set, get) => ({
     return file
   },
 
-  updateFile: async (id, name, content) => {
-    const file = await api.updateFile(id, name, content)
-    set({ files: get().files.map((f) => (f.id === id ? file : f)) })
-    return file
+  /**
+   * updateFile — save with optimistic concurrency (P2).
+   *
+   * Sends the rev this client last saw for the file. If a concurrent editor
+   * already advanced it the server replies 409 Conflict with the newer stored
+   * file (err.current). We then:
+   *   1. adopt the newer file into the store (so the UI/state has the latest rev
+   *      + content), and
+   *   2. retry ONCE with the newer rev, re-applying THIS caller's `content`.
+   * This turns a would-be silent lost-update into a clean last-writer-wins with
+   * a preserved version history — no PUT is dropped. If the retry also conflicts
+   * (a third writer raced in) we surface the conflict so the caller can reload.
+   *
+   * For CRDT docs the `content` handed in is already the locally-converged truth,
+   * so the retry re-commits it cleanly; for non-CRDT structure the caller may
+   * prefer to inspect err.current and surface a "reloaded newer version" notice —
+   * pass { onConflict } to intercept before the automatic retry.
+   */
+  updateFile: async (id, name, content, opts = {}) => {
+    const known = get().files.find((f) => f.id === id)
+    const rev = opts.rev ?? known?.rev ?? 0
+    try {
+      const file = await api.updateFile(id, name, content, rev)
+      set({ files: get().files.map((f) => (f.id === id ? file : f)) })
+      return file
+    } catch (err) {
+      if (err?.status !== 409) throw err
+      // Adopt the server's newer file so state carries the latest rev + content.
+      const current = err.current
+      if (current) set({ files: get().files.map((f) => (f.id === id ? current : f)) })
+      if (opts.onConflict) {
+        // Let the caller reconcile non-CRDT structure explicitly (may re-throw).
+        const resolved = await opts.onConflict(current, content)
+        if (resolved === false) { const e = new Error('save conflict'); e.status = 409; e.current = current; throw e }
+      }
+      if (opts._retried || !current) {
+        const e = new Error('save conflict'); e.status = 409; e.current = current; throw e
+      }
+      // Retry once against the newer rev, re-applying this caller's content.
+      return get().updateFile(id, name, content, { rev: current.rev, _retried: true, onConflict: opts.onConflict })
+    }
   },
 
   deleteFile: async (id) => {
@@ -85,8 +122,9 @@ export const useFilesStore = create((set, get) => ({
     // Write draft first — survives a tab-close mid-flight
     await writeDraft(id, name, content)
     try {
-      const file = await api.updateFile(id, name, content)
-      set({ files: get().files.map((f) => (f.id === id ? file : f)) })
+      // Route through the rev-aware updateFile so a concurrent editor's save
+      // triggers the 409 reload+reconcile+retry path instead of a lost update.
+      const file = await get().updateFile(id, name, content)
       await clearDraft(id)
       setSaveState(id, 'saved')
       return file

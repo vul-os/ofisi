@@ -42,11 +42,17 @@ func (m *memStorage) GetFile(id string) (*models.File, error) {
 	}
 	return nil, errFileNotFound
 }
-func (m *memStorage) CreateFile(f *models.File) error { m.files[f.ID] = f; return nil }
+func (m *memStorage) CreateFile(f *models.File) error { f.Rev = 1; m.files[f.ID] = f; return nil }
 func (m *memStorage) UpdateFile(f *models.File) error {
-	if _, ok := m.files[f.ID]; !ok {
+	existing, ok := m.files[f.ID]
+	if !ok {
 		return errFileNotFound
 	}
+	// P2 optimistic concurrency: mirror the real store's rev compare-and-swap.
+	if f.Rev > 0 && f.Rev != existing.Rev {
+		return storage.ErrRevConflict
+	}
+	f.Rev = existing.Rev + 1
 	m.files[f.ID] = f
 	return nil
 }

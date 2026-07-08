@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -164,6 +165,9 @@ func (h *FileHandler) Update(c *gin.Context) {
 		ID:      id,
 		Name:    req.Name,
 		Content: req.Content,
+		// P2 optimistic concurrency: echo the rev the client last read. The store
+		// rejects a stale PUT with ErrRevConflict (→ 409) instead of clobbering.
+		Rev: req.Rev,
 	}
 
 	// STORAGE GATE: atomically check AND reserve the quota for the new content
@@ -182,6 +186,18 @@ func (h *FileHandler) Update(c *gin.Context) {
 
 	if err := h.store.UpdateFile(file); err != nil {
 		res.Release()
+		// P2: a stale rev (optimistic-concurrency CAS miss) is a 409 Conflict. Return
+		// the CURRENT stored file so the client can reload, reconcile its pending
+		// change against the newer content, and retry — never a silent lost update.
+		if errors.Is(err, storage.ErrRevConflict) {
+			current, gerr := h.store.GetFile(id)
+			if gerr != nil {
+				c.JSON(http.StatusConflict, gin.H{"error": "revision conflict"})
+				return
+			}
+			c.JSON(http.StatusConflict, gin.H{"error": "revision conflict", "current": current})
+			return
+		}
 		if err.Error() == "file not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 			return

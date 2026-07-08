@@ -239,6 +239,193 @@ describe('BUG6: offline-reconnect merges snapshots (no lost edits)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// BUG 8 (fix/office-collab-autosave, P1) — Slides SLIDE-LEVEL clobber.
+//
+// A slide was stored as ONE JSON blob mutated via a whole-slide LWW (SET_TEXT).
+// Two peers editing DIFFERENT positioned objects on the SAME slide clobbered
+// each other: last-writer-wins on the ENTIRE slide → the loser's object move/
+// edit was silently lost. Fix: per-OBJECT LWW — each object carries its own id +
+// opId and setSlide diffs + broadcasts only the changed objects/scalars, merged
+// per-entry. Two peers moving two different objects must BOTH survive; two peers
+// editing the SAME object is deterministic per-object LWW; scalar props keep
+// their own LWW stamp.
+// ---------------------------------------------------------------------------
+describe('BUG8: slides per-object LWW (concurrent object edits both survive)', () => {
+  beforeEach(() => { try { localStorage.clear(); sessionStorage.clear() } catch { /* jsdom */ } })
+
+  // Two TreeSessions on a shared bus, but each captures outbound frames so the
+  // test controls delivery timing. `flush()` cross-delivers all queued frames —
+  // this models TRUE concurrency: both peers act BEFORE seeing each other's op,
+  // exactly the case a whole-slide LWW clobbered. Seeded from a common base deck.
+  function concurrentPair(session, baseSlide) {
+    const seed = new TreeSession({ sessionId: session, replicaId: 'seed', fabricClient: new (class extends EventTarget { send() {} })() })
+    const nid = seed.insertSlide('m', baseSlide)
+    const baseNodes = seed._crdt.snapshot()
+
+    const queues = new Map()
+    const mk = (replicaId) => {
+      const fab = new (class extends EventTarget { send(frame) { queues.get(replicaId).push(frame) } })()
+      const s = new TreeSession({ sessionId: session, replicaId, fabricClient: fab })
+      queues.set(replicaId, [])
+      s._handleFabricMessage(JSON.stringify({ type: 'tree_snapshot', session, nodes: baseNodes }))
+      queues.set(replicaId, []) // discard any frames from the seed apply
+      return s
+    }
+    const A = mk('A'), B = mk('B')
+    const flush = () => {
+      const fa = queues.get('A').splice(0), fb = queues.get('B').splice(0)
+      for (const f of fa) B._handleFabricMessage(f)   // A's ops → B
+      for (const f of fb) A._handleFabricMessage(f)   // B's ops → A
+    }
+    return { A, B, nid, flush }
+  }
+
+  function slideOf(s, nodeId) {
+    return s.orderedSlides().find((x) => x.nodeId === nodeId)?.data
+  }
+
+  it('two peers moving DIFFERENT objects on one slide → union (no loss)', () => {
+    const { A, B, nid, flush } = concurrentPair('deck1', {
+      title: 'S',
+      objects: [
+        { id: 'o1', type: 'shape', x: 0.1, y: 0.1, w: 0.2, h: 0.2, z: 1 },
+        { id: 'o2', type: 'shape', x: 0.5, y: 0.5, w: 0.2, h: 0.2, z: 2 },
+      ],
+    })
+    // TRUE concurrency: each acts against the base BEFORE seeing the other.
+    A.setSlide(nid, {
+      title: 'S',
+      objects: [
+        { id: 'o1', type: 'shape', x: 0.8, y: 0.8, w: 0.2, h: 0.2, z: 1 }, // A moves o1
+        { id: 'o2', type: 'shape', x: 0.5, y: 0.5, w: 0.2, h: 0.2, z: 2 },
+      ],
+    })
+    B.setSlide(nid, {
+      title: 'S',
+      objects: [
+        { id: 'o1', type: 'shape', x: 0.1, y: 0.1, w: 0.2, h: 0.2, z: 1 },
+        { id: 'o2', type: 'shape', x: 0.2, y: 0.2, w: 0.2, h: 0.2, z: 2 }, // B moves o2
+      ],
+    })
+    flush()
+
+    for (const s of [A, B]) {
+      const objs = Object.fromEntries(slideOf(s, nid).objects.map((o) => [o.id, o]))
+      expect(objs.o1.x).toBe(0.8) // A's move to o1 survived on both
+      expect(objs.o2.x).toBe(0.2) // B's move to o2 survived on both — NOT clobbered
+    }
+    expect(slideOf(A, nid)).toEqual(slideOf(B, nid))
+  })
+
+  it('two peers editing the SAME object → deterministic per-object LWW', () => {
+    const { A, B, nid, flush } = concurrentPair('deck2', {
+      objects: [{ id: 'o1', type: 'shape', x: 0, y: 0, w: 0.2, h: 0.2, z: 1 }],
+    })
+    A.setSlide(nid, { objects: [{ id: 'o1', type: 'shape', x: 0.3, y: 0, w: 0.2, h: 0.2, z: 1 }] })
+    B.setSlide(nid, { objects: [{ id: 'o1', type: 'shape', x: 0.7, y: 0, w: 0.2, h: 0.2, z: 1 }] })
+    flush()
+
+    // Both replicas agree on the SAME winner (higher opId wins — deterministic).
+    expect(slideOf(A, nid)).toEqual(slideOf(B, nid))
+    expect([0.3, 0.7]).toContain(slideOf(A, nid).objects[0].x)
+  })
+
+  it('scalar props (background) keep their own LWW, independent of objects', () => {
+    const { A, B, nid, flush } = concurrentPair('deck3', {
+      background: '#000', objects: [{ id: 'o1', type: 'shape', x: 0, y: 0, w: 0.2, h: 0.2, z: 1 }],
+    })
+    A.setSlide(nid, { background: '#fff', objects: [{ id: 'o1', type: 'shape', x: 0, y: 0, w: 0.2, h: 0.2, z: 1 }] })
+    B.setSlide(nid, { background: '#000', objects: [{ id: 'o1', type: 'shape', x: 0.5, y: 0, w: 0.2, h: 0.2, z: 1 }] })
+    flush()
+
+    for (const s of [A, B]) {
+      const d = slideOf(s, nid)
+      expect(d.background).toBe('#fff')      // A's scalar edit survived
+      expect(d.objects[0].x).toBe(0.5)       // B's object move survived (independent)
+    }
+  })
+
+  it('a peer DELETING an object converges (object removed on both)', () => {
+    const { A, B, nid, flush } = concurrentPair('deck4', {
+      objects: [
+        { id: 'o1', type: 'shape', x: 0, y: 0, w: 0.2, h: 0.2, z: 1 },
+        { id: 'o2', type: 'shape', x: 0.5, y: 0, w: 0.2, h: 0.2, z: 2 },
+      ],
+    })
+    A.setSlide(nid, {
+      objects: [
+        { id: 'o1', type: 'shape', x: 0.9, y: 0, w: 0.2, h: 0.2, z: 1 }, // A moves o1
+        { id: 'o2', type: 'shape', x: 0.5, y: 0, w: 0.2, h: 0.2, z: 2 },
+      ],
+    })
+    B.setSlide(nid, { objects: [{ id: 'o1', type: 'shape', x: 0, y: 0, w: 0.2, h: 0.2, z: 1 }] }) // B deletes o2
+    flush()
+
+    for (const s of [A, B]) {
+      const objs = slideOf(s, nid).objects
+      expect(objs.map((o) => o.id)).toEqual(['o1']) // o2 deleted on both
+      expect(objs[0].x).toBe(0.9)                   // A's move to o1 survived
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// BUG 9 (fix/office-collab-autosave, P1) — offline-reconnect of slides must
+// converge object-granularly. Two peers edit DIFFERENT objects OFFLINE, then
+// exchange snapshots on reconnect. A whole-slide-replay cold-join would clobber
+// the joiner's own concurrent object edit; the union merge keeps both.
+// ---------------------------------------------------------------------------
+describe('BUG9: slides offline-reconnect converges per object (no lost edits)', () => {
+  beforeEach(() => { try { localStorage.clear(); sessionStorage.clear() } catch { /* jsdom */ } })
+  class FF extends EventTarget { send() {} }
+
+  it('offline edits to different objects both survive a snapshot exchange', () => {
+    // Shared starting deck (same node id + objects on both replicas).
+    const seed = new TreeSession({ sessionId: 'deckR', replicaId: 'seed', fabricClient: new FF() })
+    const nid = seed.insertSlide('m', {
+      objects: [
+        { id: 'o1', type: 'shape', x: 0.1, y: 0, w: 0.2, h: 0.2, z: 1 },
+        { id: 'o2', type: 'shape', x: 0.5, y: 0, w: 0.2, h: 0.2, z: 2 },
+      ],
+    })
+    const baseNodes = seed._crdt.snapshot()
+
+    const A = new TreeSession({ sessionId: 'deckR', replicaId: 'A', fabricClient: new FF() })
+    const B = new TreeSession({ sessionId: 'deckR', replicaId: 'B', fabricClient: new FF() })
+    for (const s of [A, B]) {
+      s._handleFabricMessage(JSON.stringify({ type: 'tree_snapshot', session: 'deckR', nodes: baseNodes }))
+    }
+
+    // OFFLINE: A moves o1, B moves o2 — neither sees the other yet.
+    A.setSlide(nid, {
+      objects: [
+        { id: 'o1', type: 'shape', x: 0.9, y: 0, w: 0.2, h: 0.2, z: 1 },
+        { id: 'o2', type: 'shape', x: 0.5, y: 0, w: 0.2, h: 0.2, z: 2 },
+      ],
+    })
+    B.setSlide(nid, {
+      objects: [
+        { id: 'o1', type: 'shape', x: 0.1, y: 0, w: 0.2, h: 0.2, z: 1 },
+        { id: 'o2', type: 'shape', x: 0.2, y: 0.7, w: 0.2, h: 0.2, z: 2 },
+      ],
+    })
+
+    // RECONNECT: exchange snapshots (order-independent union merge).
+    const snapA = A._crdt.snapshot()
+    const snapB = B._crdt.snapshot()
+    B._handleFabricMessage(JSON.stringify({ type: 'tree_snapshot', session: 'deckR', nodes: snapA }))
+    A._handleFabricMessage(JSON.stringify({ type: 'tree_snapshot', session: 'deckR', nodes: snapB }))
+
+    for (const s of [A, B]) {
+      const objs = Object.fromEntries(s.orderedSlides().find((x) => x.nodeId === nid).data.objects.map((o) => [o.id, o]))
+      expect(objs.o1.x).toBe(0.9)   // A's offline move survived
+      expect(objs.o2.y).toBe(0.7)   // B's offline move survived
+    }
+    expect(A.orderedSlides()).toEqual(B.orderedSlides())
+  })
+})
+
+// ---------------------------------------------------------------------------
 // BUG 7 (deep/office2) — Slides tree cold-join created a PHANTOM DUPLICATE slide
 // after any reorder.
 //
