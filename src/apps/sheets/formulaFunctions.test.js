@@ -209,4 +209,29 @@ describe('FILTER — error propagation is scoped to INCLUDED rows (deep/office)'
   it('an error in the INCLUDE mask propagates (not silently kept)', () => {
     expect(FILTER([[[10], [20]], [[ERR.NA], [1]]])).toBe(ERR.NA)
   })
+  it('a mask SHORTER than the array errors instead of dropping the tail (deep/office2)', () => {
+    // Was: FILTER({1;2;3}, {1;1}) → "1, 2" (row 3 silently dropped). Excel: #VALUE!.
+    expect(FILTER([[[1], [2], [3]], [[1], [1]]])).toBe(ERR.VALUE)
+  })
+  it('a mask LONGER than the array errors too', () => {
+    expect(FILTER([[[1], [2]], [[1], [1], [1]]])).toBe(ERR.VALUE)
+  })
+})
+
+describe('XLOOKUP — row-aware 2-D return + length validation (deep/office2)', () => {
+  it('a 2-D return range returns the matched ROW, not a flattened offset', () => {
+    // Was: XLOOKUP("b", {a;b;c}, {10,11; 20,21; 30,31}) → 11 (row0,col1). Should be 20.
+    expect(XLOOKUP(['b', [['a'], ['b'], ['c']], [[10, 11], [20, 21], [30, 31]]])).toBe(20)
+  })
+  it('a single-column return (flat or 1-col rows) is unchanged', () => {
+    expect(XLOOKUP(['b', ['a', 'b', 'c'], [10, 20, 30]])).toBe(20)
+    expect(XLOOKUP(['b', [['a'], ['b'], ['c']], [[10], [20], [30]]])).toBe(20)
+  })
+  it('a lookup/return length mismatch errors instead of misaligning', () => {
+    // Was: XLOOKUP("a", {a;b;c}, {x;y}) → "x" silently. Excel: #VALUE!.
+    expect(XLOOKUP(['a', ['a', 'b', 'c'], ['x', 'y']])).toBe(ERR.VALUE)
+  })
+  it('approximate match still resolves through the row picker', () => {
+    expect(XLOOKUP([25, [10, 20, 30], [1, 2, 3], null, -1])).toBe(2)
+  })
 })

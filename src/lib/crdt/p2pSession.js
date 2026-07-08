@@ -147,7 +147,8 @@ export class P2PCollabSession extends EventTarget {
   /**
    * Re-request a snapshot from peers. Call after a transport reconnect so any
    * edits missed while offline are pulled back in (offline-buffer-then-sync).
-   * Safe to call repeatedly; snapshots only replace strictly-larger state.
+   * Safe to call repeatedly; incoming snapshots are MERGED (union) into local
+   * state, so a reconnecting peer never loses its own offline edits.
    */
   async resync() {
     await this._broadcast({ type: 'snap-req' })
@@ -222,10 +223,14 @@ export class P2PCollabSession extends EventTarget {
       // rw peers only accept AUTHORITATIVE snapshots. ro peers accept any (they
       // never write back, so a poisoned read is contained to their own view).
       if (this._room.macKeyRw && !authoritative) return
-      const remoteNodeCount = msg.snap.nodes ? msg.snap.nodes.length : 0
-      const localNodeCount = this._crdt.snapshot().nodes.length
-      if (remoteNodeCount > localNodeCount) {
-        this._crdt.restore(msg.snap)
+      // MERGE the snapshot (union), never a count-gated restore(). When two peers
+      // edit OFFLINE and reconnect, each holds nodes the other lacks; a "replace
+      // only if remote is larger" rule silently DROPS the smaller side's offline
+      // work. merge() folds the incoming nodes via idempotent RGA apply so both
+      // peers reach the union with zero loss. (The resync() docstring's old
+      // "only replace strictly-larger state" claim was the bug.)
+      const changed = this._crdt.merge(msg.snap)
+      if (changed) {
         this.dispatchEvent(new CustomEvent('change', {
           detail: { text: this._crdt.toString(), remote: true },
         }))

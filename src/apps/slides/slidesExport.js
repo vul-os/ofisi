@@ -1,6 +1,7 @@
 import { saveAs } from 'file-saver'
 import pptxgen from 'pptxgenjs'
 import { stripHtml } from '../../lib/sanitize'
+import { stripXmlInvalidChars } from '../../lib/xmlText.js'
 import { ensureObjects } from './slideObjects'
 
 export function exportSlidesToPdf(filename) {
@@ -52,7 +53,9 @@ function addObjectToSlide(s, obj, theme) {
   const rotate = obj.rotation || 0
 
   if (obj.type === 'text') {
-    const text = stripHtml(obj.html || '')
+    // strip XML-1.0-illegal control chars: pptxgenjs does NOT, so a VT/FF/NUL in
+    // the text would make PowerPoint reject the deck (corrupt slide1.xml).
+    const text = stripXmlInvalidChars(stripHtml(obj.html || ''))
     if (!text.trim()) return
     // Rough heading detection: an <h1/h2/h3> wrapper → larger + bold.
     const isHeading = /<h[1-3][\s>]/i.test(obj.html || '')
@@ -100,10 +103,10 @@ export async function exportSlidesToPptx(data, filename) {
     // Fallback for a truly empty slide with only a legacy title (ensureObjects
     // already migrates title/content into text objects, so this rarely fires).
     if (objects.length === 0 && slide.title) {
-      s.addText(slide.title, { x: 0.5, y: 0.5, w: '90%', h: 1, fontSize: 36, bold: true, color: theme.fg, fontFace: 'Calibri' })
+      s.addText(stripXmlInvalidChars(slide.title), { x: 0.5, y: 0.5, w: '90%', h: 1, fontSize: 36, bold: true, color: theme.fg, fontFace: 'Calibri' })
     }
 
-    if (slide.notes) s.addNotes(slide.notes)
+    if (slide.notes) s.addNotes(stripXmlInvalidChars(slide.notes))
   }
 
   const blob = await pres.stream()

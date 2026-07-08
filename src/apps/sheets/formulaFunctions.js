@@ -173,14 +173,29 @@ export function XLOOKUP(params) {
   const [lookup, lookupArrRaw, returnArrRaw, ifNotFound, matchModeRaw] = params
   if (isErr(lookup)) return lookup
   const lookupArr = flatten(lookupArrRaw)
-  const returnArr = flatten(returnArrRaw)
+  // DATA-INTEGRITY: index the return array BY ROW, not by flattened offset. When
+  // the return range is 2-D (multiple columns), a single flatten() interleaves
+  // every column, so aligning the match index `i` against the flat list lands on
+  // (row 0, col i) instead of the matched ROW — e.g. XLOOKUP("b", A1:A3, B1:C3)
+  // wrongly returned C1 rather than B2. returnRows keeps each row intact; with no
+  // spill we surface the row's FIRST cell (the leftmost matched value).
+  const returnRows = toRows(returnArrRaw)
   const matchMode = Number(matchModeRaw) || 0
+
+  // Excel returns #VALUE! when the lookup and return arrays have different
+  // lengths (heights). Silently truncating/misaligning would drop or misreport
+  // data with no signal — validate up front and fail loud.
+  if (lookupArr.length !== returnRows.length) return ERR.VALUE
+
+  const pick = (i) => {
+    const row = returnRows[i]
+    if (i < 0 || i >= returnRows.length) return ERR.REF
+    return Array.isArray(row) ? (row.length ? row[0] : ERR.REF) : row
+  }
 
   // Exact match first (always).
   for (let i = 0; i < lookupArr.length; i++) {
-    if (looseEqual(lookup, lookupArr[i])) {
-      return i < returnArr.length ? returnArr[i] : ERR.REF
-    }
+    if (looseEqual(lookup, lookupArr[i])) return pick(i)
   }
   // Approximate modes over numeric keys.
   if (matchMode === -1 || matchMode === 1) {
@@ -198,10 +213,20 @@ export function XLOOKUP(params) {
           if (d < bestDelta) { bestDelta = d; best = i }
         }
       }
-      if (best >= 0) return best < returnArr.length ? returnArr[best] : ERR.REF
+      if (best >= 0) return pick(best)
     }
   }
   return ifNotFound !== undefined ? ifNotFound : ERR.NA
+}
+
+// Normalise a range argument into an array of ROWS. A 2-D range arrives as an
+// array of row arrays; a 1-D column/row arrives as a flat array (each element is
+// its own row); a scalar becomes a single one-row list. Used by XLOOKUP so a
+// multi-column return range is aligned by row, not by flattened cell offset.
+function toRows(arg) {
+  if (!Array.isArray(arg)) return [arg]
+  if (arg.length === 0) return []
+  return arg.map((r) => (Array.isArray(r) ? r : r))
 }
 
 // ── XMATCH(lookup, lookup_array, [match_mode]) ──────────────────────────────
@@ -264,9 +289,15 @@ export function FILTER(params) {
   const [arrayRaw, includeRaw, ifEmpty] = params
   const arr = flatten(arrayRaw)
   const mask = flatten(includeRaw)
+  // DATA-INTEGRITY: Excel requires the INCLUDE mask to be the same height as the
+  // array. The old code defaulted every out-of-range mask index to 0 (exclude),
+  // so a mask SHORTER than the array silently DROPPED the unmatched tail
+  // (FILTER({1;2;3}, {1;1}) returned "1, 2", losing row 3) — a silent data loss.
+  // Fail loud with #VALUE! on any length mismatch instead of quietly truncating.
+  if (arr.length !== mask.length) return ERR.VALUE
   const kept = []
   for (let i = 0; i < arr.length; i++) {
-    const m = i < mask.length ? mask[i] : 0
+    const m = mask[i]
     // An error in the INCLUDE mask propagates (Excel semantics) — and must not be
     // fed to toBool, which coerces an unrecognised string to true and would
     // silently KEEP the row instead of surfacing the error.

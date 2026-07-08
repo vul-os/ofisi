@@ -462,8 +462,21 @@ export class TreeSession extends EventTarget {
             this._clock.observe(parseInt(parts[1], 10) || 0)
           }
         }
-        if (n.ordId) {
-          this._crdt.apply({ kind: TREE_OP_INSERT, id: n.ordId, parent: n.parent, ordKey: n.ordKey })
+        // DATA-INTEGRITY: reconstruct the node under its OWN id (n.id), never
+        // under n.ordId. A node's ordId ADVANCES on every moveSlide (LWW), so
+        // after any reorder ordId !== id. The old code did apply(INSERT, id:
+        // n.ordId): that keyed the node in the CRDT map by the MOVE op's id, a
+        // DIFFERENT key than n.id. Then SET_TEXT (target: n.id) and DELETE found
+        // no such node and created a second empty stub — the joiner rendered a
+        // phantom duplicate slide and lost the real slide's identity (two slides
+        // where the peer had one → non-convergence after any reorder + cold-join).
+        // Establish the node at id=n.id first, then, if it was moved, replay the
+        // MOVE (id: n.ordId) so the ordKey/ordId converge to the peer's LWW value.
+        if (n.id) {
+          this._crdt.apply({ kind: TREE_OP_INSERT, id: n.id, parent: n.parent, ordKey: n.ordKey })
+          if (n.ordId && n.ordId !== n.id) {
+            this._crdt.apply({ kind: TREE_OP_MOVE, id: n.ordId, target: n.id, parent: n.parent, ordKey: n.ordKey })
+          }
         }
         if (n.valueId && n.value) {
           this._crdt.apply({ kind: TREE_OP_SET_TEXT, id: n.valueId, target: n.id, value: n.value })

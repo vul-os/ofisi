@@ -16,11 +16,13 @@
 
 import { saveAs } from 'file-saver'
 import JSZip from 'jszip'
+import { escapeXmlText } from '../../lib/xmlText.js'
 
+// Escape for ODF content.xml. escapeXmlText FIRST strips XML-1.0-illegal control
+// chars (VT/FF/NUL/…) that would otherwise make LibreOffice reject the .odt, THEN
+// escapes the five XML metacharacters. See src/lib/xmlText.js.
 function esc(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+  return escapeXmlText(s)
 }
 
 // Wrap escaped text in the nested spans for whichever marks are present. Each

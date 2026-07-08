@@ -271,6 +271,39 @@ export class TextCRDT {
   }
 
   /**
+   * MERGE a snapshot into the current state (union, non-destructive).
+   *
+   * Unlike restore() — which REPLACES local state — merge() folds every node of
+   * an incoming snapshot into the existing CRDT via the same idempotent apply
+   * path. This is the correct primitive for the snap/snap-req reconnection
+   * exchange: when two peers edit OFFLINE and then reconnect, each holds nodes
+   * the other lacks. A count-gated restore() ("replace only if the incoming
+   * snapshot has MORE nodes") silently DROPS the smaller side's offline edits —
+   * the peers "converge" only by one losing its work, and if the counts are
+   * equal-but-different neither side ever learns the other's chars. Because RGA
+   * apply is commutative + idempotent, merging both snapshots (in either order)
+   * yields the union on both peers with zero loss.
+   *
+   * Returns true if the merge changed the visible document.
+   */
+  merge(snap) {
+    if (!snap || !Array.isArray(snap.nodes)) return false
+    let changed = false
+    // Two passes so a delete whose target INSERT is later in the array is not
+    // dropped to the pending buffer — apply all inserts first, then deletes.
+    for (const n of snap.nodes) {
+      if (!n || typeof n !== 'object' || !isValidOpId(n.id) || !isValidCodePoint(n.v)) continue
+      const parent = n.p && !opidZero(n.p) ? n.p : ROOT_ID
+      if (this.apply({ k: TEXT_OP_INSERT, id: n.id, p: parent, v: n.v })) changed = true
+    }
+    for (const n of snap.nodes) {
+      if (!n || typeof n !== 'object' || !n.d || !isValidOpId(n.id)) continue
+      if (this.apply({ k: TEXT_OP_DELETE, id: n.id, t: n.id })) changed = true
+    }
+    return changed
+  }
+
+  /**
    * Restore state from a snapshot (replaces current state).
    */
   restore(snap) {

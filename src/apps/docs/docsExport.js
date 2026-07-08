@@ -12,6 +12,19 @@ import {
 import { renderEquationHtml } from './equation.js'
 import { pageSetupToCssAtPage, normalizePageSetup, PAGE_SIZES } from './pageSetup.js'
 import { normalizeHeaderFooter, resolveFields } from './headerFooter.js'
+import { stripXmlInvalidChars } from '../../lib/xmlText.js'
+
+// DATA-INTEGRITY: every string that becomes <w:t> text must have XML-1.0-illegal
+// control chars (VT/FF/NUL/…) removed first — the docx library does NOT strip
+// them, so Word would reject/"repair" the exported .docx. Wrap TextRun so ALL run
+// text flows through the strip; callers keep passing raw node text. See xmlText.js.
+function xr(opts) {
+  if (typeof opts === 'string') return new TextRun(stripXmlInvalidChars(opts))
+  if (opts && typeof opts.text === 'string') {
+    return new TextRun({ ...opts, text: stripXmlInvalidChars(opts.text) })
+  }
+  return new TextRun(opts)
+}
 
 // P4: Render every math node in an exported HTML string with KaTeX, then hand
 // the result through sanitizeDocHtml. The doc HTML carries the LaTeX source in a
@@ -327,10 +340,10 @@ function bandParagraph(band, ctx) {
   const children = []
   // Left cell.
   children.push(...runsFor(band.left))
-  children.push(new TextRun({ text: '\t' }))
+  children.push(xr({ text: '\t' }))
   // Center cell.
   children.push(...runsFor(band.center))
-  children.push(new TextRun({ text: '\t' }))
+  children.push(xr({ text: '\t' }))
   // Right cell.
   children.push(...runsFor(band.right))
   return new Paragraph({
@@ -346,23 +359,23 @@ function bandParagraph(band, ctx) {
 // Convert a header/footer cell string into docx runs, mapping {{page}}/{{pages}}
 // to live PageNumber fields and {{title}}/{{date}} to static resolved text.
 function fieldTextToRuns(text, ctx) {
-  if (typeof text !== 'string' || !text) return [new TextRun('')]
+  if (typeof text !== 'string' || !text) return [xr('')]
   const runs = []
   const re = /\{\{\s*(page|pages|title|date)\s*\}\}/gi
   let last = 0
   let m
   while ((m = re.exec(text))) {
     const lit = text.slice(last, m.index)
-    if (lit) runs.push(new TextRun({ text: lit }))
+    if (lit) runs.push(xr({ text: lit }))
     const tok = m[1].toLowerCase()
-    if (tok === 'page') runs.push(new TextRun({ children: [PageNumber.CURRENT] }))
-    else if (tok === 'pages') runs.push(new TextRun({ children: [PageNumber.TOTAL_PAGES] }))
-    else runs.push(new TextRun({ text: resolveFields(m[0], ctx) }))
+    if (tok === 'page') runs.push(xr({ children: [PageNumber.CURRENT] }))
+    else if (tok === 'pages') runs.push(xr({ children: [PageNumber.TOTAL_PAGES] }))
+    else runs.push(xr({ text: resolveFields(m[0], ctx) }))
     last = m.index + m[0].length
   }
   const tail = text.slice(last)
-  if (tail) runs.push(new TextRun({ text: tail }))
-  return runs.length ? runs : [new TextRun('')]
+  if (tail) runs.push(xr({ text: tail }))
+  return runs.length ? runs : [xr('')]
 }
 
 async function nodesToDocx(nodes, fnOrder) {
@@ -386,7 +399,7 @@ async function listToDocx(listNode, depth) {
         const checked = child.attrs?.checked || false
         items.push(new Paragraph({
           bullet: { level: Math.min(depth, 8) },
-          children: [new TextRun({ text: (checked ? '☑ ' : '☐ ') }), ...inlineNodes(child.content?.[0]?.content || [])],
+          children: [xr({ text: (checked ? '☑ ' : '☐ ') }), ...inlineNodes(child.content?.[0]?.content || [])],
         }))
       } else {
         // paragraph or other inline container
@@ -423,7 +436,7 @@ async function nodeToDocx(node, fnOrder) {
     case 'blockquote':
       return await nodesToDocx(node.content || [], fnOrder)
     case 'codeBlock':
-      return [new Paragraph({ children: [new TextRun({ text: node.content?.map((n) => n.text).join('') || '', font: 'Courier New', size: 20 })] })]
+      return [new Paragraph({ children: [xr({ text: node.content?.map((n) => n.text).join('') || '', font: 'Courier New', size: 20 })] })]
     case 'horizontalRule':
       return [new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'AAAAAA' } } })]
     case 'table': {
@@ -470,11 +483,11 @@ async function nodeToDocx(node, fnOrder) {
       // paragraphs (indented by level). Word users can regenerate a field-based
       // ToC; this gives a readable static outline that matches the editor.
       const headings = fnOrder?._tocHeadings || []
-      const out = [new Paragraph({ children: [new TextRun({ text: 'Table of Contents', bold: true })] })]
+      const out = [new Paragraph({ children: [xr({ text: 'Table of Contents', bold: true })] })]
       for (const h of headings) {
         out.push(new Paragraph({
           indent: { left: (h.level - 1) * 360 },
-          children: [new TextRun({ text: h.text || '(untitled heading)' })],
+          children: [xr({ text: h.text || '(untitled heading)' })],
         }))
       }
       return out
@@ -488,7 +501,7 @@ async function nodeToDocx(node, fnOrder) {
       const latex = node.attrs?.latex || ''
       return [new Paragraph({
         alignment: AlignmentType.CENTER,
-        children: [new TextRun({ text: latex, font: 'Cambria Math', italics: true })],
+        children: [xr({ text: latex, font: 'Cambria Math', italics: true })],
       })]
     }
     case 'footnotesList': {
@@ -505,7 +518,7 @@ async function nodeToDocx(node, fnOrder) {
         paras.forEach((para, i) => {
           const inline = inlineNodes(para.content || [], fnOrder)
           const children = i === 0
-            ? [new TextRun({ text: marker, bold: true }), ...inline]
+            ? [xr({ text: marker, bold: true }), ...inline]
             : inline
           out.push(new Paragraph({ children }))
         })
@@ -521,14 +534,14 @@ export function inlineNodes(nodes, fnOrder) {
   return nodes.map((node) => {
     if (node.type === 'footnoteRef') {
       const num = fnOrder?.get(node.attrs?.id)
-      return new TextRun({ text: num ? String(num) : '*', superScript: true })
+      return xr({ text: num ? String(num) : '*', superScript: true })
     }
     // P4: inline equation → its LaTeX source in Cambria Math (best-effort; see
     // the mathBlock note above and the DOCX-fidelity note).
     if (node.type === 'mathInline') {
-      return new TextRun({ text: node.attrs?.latex || '', font: 'Cambria Math', italics: true })
+      return xr({ text: node.attrs?.latex || '', font: 'Cambria Math', italics: true })
     }
-    if (node.type !== 'text') return new TextRun('')
+    if (node.type !== 'text') return xr('')
     const marks = node.marks || []
     const hasMark = (type) => marks.some((m) => m.type === type)
     const markAttr = (type, attr) => marks.find((m) => m.type === type)?.attrs?.[attr]
@@ -548,7 +561,7 @@ export function inlineNodes(nodes, fnOrder) {
     // is linked, render it underlined+blue and wrap it in a docx ExternalHyperlink.
     const href = markAttr('link', 'href')
     const linkOk = typeof href === 'string' && /^(https?:|mailto:)/i.test(href.trim())
-    const run = new TextRun({
+    const run = xr({
       text: node.text || '',
       bold: hasMark('bold'),
       italics: hasMark('italic'),

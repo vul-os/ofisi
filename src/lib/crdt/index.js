@@ -164,12 +164,14 @@ export class DocsCollabSession extends EventTarget {
         this._fabric.send(reply)
       }
     } else if (msg.type === 'snap' && msg.snap) {
-      // Received a snapshot from a peer; restore only if it has more nodes
-      // than our current state (prevents regressing a richer local state).
-      const remoteNodeCount = msg.snap.nodes ? msg.snap.nodes.length : 0
-      const localNodeCount = this._crdt.snapshot().nodes.length
-      if (remoteNodeCount > localNodeCount) {
-        this._crdt.restore(msg.snap)
+      // Received a snapshot from a peer — MERGE it (union), never a count-gated
+      // restore(). Two peers that edited OFFLINE each hold nodes the other lacks;
+      // the old "restore only if remote has MORE nodes" rule DROPPED the smaller
+      // side's offline edits (and if counts were equal-but-different, neither side
+      // ever learned the other's chars → permanent divergence). merge() folds the
+      // incoming nodes in via idempotent RGA apply, so both peers reach the union.
+      const changed = this._crdt.merge(msg.snap)
+      if (changed) {
         this.dispatchEvent(new CustomEvent('change', { detail: { text: this._crdt.toString(), remote: true } }))
         this._scheduleSnapshotFlush()
       }

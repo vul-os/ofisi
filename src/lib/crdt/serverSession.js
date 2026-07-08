@@ -133,14 +133,14 @@ export class ServerCollabSession extends EventTarget {
       return
     }
     let changed = false
-    // Apply the compaction snapshot first (if larger than our local state).
+    // MERGE the compaction snapshot (union), never a count-gated restore(). If a
+    // user edited OFFLINE, their local snapshot holds nodes the server's snapshot
+    // lacks; the old "restore only if server snap is larger" replaced (and thus
+    // DROPPED) those offline edits, or skipped the server state entirely when the
+    // local count happened to be higher. merge() folds the server nodes in via
+    // idempotent RGA apply so the offline edits survive and still converge.
     if (state?.snap) {
-      const remoteNodes = state.snap.nodes ? state.snap.nodes.length : 0
-      const localNodes = this._crdt.snapshot().nodes.length
-      if (remoteNodes > localNodes) {
-        this._crdt.restore(state.snap)
-        changed = true
-      }
+      if (this._crdt.merge(state.snap)) changed = true
     }
     // Then replay trailing ops (idempotent — dedups by op id).
     for (const rec of state?.ops || []) {

@@ -180,3 +180,120 @@ describe('BUG5: slides tree cold-join seeds the clock (joiner edits win)', () =>
     expect(s.orderedSlides()[0].data).toEqual({ title: 'mine' }) // was still {title:'peer'}
   })
 })
+
+// ---------------------------------------------------------------------------
+// BUG 6 (deep/office2) — OFFLINE→reconnect snapshot exchange LOST edits.
+//
+// The snap/snap-req reconnection handlers (DocsCollabSession, P2PCollabSession,
+// ServerCollabSession) merged an incoming snapshot with restore() gated on
+// "remote node count > local node count". restore() REPLACES local state, so:
+//   • two peers editing OFFLINE each hold nodes the other lacks — the smaller
+//     side's offline edits were silently DROPPED (replaced away), and
+//   • if counts were equal-but-different, neither side restored → permanent
+//     divergence.
+// Fix: TextCRDT.merge() folds the snapshot in via idempotent RGA apply (union),
+// so both peers reach the same superset with ZERO loss regardless of order.
+// ---------------------------------------------------------------------------
+describe('BUG6: offline-reconnect merges snapshots (no lost edits)', () => {
+  function seededPair() {
+    const a = new TextCRDT('A')
+    const baseOps = []
+    for (const [i, ch] of [...'base'].entries()) { const op = a.localInsert(i, ch); a.apply(op); baseOps.push(op) }
+    const b = new TextCRDT('B')
+    for (const op of baseOps) b.apply(op)
+    return { a, b }
+  }
+
+  it('both peers keep their offline edits after a snapshot exchange', () => {
+    const { a, b } = seededPair()
+    for (const [i, ch] of [...'AAA'].entries()) a.apply(a.localInsert(4 + i, ch)) // baseAAA
+    for (const [i, ch] of [...'BB'].entries()) b.apply(b.localInsert(4 + i, ch))  // baseBB
+
+    // Reconnect: exchange snapshots. Order must not matter.
+    const snapA = a.snapshot(); const snapB = b.snapshot()
+    b.merge(snapA) // B had FEWER nodes; the old restore-if-larger DROPPED B's "BB"
+    a.merge(snapB)
+
+    expect(a.toString()).toBe(b.toString())      // converged
+    expect(a.toString()).toContain('AAA')
+    expect(a.toString()).toContain('BB')         // was lost before the fix
+  })
+
+  it('an offline DELETE propagates through the merge', () => {
+    const { a, b } = seededPair()
+    b.apply(b.localDelete(0)) // B deletes 'b' offline → "ase"
+    a.merge(b.snapshot())
+    b.merge(a.snapshot())
+    expect(a.toString()).toBe(b.toString())
+    expect(a.toString()).toBe('ase')            // delete survived + converged
+  })
+
+  it('merge is idempotent (re-merging the same snapshot is a no-op)', () => {
+    const { a, b } = seededPair()
+    for (const [i, ch] of [...'X'].entries()) a.apply(a.localInsert(4 + i, ch))
+    const snap = a.snapshot()
+    expect(b.merge(snap)).toBe(true)
+    expect(b.merge(snap)).toBe(false)           // second merge changes nothing
+    expect(b.toString()).toBe('baseX')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// BUG 7 (deep/office2) — Slides tree cold-join created a PHANTOM DUPLICATE slide
+// after any reorder.
+//
+// A node's ordId ADVANCES on every moveSlide (LWW), so after a reorder
+// ordId !== id. The tree_snapshot handler rebuilt the node with
+// apply(INSERT, id: n.ordId) — keying it in the CRDT map by the MOVE op's id, a
+// DIFFERENT key than n.id. The subsequent SET_TEXT (target: n.id) then found no
+// such node and created a SECOND empty stub. Result: the joiner rendered a
+// phantom duplicate empty slide (two slides where the peer had one) and lost the
+// real slide's node identity → non-convergence after any reorder + cold-join.
+// Fix: rebuild at id=n.id, then replay the MOVE (id: n.ordId) to converge ordKey.
+// ---------------------------------------------------------------------------
+describe('BUG7: slides tree cold-join after a reorder does not duplicate slides', () => {
+  beforeEach(() => { try { localStorage.clear(); sessionStorage.clear() } catch { /* jsdom */ } })
+
+  it('a moved slide cold-joins as ONE slide with the peer node id', () => {
+    const fabA = new FakeFabric()
+    const A = new TreeSession({ sessionId: 'deckX', replicaId: 'A', fabricClient: fabA })
+    const nid = A.insertSlide('m', { title: 'S1' })
+    A.moveSlide(nid, 'p') // ordId now advances past nid
+    const nodes = A._crdt.snapshot()
+    expect(A.orderedSlides()).toHaveLength(1)
+
+    const fabB = new FakeFabric()
+    const B = new TreeSession({ sessionId: 'deckX', replicaId: 'B', fabricClient: fabB })
+    fabB.dispatchEvent(new CustomEvent('message', {
+      detail: { data: JSON.stringify({ type: 'tree_snapshot', session: 'deckX', nodes }) },
+    }))
+
+    const bs = B.orderedSlides()
+    expect(bs).toHaveLength(1)                    // was 2 (a phantom empty stub)
+    expect(bs[0].nodeId).toBe(nid)               // real node identity preserved
+    expect(bs[0].data).toEqual({ title: 'S1' })
+  })
+
+  it('multi-slide reorder cold-joins to the same order and count', () => {
+    const fabA = new FakeFabric()
+    const A = new TreeSession({ sessionId: 'deckY', replicaId: 'A', fabricClient: fabA })
+    const n1 = A.insertSlide('b', { t: 'one' })
+    A.insertSlide('n', { t: 'two' })
+    const n3 = A.insertSlide('t', { t: 'three' })
+    A.moveSlide(n3, 'a') // three to the front
+    const nodes = A._crdt.snapshot()
+
+    const fabB = new FakeFabric()
+    const B = new TreeSession({ sessionId: 'deckY', replicaId: 'B', fabricClient: fabB })
+    fabB.dispatchEvent(new CustomEvent('message', {
+      detail: { data: JSON.stringify({ type: 'tree_snapshot', session: 'deckY', nodes }) },
+    }))
+
+    expect(B.orderedSlides().map((s) => s.nodeId))
+      .toEqual(A.orderedSlides().map((s) => s.nodeId))
+    expect(B.orderedSlides().map((s) => s.data.t)).toEqual(['three', 'one', 'two'])
+    // Joiner edit to the moved slide must still win (clock seeded past ordId).
+    B.setSlide(n1, { t: 'EDITED' })
+    expect(B.orderedSlides().find((s) => s.nodeId === n1).data).toEqual({ t: 'EDITED' })
+  })
+})

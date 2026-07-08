@@ -147,7 +147,7 @@ function docHasStructuredNodes(editor) {
   return found
 }
 
-function applyTextPatch(editor, prevText, nextText) {
+export function applyTextPatch(editor, prevText, nextText) {
   if (prevText === nextText) return
 
   // Tables (and other structured blocks) make the plain-text→doc-position
@@ -179,7 +179,14 @@ function applyTextPatch(editor, prevText, nextText) {
   const from = pre + 1
   const to = from + deleteCount
 
+  // UNDO-INTEGRITY: a REMOTE peer's edit must NOT enter this editor's local undo
+  // history. Without addToHistory:false, TipTap's history extension records the
+  // remote deleteRange/insert, so the local user's next Ctrl+Z reverts the PEER's
+  // change — which then re-broadcasts as a local delete and corrupts the shared
+  // document (and Ctrl+Y could resurrect a peer-deleted node). Tag the transaction
+  // so only genuinely-local keystrokes are undoable.
   editor.chain()
+    .command(({ tr }) => { tr.setMeta('addToHistory', false); return true })
     .deleteRange({ from, to })
     .insertContentAt(from, insertStr)
     .run()
