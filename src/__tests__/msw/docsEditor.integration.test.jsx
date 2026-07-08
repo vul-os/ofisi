@@ -60,6 +60,14 @@ function renderToolbar(content) {
 describe('Docs editor — real TipTap integration (MSW/RTL)', () => {
   beforeEach(() => { saveAs.mockClear() })
 
+  // ── a11y: the toolbar is a proper labelled, horizontally-oriented toolbar ──
+  it('exposes the formatting toolbar as an oriented ARIA toolbar', () => {
+    renderToolbar('<p>x</p>')
+    const bar = screen.getByRole('toolbar', { name: /document formatting/i })
+    expect(bar).toBeInTheDocument()
+    expect(bar.getAttribute('aria-orientation')).toBe('horizontal')
+  })
+
   // ── diffToOps / typing-order regression guard ("olleh") ───────────────────
   it('typing renders characters in order — never reversed', () => {
     const { result } = renderHook(() => useRealEditor('<p></p>'))

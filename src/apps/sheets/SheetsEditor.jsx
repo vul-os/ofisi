@@ -1005,7 +1005,12 @@ export default function SheetsEditor() {
             </Tooltip>
 
             {/* Secondary tools — inline on ≥lg, collapsed into "More" below lg */}
-            <div className="hidden lg:flex items-center gap-1">
+            <div
+              className="hidden lg:flex items-center gap-1"
+              role="toolbar"
+              aria-label="Sheet tools"
+              aria-orientation="horizontal"
+            >
               <NumberFormatMenu
                 selection={selectionRect}
                 activeCell={activeCell}

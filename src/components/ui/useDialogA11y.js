@@ -36,7 +36,9 @@ export function useDialogA11y(containerRef, onClose) {
     const raf = requestAnimationFrame(() => focusables()[0]?.focus())
 
     const onKeyDown = (e) => {
-      if (e.key === 'Escape') { onClose?.(); return }
+      // Stop the Escape from bubbling to a parent dialog / editor handler so
+      // one press closes only this dialog, not everything listening for Escape.
+      if (e.key === 'Escape') { e.stopPropagation(); onClose?.(); return }
       if (e.key !== 'Tab') return
       const items = focusables()
       if (items.length === 0) return

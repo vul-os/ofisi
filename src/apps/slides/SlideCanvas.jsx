@@ -310,6 +310,16 @@ export default function SlideCanvas({
     left: `${fracW * 100}%`, top: `${fracH * 100}%`,
   })
 
+  // Announce the current selection to assistive tech. Kept terse (type when one
+  // object, count when several, "nothing" when cleared) so it reads naturally.
+  let selectionAnnouncement = ''
+  if (selectedIds.length === 1) {
+    const o = (objects || []).find((x) => x.id === selectedIds[0])
+    selectionAnnouncement = o ? `${o.type} object selected` : 'Object selected'
+  } else if (selectedIds.length > 1) {
+    selectionAnnouncement = `${selectedIds.length} objects selected`
+  }
+
   return (
     <div className={`vslide-canvas-wrap ${className}`} style={{ width: '100%' }}>
       <div
@@ -324,6 +334,12 @@ export default function SlideCanvas({
         role="group"
         aria-label="Slide canvas"
       >
+        {/* Selection announcer — polite live region so screen-reader users hear
+            what got selected (object type / count) as focus + selection change. */}
+        <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {selectionAnnouncement}
+        </div>
+
         {/* transparent bg hit layer so clicks on empty space deselect */}
         <div className="vslide-stage-bg absolute inset-0" aria-hidden="true" />
 
@@ -335,7 +351,7 @@ export default function SlideCanvas({
               data-object-id={obj.id}
               role="button"
               tabIndex={editable ? 0 : -1}
-              aria-label={`${obj.type} object`}
+              aria-label={`${obj.type} object${selected ? ', selected' : ''}`}
               aria-pressed={selected}
               className={[
                 'vslide-object absolute',
@@ -380,7 +396,7 @@ export default function SlideCanvas({
               {HANDLES.map((h) => (
                 <div
                   key={h.key}
-                  className="absolute bg-paper border border-accent rounded-xs pointer-events-auto"
+                  className="vslide-handle absolute pointer-events-auto"
                   style={{
                     width: HANDLE, height: HANDLE, cursor: h.cursor,
                     left: `calc(${(h.dx + 1) * 50}% - ${HANDLE / 2}px)`,
@@ -392,7 +408,7 @@ export default function SlideCanvas({
               ))}
               {/* Rotate handle above the top edge */}
               <div
-                className="absolute bg-accent rounded-pill pointer-events-auto"
+                className="vslide-rotate absolute pointer-events-auto"
                 style={{
                   width: 10, height: 10, cursor: 'grab',
                   left: `calc(50% - 5px)`, top: -22,
@@ -438,7 +454,7 @@ export default function SlideCanvas({
 
         {/* Marquee rectangle */}
         {marquee && (
-          <div className="absolute pointer-events-none border border-accent bg-accent/10"
+          <div className="absolute pointer-events-none border border-accent bg-accent/10 animate-fade-in"
             style={{
               left: `${marquee.x * 100}%`, top: `${marquee.y * 100}%`,
               width: `${marquee.w * 100}%`, height: `${marquee.h * 100}%`,

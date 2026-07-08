@@ -14,6 +14,29 @@ import SaveStatus from './SaveStatus'
 import Avatar, { AvatarStack, hueFor } from './Avatar'
 import EmptyState from './EmptyState'
 import DocThumb from './DocThumb'
+import ToolbarButton from './ToolbarButton'
+
+describe('ToolbarButton (shared toolbar toggle primitive)', () => {
+  it('announces the toggle state via aria-pressed only when active', () => {
+    // Inactive → the attribute is omitted (reads as a plain action button).
+    const { rerender } = render(<ToolbarButton title="Bold">B</ToolbarButton>)
+    let btn = screen.getByRole('button', { name: 'Bold' })
+    expect(btn.hasAttribute('aria-pressed')).toBe(false)
+    expect(btn.className).toContain('toolbar-btn')
+
+    // Active → aria-pressed="true" + the .active state class.
+    rerender(<ToolbarButton title="Bold" active>B</ToolbarButton>)
+    btn = screen.getByRole('button', { name: 'Bold' })
+    expect(btn.getAttribute('aria-pressed')).toBe('true')
+    expect(btn.className).toContain('active')
+  })
+
+  it('mirrors the title into an accessible name and disables cleanly', () => {
+    render(<ToolbarButton title="Italic (⌘I)" disabled>I</ToolbarButton>)
+    const btn = screen.getByRole('button', { name: 'Italic (⌘I)' })
+    expect(btn).toBeDisabled()
+  })
+})
 
 describe('SaveStatus', () => {
   it('announces via role=status and renders the mapped label per state', () => {

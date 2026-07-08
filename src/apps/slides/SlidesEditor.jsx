@@ -1307,6 +1307,7 @@ export default function SlidesEditor() {
                 className="toolbar-surface flex items-center gap-0.5 px-2 sm:px-3 h-auto min-h-10 py-1 flex-wrap"
                 role="toolbar"
                 aria-label="Slide formatting"
+                aria-orientation="horizontal"
               >
                 {/* Undo / Redo */}
                 <Tooltip label="Undo (⌘Z)">

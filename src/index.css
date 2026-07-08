@@ -257,6 +257,21 @@
   .animate-drawer-in {
     animation-duration: 1ms;   /* effectively instant, but still "runs" so `both` fill applies */
   }
+
+  /* Inline Tailwind `transition-*` utilities (hover tints, card lifts, toolbar
+   * feedback) are NOT covered by the token motion vars — they hard-code their
+   * own durations. Collapse them here so "reduce" is honoured across every
+   * editor's micro-interactions, not just our named keyframes. Transforms are
+   * neutralised too so hover-lift cards don't shift for motion-sensitive users. */
+  [class*="transition-"] {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+  .hover\:-translate-y-0\.5:hover,
+  .group:hover .group-hover\:-translate-y-0,
+  .hover\:-translate-y-1:hover {
+    transform: none !important;
+  }
 }
 
 /* ============================================================================
@@ -415,7 +430,7 @@
 .toolbar-btn.active {
   background: var(--accent-tint-2);
   color: var(--accent-press);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 .toolbar-btn.active:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent-tint-2) 70%, var(--bg-hover));
@@ -575,6 +590,42 @@
       color-mix(in srgb, var(--accent) 6%, transparent),
       transparent 60%),
     var(--bg);
+}
+
+/* ── Slides selection chrome — resize + rotate handles ──────────────────────
+ * Give the drag/resize/rotate handles a real affordance ladder: rest → hover
+ * (fills accent, lifts) → focus-visible (accent ring). The handles are tiny,
+ * so the hover grow makes them findable without a heavy visual at rest. */
+.vslide-handle {
+  background: var(--paper);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-xs);
+  transition: transform var(--duration-fast) var(--ease-out),
+              background-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+.vslide-handle:hover {
+  background: var(--accent);
+  transform: scale(1.35);
+}
+.vslide-handle:focus-visible {
+  outline: none;
+  background: var(--accent);
+  box-shadow: var(--elev-focus);
+  transform: scale(1.35);
+}
+.vslide-rotate {
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: transform var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
+              opacity var(--duration-fast) var(--ease-out);
+}
+.vslide-rotate:hover { transform: scale(1.25); opacity: 0.9; }
+.vslide-rotate:focus-visible { outline: none; box-shadow: var(--elev-focus); transform: scale(1.25); }
+@media (prefers-reduced-motion: reduce) {
+  .vslide-handle:hover, .vslide-handle:focus-visible,
+  .vslide-rotate:hover, .vslide-rotate:focus-visible { transform: none; }
 }
 
 /* ============================================================================

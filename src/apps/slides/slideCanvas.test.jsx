@@ -405,6 +405,51 @@ describe('SlideCanvas interaction (P2)', () => {
   })
 })
 
+// ── Accessibility: selection announce + handle affordances (polish/office) ───
+describe('SlideCanvas accessibility', () => {
+  const baseObjects = [
+    { id: 'a', type: 'shape', shape: 'rect', x: 0.2, y: 0.2, w: 0.3, h: 0.3, rotation: 0, z: 1, fill: '#7c6af7', stroke: '#5b4dd0', strokeWidth: 2, opacity: 1 },
+    { id: 'b', type: 'text', x: 0.6, y: 0.2, w: 0.3, h: 0.2, rotation: 0, z: 2, html: '<p>hi</p>' },
+  ]
+
+  beforeEach(() => {
+    Element.prototype.getBoundingClientRect = vi.fn(() => ({
+      x: 0, y: 0, left: 0, top: 0, right: 960, bottom: 540, width: 960, height: 540,
+    }))
+  })
+
+  it('exposes a polite live region that announces the single selection by type', () => {
+    const { rerender } = render(
+      <SlideCanvas objects={baseObjects} selectedIds={[]} onSelect={() => {}} onChange={() => {}} />)
+    const live = document.querySelector('[role="status"][aria-live="polite"]')
+    expect(live).toBeTruthy()
+    expect(live.textContent).toBe('')
+    rerender(<SlideCanvas objects={baseObjects} selectedIds={['b']} onSelect={() => {}} onChange={() => {}} />)
+    expect(live.textContent).toBe('text object selected')
+  })
+
+  it('announces a multi-selection as a count', () => {
+    render(<SlideCanvas objects={baseObjects} selectedIds={['a', 'b']} onSelect={() => {}} onChange={() => {}} />)
+    const live = document.querySelector('[role="status"][aria-live="polite"]')
+    expect(live.textContent).toBe('2 objects selected')
+  })
+
+  it('marks the selected object aria-pressed and includes "selected" in its label', () => {
+    render(<SlideCanvas objects={baseObjects} selectedIds={['a']} onSelect={() => {}} onChange={() => {}} />)
+    const el = document.querySelector('[data-object-id="a"]')
+    expect(el.getAttribute('aria-pressed')).toBe('true')
+    expect(el.getAttribute('aria-label')).toContain('selected')
+  })
+
+  it('resize + rotate handles carry the affordance classes (hover/focus ladder)', () => {
+    render(<SlideCanvas objects={baseObjects} selectedIds={['a']} onSelect={() => {}} onChange={() => {}} />)
+    const seHandle = screen.getByLabelText('Resize se')
+    expect(seHandle.className).toContain('vslide-handle')
+    const rot = screen.getByLabelText('Rotate')
+    expect(rot.className).toContain('vslide-rotate')
+  })
+})
+
 // ── Export: PPTX carries positions ──────────────────────────────────────────
 describe('PPTX export fidelity', () => {
   it('addSlide receives positioned text/shape/image with x/y/w/h/rotate', async () => {

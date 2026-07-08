@@ -416,10 +416,18 @@ function FileCard({
 }) {
   return (
     <div className="group bg-paper rounded-lg border border-line hover:border-line-strong hover:shadow-e2 hover:-translate-y-0.5 transition-[transform,box-shadow,border-color] duration-base ease-out cursor-pointer overflow-hidden">
-      {/* Thumbnail — a crafted per-type preview, not a flat tinted box */}
+      {/* Thumbnail — a crafted per-type preview, not a flat tinted box.
+          Keyboard-openable: role=button + Enter/Space, with a focus-visible ring
+          so tab users can find and open the file without a mouse. */}
       <div
-        className="h-28 relative border-b border-line"
+        className="h-28 relative border-b border-line cursor-pointer rounded-t-lg focus-visible:outline-none focus-visible:shadow-focus focus-visible:z-10"
         onClick={onOpen}
+        role="button"
+        tabIndex={0}
+        aria-label={`Open ${file.name}`}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() }
+        }}
       >
         <DocThumb type={type} className="h-full" />
         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 translate-y-0.5 group-hover:translate-y-0 transition-[opacity,transform] duration-fast">

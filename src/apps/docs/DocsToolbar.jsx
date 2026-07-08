@@ -541,6 +541,7 @@ export default function DocsToolbar({
       className="toolbar-surface relative"
       role="toolbar"
       aria-label="Document formatting"
+      aria-orientation="horizontal"
     >
       {/* Single overflow strategy: scroll horizontally (no flex-wrap) so the
           row never reflows into a crushed multi-line block on narrow screens. */}

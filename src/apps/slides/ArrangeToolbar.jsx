@@ -27,6 +27,7 @@ export default function ArrangeToolbar({
       className="toolbar-surface flex items-center gap-0.5 px-2 sm:px-3 h-auto min-h-10 py-1 flex-wrap"
       role="toolbar"
       aria-label="Arrange objects"
+      aria-orientation="horizontal"
     >
       <span className="text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow pr-1">
         {count} selected

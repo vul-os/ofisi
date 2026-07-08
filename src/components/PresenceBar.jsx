@@ -205,7 +205,18 @@ export default function PresenceBar({ roster = [], max = 5, className = '' }) {
   if (!roster || roster.length === 0) return null
 
   const visible  = roster.slice(0, max)
-  const overflow = roster.length - max
+  const hidden   = roster.slice(max)
+  const overflow = hidden.length
+  // Name the hidden collaborators in the "+N" tooltip so hovering reveals who
+  // else is here (capped so a large room doesn't produce a runaway title).
+  const overflowNames = hidden
+    .slice(0, 8)
+    .map((p) => p.displayName)
+    .filter(Boolean)
+    .join(', ')
+  const overflowTitle = overflowNames
+    ? `${overflow} more: ${overflowNames}${overflow > 8 ? ', …' : ''}`
+    : `${overflow} more`
 
   return (
     <div
@@ -228,7 +239,8 @@ export default function PresenceBar({ roster = [], max = 5, className = '' }) {
         <div
           className="flex items-center justify-center rounded-full bg-bg-elev2 border border-line text-ink-muted font-medium select-none"
           style={{ width: 28, height: 28, fontSize: 11, marginLeft: -8 }}
-          title={`${overflow} more`}
+          title={overflowTitle}
+          aria-label={overflowTitle}
         >
           +{overflow}
         </div>
