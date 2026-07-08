@@ -24,11 +24,12 @@ type LocalStorage struct {
 	repliesDir     string
 	sealedDir      string // OFFICE-46: sealed PDF store
 	suggestionsDir string // OFFICE-27: track-changes sidecar
+	foldersDir     string // parity: folder tree
 }
 
 func NewLocalStorage(cfg *config.Config) (*LocalStorage, error) {
 	dir := cfg.Server.DataDir
-	for _, sub := range []string{"", "versions", "envelopes", "signers", "audit", "comments", "replies", "sealed", "suggestions"} {
+	for _, sub := range []string{"", "versions", "envelopes", "signers", "audit", "comments", "replies", "sealed", "suggestions", "folders"} {
 		d := filepath.Join(dir, sub)
 		if err := os.MkdirAll(d, 0755); err != nil {
 			return nil, fmt.Errorf("create dir %s: %w", d, err)
@@ -44,6 +45,7 @@ func NewLocalStorage(cfg *config.Config) (*LocalStorage, error) {
 		repliesDir:     filepath.Join(dir, "replies"),
 		sealedDir:      filepath.Join(dir, "sealed"),
 		suggestionsDir: filepath.Join(dir, "suggestions"),
+		foldersDir:     filepath.Join(dir, "folders"),
 	}, nil
 }
 
@@ -191,6 +193,14 @@ func (s *LocalStorage) UpdateFile(file *models.File) error {
 	file.CreatedAt = existing.CreatedAt
 	file.UpdatedAt = time.Now()
 	file.Rev = existing.Rev + 1 // advance the revision on every committed write
+	// Preserve organization metadata (folder/star/trash) across a content PUT:
+	// the content-update path only carries Name/Content/Rev, so without this the
+	// file's placement and favorite/trash state would be silently wiped on save.
+	// Reparent/star/trash mutations go through the dedicated Move path instead.
+	file.ParentID = existing.ParentID
+	file.Starred = existing.Starred
+	file.Trashed = existing.Trashed
+	file.TrashedAt = existing.TrashedAt
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return err
@@ -210,6 +220,132 @@ func (s *LocalStorage) DeleteFile(id string) error {
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("file not found")
+		}
+		return err
+	}
+	return nil
+}
+
+// UpdateFileMeta persists only the organization metadata (folder/star/trash)
+// without snapshotting a version or advancing the content rev.
+func (s *LocalStorage) UpdateFileMeta(id, parentID string, starred, trashed bool, trashedAt *time.Time) error {
+	existing, err := s.GetFile(id)
+	if err != nil {
+		return err
+	}
+	existing.ParentID = parentID
+	existing.Starred = starred
+	existing.Trashed = trashed
+	existing.TrashedAt = trashedAt
+	existing.UpdatedAt = time.Now()
+	data, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return err
+	}
+	path, err := s.filePath(id)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// ============================================================
+// Folders (parity: file organization) — folders/<id>.json
+// ============================================================
+
+func (s *LocalStorage) folderPath(id string) (string, error) {
+	if !validID(id) {
+		return "", errInvalidID
+	}
+	return filepath.Join(s.foldersDir, id+".json"), nil
+}
+
+func (s *LocalStorage) ListFolders() ([]*models.Folder, error) {
+	entries, err := os.ReadDir(s.foldersDir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var folders []*models.Folder
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		id := entry.Name()[:len(entry.Name())-5]
+		f, err := s.GetFolder(id)
+		if err != nil {
+			continue
+		}
+		folders = append(folders, f)
+	}
+	sort.Slice(folders, func(i, j int) bool {
+		return folders[i].Name < folders[j].Name
+	})
+	return folders, nil
+}
+
+func (s *LocalStorage) GetFolder(id string) (*models.Folder, error) {
+	path, err := s.folderPath(id)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("folder not found")
+		}
+		return nil, err
+	}
+	var f models.Folder
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+func (s *LocalStorage) CreateFolder(f *models.Folder) error {
+	now := time.Now()
+	f.CreatedAt = now
+	f.UpdatedAt = now
+	data, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return err
+	}
+	path, err := s.folderPath(f.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+func (s *LocalStorage) UpdateFolder(f *models.Folder) error {
+	existing, err := s.GetFolder(f.ID)
+	if err != nil {
+		return err
+	}
+	f.CreatedAt = existing.CreatedAt
+	f.UpdatedAt = time.Now()
+	data, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return err
+	}
+	path, err := s.folderPath(f.ID)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+func (s *LocalStorage) DeleteFolder(id string) error {
+	path, err := s.folderPath(id)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("folder not found")
 		}
 		return err
 	}

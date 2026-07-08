@@ -77,6 +77,34 @@ export const api = {
   deleteFile: (id) =>
     request(`/files/${id}`, { method: 'DELETE' }),
 
+  // Parity: file organization — folders / star / trash.
+  // moveFile reparents a file and/or toggles star/trash. Any field left
+  // undefined is unchanged server-side.
+  moveFile: (id, { parentId, starred, trashed } = {}) => {
+    const body = {}
+    if (parentId !== undefined) body.parent_id = parentId
+    if (starred !== undefined) body.starred = starred
+    if (trashed !== undefined) body.trashed = trashed
+    return request(`/files/${id}/move`, { method: 'POST', body: JSON.stringify(body) })
+  },
+  listFolders: () => request('/folders'),
+  createFolder: (name, parentId = '') =>
+    request('/folders', { method: 'POST', body: JSON.stringify({ name, parent_id: parentId }) }),
+  updateFolder: (id, patch) =>
+    request(`/folders/${id}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  trashFolder: (id, trashed) =>
+    request(`/folders/${id}/trash`, { method: 'POST', body: JSON.stringify({ trashed }) }),
+  deleteFolder: (id) =>
+    request(`/folders/${id}`, { method: 'DELETE' }),
+
+  // Parity: collaborator roster (for @-mention autocomplete).
+  listFileCollaborators: (id) => request(`/files/${id}/collaborators`),
+
+  // Parity: in-app notifications (surfaces @-mentions).
+  listNotifications: () => request('/notifications'),
+  markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: 'POST' }),
+  markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
+
   // OFFICE-08: version history
   listVersions: (id) => request(`/files/${id}/versions`),
   restoreVersion: (id, vid) =>
@@ -106,14 +134,14 @@ export const api = {
 
   // OFFICE-26: comments (anchored, threaded, resolvable)
   listComments: (fileId) => request(`/files/${fileId}/comments`),
-  createComment: (fileId, anchor, authorId, body) =>
-    request(`/files/${fileId}/comments`, { method: 'POST', body: JSON.stringify({ anchor, author_id: authorId, body }) }),
+  createComment: (fileId, anchor, authorId, body, mentions = []) =>
+    request(`/files/${fileId}/comments`, { method: 'POST', body: JSON.stringify({ anchor, author_id: authorId, body, mentions }) }),
   updateComment: (fileId, commentId, patch) =>
     request(`/files/${fileId}/comments/${commentId}`, { method: 'PUT', body: JSON.stringify(patch) }),
   deleteComment: (fileId, commentId) =>
     request(`/files/${fileId}/comments/${commentId}`, { method: 'DELETE' }),
-  createReply: (fileId, commentId, authorId, body) =>
-    request(`/files/${fileId}/comments/${commentId}/replies`, { method: 'POST', body: JSON.stringify({ author_id: authorId, body }) }),
+  createReply: (fileId, commentId, authorId, body, mentions = []) =>
+    request(`/files/${fileId}/comments/${commentId}/replies`, { method: 'POST', body: JSON.stringify({ author_id: authorId, body, mentions }) }),
   updateReply: (fileId, commentId, replyId, patch) =>
     request(`/files/${fileId}/comments/${commentId}/replies/${replyId}`, { method: 'PUT', body: JSON.stringify(patch) }),
   deleteReply: (fileId, commentId, replyId) =>

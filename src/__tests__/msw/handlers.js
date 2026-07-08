@@ -21,6 +21,7 @@ export const mockState = {
   files: {},
   versions: {},     // fileId → [{ id, name, created_at, label }]
   comments: {},     // fileId → [comment]
+  collaborators: {}, // fileId → [{ account_id, role }] (for @-mention autocomplete)
   suggestions: {},  // fileId → [suggestion]
   // WAVE37 server-collab authoritative op log: fileId → { seq, ops:[{seq,origin,op}] }.
   collab: {},
@@ -51,6 +52,7 @@ export function resetMock({ role = 'owner' } = {}) {
     ],
   }
   mockState.comments = { doc1: [] }
+  mockState.collaborators = { doc1: [] }
   mockState.suggestions = { doc1: [] }
   mockState.collab = { doc1: { seq: 0, ops: [] } }
 }
@@ -114,6 +116,12 @@ export const handlers = [
   }),
 
   // ── Comments ─────────────────────────────────────────────────────────────
+  // Collaborator roster for @-mention autocomplete (parity).
+  http.get('/api/files/:id/collaborators', ({ params }) => {
+    log('GET', `/files/${params.id}/collaborators`)
+    return HttpResponse.json({ collaborators: mockState.collaborators?.[params.id] || [] })
+  }),
+
   http.get('/api/files/:id/comments', ({ params }) => {
     log('GET', `/files/${params.id}/comments`)
     return HttpResponse.json(mockState.comments[params.id] || [])
@@ -127,6 +135,7 @@ export const handlers = [
       anchor: body.anchor,
       author_id: body.author_id,
       body: body.body,
+      mentions: body.mentions || [],
       state: 'open',
       created_at: new Date().toISOString(),
       replies: [],
@@ -152,7 +161,7 @@ export const handlers = [
   http.post('/api/files/:id/comments/:cid/replies', async ({ params, request }) => {
     log('POST', `/files/${params.id}/comments/${params.cid}/replies`)
     const body = await request.json()
-    const r = { id: uid('r'), author_id: body.author_id, body: body.body, created_at: new Date().toISOString() }
+    const r = { id: uid('r'), author_id: body.author_id, body: body.body, mentions: body.mentions || [], created_at: new Date().toISOString() }
     const c = (mockState.comments[params.id] || []).find((x) => x.id === params.cid)
     if (c) (c.replies ||= []).push(r)
     return HttpResponse.json(r)

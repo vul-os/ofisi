@@ -16,6 +16,7 @@ import (
 
 	"vulos-office/backend/billing"
 	"vulos-office/backend/models"
+	"vulos-office/backend/notify"
 	"vulos-office/backend/storage"
 
 	"github.com/gin-gonic/gin"
@@ -23,12 +24,19 @@ import (
 )
 
 type CommentHandler struct {
-	store storage.Storage
-	authz *FileAuthz
+	store  storage.Storage
+	authz  *FileAuthz
+	notify notify.Store
 }
 
 func NewCommentHandler(store storage.Storage) *CommentHandler {
-	return &CommentHandler{store: store, authz: SharedFileAuthz()}
+	return &CommentHandler{store: store, authz: SharedFileAuthz(), notify: SharedNotifyStore()}
+}
+
+// NewCommentHandlerWith builds a handler over caller-supplied authz + notify
+// stores (tests).
+func NewCommentHandlerWith(store storage.Storage, authz *FileAuthz, nf notify.Store) *CommentHandler {
+	return &CommentHandler{store: store, authz: authz, notify: nf}
 }
 
 // hlcNow returns a simple HLC-compatible clock string (wall-ms padded, monotone via uuid suffix).
@@ -85,6 +93,11 @@ func (h *CommentHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// Validate @-mentions against the file's actual collaborators so a comment can
+	// never mention — and thereby notify — an account that has no access to the
+	// document (prevents using mentions as a cross-account probe/spam vector).
+	mentions := h.validMentions(fileID, req.Mentions)
+
 	cm := &models.Comment{
 		ID:     uuid.New().String(),
 		FileID: fileID,
@@ -96,12 +109,79 @@ func (h *CommentHandler) Create(c *gin.Context) {
 		Body:     req.Body,
 		State:    models.CommentOpen,
 		SeqClock: hlcNow(),
+		Mentions: mentions,
 	}
 	if err := h.store.CreateComment(cm); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Surface an in-app notification to each mentioned collaborator (except the
+	// author mentioning themselves).
+	h.notifyMentions(c, fileID, cm.ID, cm.AuthorID, cm.Body, mentions)
 	c.JSON(http.StatusCreated, cm)
+}
+
+// validMentions filters the client-supplied mention ids down to accounts that
+// are ACTUALLY collaborators/owner of the file (the authoritative ACL record).
+// Anything else is dropped, so a mention can never address a non-participant.
+func (h *CommentHandler) validMentions(fileID string, requested []string) []string {
+	if len(requested) == 0 {
+		return nil
+	}
+	rec, ok, err := h.authz.Store().Get(fileID)
+	if err != nil || !ok {
+		return nil
+	}
+	allowed := make(map[string]bool, len(rec.Collaborators)+1)
+	if rec.Owner != "" {
+		allowed[rec.Owner] = true
+	}
+	for _, ce := range rec.Collaborators {
+		allowed[ce.AccountID] = true
+	}
+	seen := make(map[string]bool, len(requested))
+	out := make([]string, 0, len(requested))
+	for _, m := range requested {
+		if m == "" || seen[m] || !allowed[m] {
+			continue
+		}
+		seen[m] = true
+		out = append(out, m)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// notifyMentions writes one in-app notification per mentioned account (skipping
+// the actor themselves). Best-effort — a notify failure never fails the comment.
+func (h *CommentHandler) notifyMentions(c *gin.Context, fileID, commentID, actor, body string, mentions []string) {
+	if len(mentions) == 0 || h.notify == nil {
+		return
+	}
+	fileName := ""
+	if f, err := h.store.GetFile(fileID); err == nil {
+		fileName = f.Name
+	}
+	snippet := body
+	if len(snippet) > 140 {
+		snippet = snippet[:140]
+	}
+	for _, acct := range mentions {
+		if acct == actor {
+			continue // don't notify yourself
+		}
+		_ = h.notify.Create(&models.Notification{
+			Account:   acct,
+			Kind:      models.NotifyMention,
+			Actor:     actor,
+			FileID:    fileID,
+			FileName:  fileName,
+			CommentID: commentID,
+			Snippet:   snippet,
+		})
+	}
 }
 
 // Update edits the body or state of a comment.
@@ -209,6 +289,9 @@ func (h *CommentHandler) CreateReply(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Notify @-mentioned collaborators on the reply (validated against the ACL).
+	mentions := h.validMentions(fileID, req.Mentions)
+	h.notifyMentions(c, fileID, commentID, r.AuthorID, r.Body, mentions)
 	c.JSON(http.StatusCreated, r)
 }
 

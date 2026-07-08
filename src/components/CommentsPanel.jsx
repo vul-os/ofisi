@@ -24,6 +24,7 @@ import { X, MessageSquare, CheckCircle, RotateCcw, Trash2, Send, ChevronDown, Ch
 import { api } from '../lib/api'
 import { getCommentStore } from '../lib/crdt/comments'
 import { IconButton, Tabs, LoadingState, EmptyState } from './ui'
+import MentionInput, { getMentions, renderMentions } from './MentionInput'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,7 +50,7 @@ function anchorLabel(anchor) {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function ReplyItem({ reply, fileId, commentId, authorId, onDeleted }) {
+function ReplyItem({ reply, fileId, commentId, authorId, collaborators = [], onDeleted }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(reply.body)
   const [busy, setBusy] = useState(false)
@@ -120,7 +121,7 @@ function ReplyItem({ reply, fileId, commentId, authorId, onDeleted }) {
           </div>
         </div>
       ) : (
-        <p className="text-xs text-ink whitespace-pre-wrap leading-snug">{reply.body}</p>
+        <p className="text-xs text-ink whitespace-pre-wrap leading-snug">{renderMentions(reply.body, collaborators)}</p>
       )}
       {isOwn && !editing && (
         <div className="flex gap-2">
@@ -132,7 +133,7 @@ function ReplyItem({ reply, fileId, commentId, authorId, onDeleted }) {
   )
 }
 
-function CommentItem({ item, fileId, authorId, onUpdated, onDeleted, onChange, onJump, isActive }) {
+function CommentItem({ item, fileId, authorId, collaborators = [], onUpdated, onDeleted, onChange, onJump, isActive }) {
   const [expanded, setExpanded] = useState(true)
   const rootRef = useRef(null)
 
@@ -156,9 +157,10 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted, onChange, o
   const handleReply = async () => {
     const body = replyDraft.trim()
     if (!body) return
+    const mentions = getMentions(body, collaborators)
     setBusy(true)
     try {
-      const r = await api.createReply(fileId, item.id, authorId, body)
+      const r = await api.createReply(fileId, item.id, authorId, body, mentions)
       const store = getCommentStore(fileId)
       store.addReply(item.id, authorId, body)
       setReplies((prev) => [...prev, r])
@@ -307,7 +309,7 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted, onChange, o
               </div>
             </div>
           ) : (
-            <p className="text-sm text-ink whitespace-pre-wrap leading-snug">{item.body}</p>
+            <p className="text-sm text-ink whitespace-pre-wrap leading-snug">{renderMentions(item.body, collaborators)}</p>
           )}
 
           {/* Replies */}
@@ -320,6 +322,7 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted, onChange, o
                   fileId={fileId}
                   commentId={item.id}
                   authorId={authorId}
+                  collaborators={collaborators}
                   onDeleted={(rid) => setReplies((prev) => prev.filter((x) => x.id !== rid))}
                 />
               ))}
@@ -329,13 +332,15 @@ function CommentItem({ item, fileId, authorId, onUpdated, onDeleted, onChange, o
           {/* Reply input */}
           {!isResolved && (
             <div className="flex items-end gap-1.5 pt-1">
-              <textarea
+              <MentionInput
                 value={replyDraft}
-                onChange={(e) => setReplyDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleReply() } }}
+                onChange={setReplyDraft}
+                onEnter={handleReply}
+                collaborators={collaborators}
                 rows={1}
                 placeholder="Reply…"
-                className="flex-1 text-xs bg-paper border border-line rounded-sm px-2 py-1 resize-none outline-none focus:border-accent focus:shadow-focus transition-colors min-h-[28px]"
+                wrapperClassName="flex-1"
+                className="w-full text-xs bg-paper border border-line rounded-sm px-2 py-1 resize-none outline-none focus:border-accent focus:shadow-focus transition-colors min-h-[28px]"
               />
               <button
                 onClick={handleReply}
@@ -401,6 +406,7 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('all') // 'all' | 'open' | 'resolved'
+  const [collaborators, setCollaborators] = useState([]) // for @-mention autocomplete
   const textareaRef = useRef(null)
 
   // Hydrate from server + CRDT store on mount
@@ -417,6 +423,17 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
       .finally(() => setLoading(false))
   }, [fileId])
 
+  // Load the file's collaborator roster for @-mention autocomplete. The server
+  // returns only accounts that actually have access, so a mention can never
+  // target — or notify — a non-participant. Best-effort: a failure just means
+  // no autocomplete (typing a bare "@name" simply won't resolve to an id).
+  useEffect(() => {
+    if (!fileId) return
+    api.listFileCollaborators(fileId)
+      .then((res) => setCollaborators(res?.collaborators || []))
+      .catch(() => setCollaborators([]))
+  }, [fileId])
+
   const refresh = useCallback(() => {
     const store = getCommentStore(fileId)
     setComments(store.list())
@@ -426,9 +443,10 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
     const body = newBody.trim()
     if (!body) return
     const anchor = anchorCtx || { type: 'slide', slide_id: '', snapshot: '' }
+    const mentions = getMentions(body, collaborators)
     setBusy(true)
     try {
-      const c = await api.createComment(fileId, anchor, authorId, body)
+      const c = await api.createComment(fileId, anchor, authorId, body, mentions)
       const store = getCommentStore(fileId)
       store.addComment(anchor, authorId, body)
       setComments(store.list())
@@ -502,11 +520,12 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
             On “{anchorLabel(anchorCtx)}”
           </p>
         )}
-        <textarea
-          ref={textareaRef}
+        <MentionInput
+          textareaRef={textareaRef}
           value={newBody}
-          onChange={(e) => setNewBody(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAdd() } }}
+          onChange={setNewBody}
+          onEnter={handleAdd}
+          collaborators={collaborators}
           rows={2}
           placeholder="Add a comment…"
           className="w-full text-sm bg-bg-elev2 border border-line rounded-sm px-2 py-1.5 resize-none outline-none focus:border-accent focus:shadow-focus focus:bg-paper transition-colors"
@@ -539,6 +558,7 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
             item={item}
             fileId={fileId}
             authorId={authorId}
+            collaborators={collaborators}
             onUpdated={handleUpdated}
             onDeleted={handleDeleted}
             onChange={onChange}

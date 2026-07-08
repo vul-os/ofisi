@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"vulos-office/backend/config"
 	"vulos-office/backend/models"
@@ -37,6 +38,20 @@ type Storage interface {
 	CreateFile(file *models.File) error
 	UpdateFile(file *models.File) error
 	DeleteFile(id string) error
+	// UpdateFileMeta persists ONLY the organization metadata (parent folder,
+	// star, trash) of a file. Unlike UpdateFile it does NOT snapshot a version,
+	// touch content, or advance the optimistic-concurrency rev — a move/star/
+	// trash is metadata, not a content edit. The file must already exist.
+	UpdateFileMeta(id, parentID string, starred, trashed bool, trashedAt *time.Time) error
+
+	// --- Folders (parity: file organization) ---
+	// Folders form a per-account tree; ACL ownership is recorded separately by
+	// the handler (fileacl), exactly like files. The store is ACL-agnostic.
+	ListFolders() ([]*models.Folder, error)
+	GetFolder(id string) (*models.Folder, error)
+	CreateFolder(f *models.Folder) error
+	UpdateFolder(f *models.Folder) error
+	DeleteFolder(id string) error
 
 	// --- Version history (OFFICE-08 / OFFICE-28) ---
 	// Snapshots created before each UpdateFile.

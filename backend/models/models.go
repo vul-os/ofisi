@@ -20,9 +20,60 @@ type File struct {
 	// last read, and the store rejects a stale PUT with a conflict (compare-and-
 	// swap) so a concurrent editor's save can't silently overwrite a newer one.
 	// rev 0 means "unknown / force" (legacy clients that don't send it).
-	Rev       int64     `json:"rev"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Rev int64 `json:"rev"`
+	// ParentID is the id of the folder this file lives in ("" = root). Folders
+	// form a tree per-owner; a file's parent is only ever a folder OWNED by the
+	// same account (enforced server-side), so folder organization can never leak
+	// or move another account's file into a foreign tree (see FileHandler.Move).
+	ParentID string `json:"parent_id,omitempty"`
+	// Starred marks a file as a favorite for quick access. Per-account UX flag.
+	Starred bool `json:"starred,omitempty"`
+	// Trashed soft-deletes a file: it disappears from normal listings and moves
+	// to the Trash view, from which it can be Restored or PERMANENTLY deleted.
+	// A hard DELETE is only permitted from trash (or as the legacy direct path).
+	Trashed   bool       `json:"trashed,omitempty"`
+	TrashedAt *time.Time `json:"trashed_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// Folder is a container in the per-account file tree. Folders themselves are
+// ACL-owned exactly like files (an owner is recorded on create), so a folder —
+// and everything filed under it — is private by default and can never be seen
+// or reparented by another account. A folder may nest under another folder via
+// ParentID ("" = root). Trashed folders behave like trashed files.
+type Folder struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	ParentID  string     `json:"parent_id,omitempty"`
+	Starred   bool       `json:"starred,omitempty"`
+	Trashed   bool       `json:"trashed,omitempty"`
+	TrashedAt *time.Time `json:"trashed_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// CreateFolderRequest is the body for POST /api/folders.
+type CreateFolderRequest struct {
+	Name     string `json:"name" binding:"required"`
+	ParentID string `json:"parent_id,omitempty"`
+}
+
+// UpdateFolderRequest is the body for PUT /api/folders/:id (rename / reparent /
+// star / trash toggle). All fields optional; only supplied ones are applied.
+type UpdateFolderRequest struct {
+	Name     *string `json:"name,omitempty"`
+	ParentID *string `json:"parent_id,omitempty"`
+	Starred  *bool   `json:"starred,omitempty"`
+}
+
+// MoveFileRequest is the body for POST /api/files/:id/move — reparent and/or
+// toggle star/trash. All fields are optional pointers so an omitted field is
+// left unchanged.
+type MoveFileRequest struct {
+	ParentID *string `json:"parent_id,omitempty"` // target folder id ("" = root)
+	Starred  *bool   `json:"starred,omitempty"`
+	Trashed  *bool   `json:"trashed,omitempty"` // true = to trash, false = restore
 }
 
 // FileVersion is an immutable snapshot of a file's content taken before each save.
@@ -141,15 +192,22 @@ const (
 // Comment is the root of a thread, anchored to a file location.
 // SeqClock is a CRDT HLC tick for LWW-merge across peers.
 type Comment struct {
-	ID        string        `json:"id"`
-	FileID    string        `json:"file_id"`
-	Anchor    CommentAnchor `json:"anchor"`
-	AuthorID  string        `json:"author_id"`
-	Body      string        `json:"body"`
-	State     CommentState  `json:"state"`
-	SeqClock  string        `json:"seq_clock"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
+	ID       string        `json:"id"`
+	FileID   string        `json:"file_id"`
+	Anchor   CommentAnchor `json:"anchor"`
+	AuthorID string        `json:"author_id"`
+	Body     string        `json:"body"`
+	State    CommentState  `json:"state"`
+	SeqClock string        `json:"seq_clock"`
+	// Mentions is the set of account ids @-mentioned in Body. It is a stored
+	// reference list (validated server-side against the file's collaborators, so
+	// a comment can never mention — and thereby notify — a stranger). The raw
+	// Body keeps the "@name" text; the client renders it as a chip. Text is
+	// never HTML — it is always escaped on render (React text node), so a
+	// crafted mention/body can carry no markup or script.
+	Mentions  []string  `json:"mentions,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // CommentReply is a threaded reply to a Comment.
@@ -177,6 +235,36 @@ type CreateCommentRequest struct {
 	Anchor   CommentAnchor `json:"anchor" binding:"required"`
 	AuthorID string        `json:"author_id"`
 	Body     string        `json:"body" binding:"required"`
+	// Mentions is the client's list of @-mentioned account ids. It is a HINT
+	// only: the server re-validates each id against the file's collaborator set
+	// before storing/notifying, so a client can never mention a non-collaborator.
+	Mentions []string `json:"mentions,omitempty"`
+}
+
+// ---- Notifications (parity: @-mention surfacing) ----
+
+// NotificationKind classifies an in-app notification entry.
+type NotificationKind string
+
+const (
+	// NotifyMention is raised when an account is @-mentioned in a comment/reply.
+	NotifyMention NotificationKind = "mention"
+)
+
+// Notification is a per-account in-app activity entry. It is addressed to a
+// single Account (the recipient) and is only ever listed/mutated by that same
+// verified account — never cross-account (see NotificationHandler).
+type Notification struct {
+	ID        string           `json:"id"`
+	Account   string           `json:"account"` // recipient account id (owner of this row)
+	Kind      NotificationKind `json:"kind"`
+	Actor     string           `json:"actor"`             // who triggered it (comment author)
+	FileID    string           `json:"file_id,omitempty"` // document context
+	FileName  string           `json:"file_name,omitempty"`
+	CommentID string           `json:"comment_id,omitempty"`
+	Snippet   string           `json:"snippet,omitempty"` // plain-text comment excerpt (escaped on render)
+	Read      bool             `json:"read"`
+	CreatedAt time.Time        `json:"created_at"`
 }
 
 type UpdateCommentRequest struct {
@@ -185,8 +273,9 @@ type UpdateCommentRequest struct {
 }
 
 type CreateReplyRequest struct {
-	AuthorID string `json:"author_id"`
-	Body     string `json:"body" binding:"required"`
+	AuthorID string   `json:"author_id"`
+	Body     string   `json:"body" binding:"required"`
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 type UpdateReplyRequest struct {

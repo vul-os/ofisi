@@ -251,8 +251,20 @@ func main() {
 	writes.POST("/files", fileHandler.Create)
 	writes.PUT("/files/:id", fileHandler.Update)
 	writes.DELETE("/files/:id", fileHandler.Delete)
+	// Parity: file organization — move into a folder / star / trash-toggle.
+	writes.POST("/files/:id/move", fileHandler.Move)
+	// Parity: collaborator roster for @-mention autocomplete.
+	protected.GET("/files/:id/collaborators", fileHandler.Collaborators)
 	// Per-file sharing (owner/admin grants or revokes another account's access).
 	writes.POST("/files/:id/share", fileHandler.Share)
+
+	// Parity: folder tree (per-account, ACL-owned like files).
+	folderHandler := handlers.NewFolderHandler(store)
+	protected.GET("/folders", folderHandler.List)
+	writes.POST("/folders", folderHandler.Create)
+	writes.PUT("/folders/:id", folderHandler.Update)
+	writes.POST("/folders/:id/trash", folderHandler.Trash)
+	writes.DELETE("/folders/:id", folderHandler.Delete)
 
 	// OFFICE-08: version history endpoints.
 	versionHandler := handlers.NewVersionHandler(store)
@@ -274,6 +286,12 @@ func main() {
 	writes.POST("/files/:id/comments/:cid/replies", commentHandler.CreateReply)
 	writes.PUT("/files/:id/comments/:cid/replies/:rid", commentHandler.UpdateReply)
 	writes.DELETE("/files/:id/comments/:cid/replies/:rid", commentHandler.DeleteReply)
+
+	// Parity: in-app notifications (surfaces @-mentions to the mentioned user).
+	notificationHandler := handlers.NewNotificationHandler()
+	protected.GET("/notifications", notificationHandler.List)
+	writes.POST("/notifications/read-all", notificationHandler.MarkAllRead)
+	writes.POST("/notifications/:id/read", notificationHandler.MarkRead)
 
 	// OFFICE-27: suggestion / track-changes mode.
 	suggestionHandler := handlers.NewSuggestionHandler(store)

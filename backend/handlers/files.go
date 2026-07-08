@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"vulos-office/backend/audit"
 	"vulos-office/backend/billing"
@@ -245,6 +246,103 @@ func (h *FileHandler) Delete(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
+// Collaborators returns the owner + collaborator account ids of a file, for the
+// @-mention autocomplete. Any caller WITH ACCESS to the file may read the list
+// (they can already see who is on the doc), but a caller without access gets a
+// 404 (no existence leak). Only ids the ACL actually records are returned, so
+// the autocomplete can never suggest — and a mention can never target — a
+// non-participant.
+//
+// GET /api/files/:id/collaborators
+func (h *FileHandler) Collaborators(c *gin.Context) {
+	id := c.Param("id")
+	if !h.authz.require(c, id) {
+		return
+	}
+	rec, ok, err := h.authz.Store().Get(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	people := []gin.H{}
+	if ok {
+		if rec.Owner != "" {
+			people = append(people, gin.H{"account_id": rec.Owner, "role": "owner"})
+		}
+		for _, ce := range rec.Collaborators {
+			people = append(people, gin.H{"account_id": ce.AccountID, "role": string(ce.Role)})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"collaborators": people})
+}
+
+// Move reparents a file into a folder and/or toggles its star / trash state.
+// This is a metadata-only mutation (no content version snapshot, no rev bump).
+//
+// SECURITY / ACL:
+//   - The caller must OWN the file (requireOwner) — organization is an owner
+//     action, so a collaborator can't relocate or trash someone else's file.
+//   - Moving INTO a folder additionally requires the caller to OWN the target
+//     folder, so a file can never be filed into another account's tree.
+//
+// POST /api/files/:id/move { "parent_id": "...", "starred": true, "trashed": false }
+func (h *FileHandler) Move(c *gin.Context) {
+	id := c.Param("id")
+	if !h.authz.requireOwner(c, id) {
+		return
+	}
+	file, err := h.store.GetFile(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		return
+	}
+	var req models.MoveFileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	parentID := file.ParentID
+	if req.ParentID != nil {
+		target := *req.ParentID
+		if target != "" {
+			// The destination folder must exist AND be owned by the caller so a
+			// file can never be relocated into another account's tree.
+			if !h.authz.requireOwner(c, target) {
+				return
+			}
+			if _, ferr := h.store.GetFolder(target); ferr != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "target folder not found"})
+				return
+			}
+		}
+		parentID = target
+	}
+
+	starred := file.Starred
+	if req.Starred != nil {
+		starred = *req.Starred
+	}
+	trashed := file.Trashed
+	trashedAt := file.TrashedAt
+	if req.Trashed != nil {
+		trashed = *req.Trashed
+		if trashed {
+			now := time.Now()
+			trashedAt = &now
+		} else {
+			trashedAt = nil
+		}
+	}
+
+	if err := h.store.UpdateFileMeta(id, parentID, starred, trashed, trashedAt); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	updated, _ := h.store.GetFile(id)
+	c.JSON(http.StatusOK, updated)
 }
 
 // Share grants or revokes another account's access to a file.

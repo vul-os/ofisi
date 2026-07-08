@@ -22,16 +22,18 @@
  * `useAuthStore` + `useFilesStore`.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Home as HomeIcon, FileText, Table2, Presentation, FileSearch, MessageSquare,
   LogOut, ChevronLeft, ChevronRight, Settings as SettingsIcon, Plus,
-  Menu, X,
+  Menu, X, Bell,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useFilesStore } from '../store/filesStore'
+import { useNotificationsStore } from '../store/notificationsStore'
 import NewFileModal from './NewFileModal'
+import NotificationsPanel from './NotificationsPanel'
 import { Sidebar, IconButton, Tooltip, ThemeSwitch } from './ui'
 
 // Each app icon carries one low-saturation tint at rest (so users find
@@ -68,6 +70,17 @@ function SidebarContent({ collapsed, onNavigate, onNewFile }) {
   const { status, logout } = useAuthStore()
   const { files } = useFilesStore()
   const navigate = useNavigate()
+  const { items: notifs, fetch: fetchNotifs } = useNotificationsStore()
+  const [notifOpen, setNotifOpen] = useState(false)
+
+  // Poll for @-mention notifications so the badge stays fresh.
+  useEffect(() => {
+    fetchNotifs()
+    const t = setInterval(fetchNotifs, 60000)
+    return () => clearInterval(t)
+  }, [fetchNotifs])
+  const unread = notifs.filter((n) => !n.read).length
+  const fileTypeOf = (id) => files.find((f) => f.id === id)?.type
 
   const recentFiles = files.slice(0, 5)
   const typeRoute = (f) =>
@@ -139,6 +152,36 @@ function SidebarContent({ collapsed, onNavigate, onNewFile }) {
       )}
 
       <Sidebar.Footer>
+        {/* @-mention notifications — a bell with an unread badge + popover. */}
+        <div className="relative">
+          <button
+            onClick={() => setNotifOpen((v) => !v)}
+            title="Notifications"
+            className={[
+              'relative w-full flex items-center gap-2 h-8 rounded-lg text-[13px] tracking-tightish transition-colors',
+              collapsed ? 'justify-center px-0' : 'px-2.5',
+              notifOpen ? 'bg-accent-tint text-ink' : 'text-ink-muted hover:bg-bg-elev2 hover:text-ink',
+            ].join(' ')}
+          >
+            <span className="relative flex-shrink-0">
+              <Bell size={15} />
+              {unread > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[13px] h-[13px] px-0.5 rounded-full bg-accent text-white text-[8px] font-bold flex items-center justify-center leading-none">
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              )}
+            </span>
+            {!collapsed && <span>Notifications</span>}
+          </button>
+          {notifOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
+              <div className="absolute bottom-full left-0 mb-2 z-50">
+                <NotificationsPanel onClose={() => setNotifOpen(false)} fileTypeOf={fileTypeOf} />
+              </div>
+            </>
+          )}
+        </div>
         <Sidebar.Item to="/settings" icon={SettingsIcon} title="Settings" onClick={onNavigate}>
           Settings
         </Sidebar.Item>

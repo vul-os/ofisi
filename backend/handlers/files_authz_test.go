@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"vulos-office/backend/config"
 	"vulos-office/backend/fileacl"
@@ -17,15 +18,17 @@ import (
 )
 
 // memStorage is a minimal in-memory Storage implementation for handler tests.
-// It implements File CRUD; the remaining interface methods panic to surface any
-// unintended use.
+// It implements File CRUD + folders/meta; the remaining interface methods panic
+// to surface any unintended use.
 type memStorage struct {
-	files map[string]*models.File
+	files   map[string]*models.File
+	folders map[string]*models.Folder
 }
 
 func newMemStorage() *memStorage {
 	return &memStorage{
-		files: make(map[string]*models.File),
+		files:   make(map[string]*models.File),
+		folders: make(map[string]*models.Folder),
 	}
 }
 
@@ -61,6 +64,47 @@ func (m *memStorage) DeleteFile(id string) error {
 		return errFileNotFound
 	}
 	delete(m.files, id)
+	return nil
+}
+func (m *memStorage) UpdateFileMeta(id, parentID string, starred, trashed bool, trashedAt *time.Time) error {
+	f, ok := m.files[id]
+	if !ok {
+		return errFileNotFound
+	}
+	f.ParentID = parentID
+	f.Starred = starred
+	f.Trashed = trashed
+	f.TrashedAt = trashedAt
+	return nil
+}
+
+// --- folders (parity) ---
+func (m *memStorage) ListFolders() ([]*models.Folder, error) {
+	out := make([]*models.Folder, 0, len(m.folders))
+	for _, f := range m.folders {
+		out = append(out, f)
+	}
+	return out, nil
+}
+func (m *memStorage) GetFolder(id string) (*models.Folder, error) {
+	if f, ok := m.folders[id]; ok {
+		return f, nil
+	}
+	return nil, errFile("folder not found")
+}
+func (m *memStorage) CreateFolder(f *models.Folder) error { m.folders[f.ID] = f; return nil }
+func (m *memStorage) UpdateFolder(f *models.Folder) error {
+	if _, ok := m.folders[f.ID]; !ok {
+		return errFile("folder not found")
+	}
+	m.folders[f.ID] = f
+	return nil
+}
+func (m *memStorage) DeleteFolder(id string) error {
+	if _, ok := m.folders[id]; !ok {
+		return errFile("folder not found")
+	}
+	delete(m.folders, id)
 	return nil
 }
 

@@ -85,6 +85,21 @@ func (s *PostgresStorage) migrate() error {
 		);
 		-- Idempotent migration for pre-existing deployments (P2 optimistic concurrency).
 		ALTER TABLE files ADD COLUMN IF NOT EXISTS rev BIGINT NOT NULL DEFAULT 1;
+		-- Parity: file organization (folders / star / trash). Idempotent migrations.
+		ALTER TABLE files ADD COLUMN IF NOT EXISTS parent_id  TEXT NOT NULL DEFAULT '';
+		ALTER TABLE files ADD COLUMN IF NOT EXISTS starred    BOOLEAN NOT NULL DEFAULT FALSE;
+		ALTER TABLE files ADD COLUMN IF NOT EXISTS trashed    BOOLEAN NOT NULL DEFAULT FALSE;
+		ALTER TABLE files ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMPTZ;
+		CREATE TABLE IF NOT EXISTS folders (
+			id          TEXT PRIMARY KEY,
+			name        TEXT NOT NULL,
+			parent_id   TEXT NOT NULL DEFAULT '',
+			starred     BOOLEAN NOT NULL DEFAULT FALSE,
+			trashed     BOOLEAN NOT NULL DEFAULT FALSE,
+			trashed_at  TIMESTAMPTZ,
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
 		CREATE TABLE IF NOT EXISTS file_versions (
 			id          TEXT NOT NULL,
 			file_id     TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -129,7 +144,7 @@ func (s *PostgresStorage) migrateSigningSchema() {
 
 func (s *PostgresStorage) ListFiles() ([]*models.File, error) {
 	rows, err := s.pool.Query(context.Background(),
-		`SELECT id, name, type, content, rev, created_at, updated_at FROM files ORDER BY updated_at DESC`)
+		`SELECT id, name, type, content, rev, parent_id, starred, trashed, trashed_at, created_at, updated_at FROM files ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +154,7 @@ func (s *PostgresStorage) ListFiles() ([]*models.File, error) {
 	for rows.Next() {
 		var f models.File
 		var contentJSON []byte
-		if err := rows.Scan(&f.ID, &f.Name, &f.Type, &contentJSON, &f.Rev, &f.CreatedAt, &f.UpdatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Type, &contentJSON, &f.Rev, &f.ParentID, &f.Starred, &f.Trashed, &f.TrashedAt, &f.CreatedAt, &f.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if contentJSON != nil {
@@ -156,8 +171,8 @@ func (s *PostgresStorage) GetFile(id string) (*models.File, error) {
 	var f models.File
 	var contentJSON []byte
 	err := s.pool.QueryRow(context.Background(),
-		`SELECT id, name, type, content, rev, created_at, updated_at FROM files WHERE id=$1`, id,
-	).Scan(&f.ID, &f.Name, &f.Type, &contentJSON, &f.Rev, &f.CreatedAt, &f.UpdatedAt)
+		`SELECT id, name, type, content, rev, parent_id, starred, trashed, trashed_at, created_at, updated_at FROM files WHERE id=$1`, id,
+	).Scan(&f.ID, &f.Name, &f.Type, &contentJSON, &f.Rev, &f.ParentID, &f.Starred, &f.Trashed, &f.TrashedAt, &f.CreatedAt, &f.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("file not found")
 	}
@@ -175,8 +190,8 @@ func (s *PostgresStorage) CreateFile(f *models.File) error {
 		return err
 	}
 	_, err = s.pool.Exec(context.Background(),
-		`INSERT INTO files (id, name, type, content, rev) VALUES ($1, $2, $3, $4, 1)`,
-		f.ID, f.Name, f.Type, contentJSON,
+		`INSERT INTO files (id, name, type, content, rev, parent_id) VALUES ($1, $2, $3, $4, 1, $5)`,
+		f.ID, f.Name, f.Type, contentJSON, f.ParentID,
 	)
 	if err == nil {
 		f.Rev = 1
@@ -242,6 +257,88 @@ func (s *PostgresStorage) DeleteFile(id string) error {
 	}
 	if cmd.RowsAffected() == 0 {
 		return fmt.Errorf("file not found")
+	}
+	return nil
+}
+
+// UpdateFileMeta persists only the organization metadata (folder/star/trash),
+// leaving content + rev untouched (no version snapshot).
+func (s *PostgresStorage) UpdateFileMeta(id, parentID string, starred, trashed bool, trashedAt *time.Time) error {
+	cmd, err := s.pool.Exec(context.Background(),
+		`UPDATE files SET parent_id=$2, starred=$3, trashed=$4, trashed_at=$5, updated_at=NOW() WHERE id=$1`,
+		id, parentID, starred, trashed, trashedAt,
+	)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return fmt.Errorf("file not found")
+	}
+	return nil
+}
+
+// ============================================================
+// Folders (parity: file organization)
+// ============================================================
+
+func (s *PostgresStorage) ListFolders() ([]*models.Folder, error) {
+	rows, err := s.pool.Query(context.Background(),
+		`SELECT id, name, parent_id, starred, trashed, trashed_at, created_at, updated_at FROM folders ORDER BY name ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var folders []*models.Folder
+	for rows.Next() {
+		var f models.Folder
+		if err := rows.Scan(&f.ID, &f.Name, &f.ParentID, &f.Starred, &f.Trashed, &f.TrashedAt, &f.CreatedAt, &f.UpdatedAt); err != nil {
+			return nil, err
+		}
+		folders = append(folders, &f)
+	}
+	return folders, rows.Err()
+}
+
+func (s *PostgresStorage) GetFolder(id string) (*models.Folder, error) {
+	var f models.Folder
+	err := s.pool.QueryRow(context.Background(),
+		`SELECT id, name, parent_id, starred, trashed, trashed_at, created_at, updated_at FROM folders WHERE id=$1`, id,
+	).Scan(&f.ID, &f.Name, &f.ParentID, &f.Starred, &f.Trashed, &f.TrashedAt, &f.CreatedAt, &f.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("folder not found")
+	}
+	return &f, nil
+}
+
+func (s *PostgresStorage) CreateFolder(f *models.Folder) error {
+	_, err := s.pool.Exec(context.Background(),
+		`INSERT INTO folders (id, name, parent_id, starred, trashed, trashed_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+		f.ID, f.Name, f.ParentID, f.Starred, f.Trashed, f.TrashedAt,
+	)
+	return err
+}
+
+func (s *PostgresStorage) UpdateFolder(f *models.Folder) error {
+	cmd, err := s.pool.Exec(context.Background(),
+		`UPDATE folders SET name=$2, parent_id=$3, starred=$4, trashed=$5, trashed_at=$6, updated_at=NOW() WHERE id=$1`,
+		f.ID, f.Name, f.ParentID, f.Starred, f.Trashed, f.TrashedAt,
+	)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return fmt.Errorf("folder not found")
+	}
+	return nil
+}
+
+func (s *PostgresStorage) DeleteFolder(id string) error {
+	cmd, err := s.pool.Exec(context.Background(), `DELETE FROM folders WHERE id=$1`, id)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return fmt.Errorf("folder not found")
 	}
 	return nil
 }

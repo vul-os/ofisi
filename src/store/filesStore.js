@@ -39,6 +39,7 @@ function setSaveState(id, status, error = null) {
 
 export const useFilesStore = create((set, get) => ({
   files: [],
+  folders: [],
   loading: false,
 
   fetchFiles: async () => {
@@ -51,10 +52,70 @@ export const useFilesStore = create((set, get) => ({
     }
   },
 
-  createFile: async (name, type) => {
-    const file = await api.createFile(name, type, defaultContent(type))
-    set({ files: [file, ...get().files] })
+  // Parity: folder tree. Loaded alongside files for the AppHome navigator.
+  fetchFolders: async () => {
+    try {
+      const folders = await api.listFolders()
+      set({ folders: folders || [] })
+    } catch {
+      /* folders are optional UX; a failure just hides the tree */
+    }
+  },
+
+  createFolder: async (name, parentId = '') => {
+    const folder = await api.createFolder(name, parentId)
+    set({ folders: [...get().folders, folder] })
+    return folder
+  },
+
+  renameFolder: async (id, name) => {
+    const folder = await api.updateFolder(id, { name })
+    set({ folders: get().folders.map((f) => (f.id === id ? folder : f)) })
+    return folder
+  },
+
+  trashFolder: async (id, trashed) => {
+    const folder = await api.trashFolder(id, trashed)
+    set({ folders: get().folders.map((f) => (f.id === id ? folder : f)) })
+    return folder
+  },
+
+  deleteFolder: async (id) => {
+    await api.deleteFolder(id)
+    set({ folders: get().folders.filter((f) => f.id !== id) })
+    // Child files fell back to root server-side; refresh so the UI matches.
+    await get().fetchFiles()
+  },
+
+  // Move / star / trash a file. Applies the returned canonical file to state.
+  moveFile: async (id, opts) => {
+    const file = await api.moveFile(id, opts)
+    set({ files: get().files.map((f) => (f.id === id ? file : f)) })
     return file
+  },
+
+  toggleStar: async (id) => {
+    const known = get().files.find((f) => f.id === id)
+    return get().moveFile(id, { starred: !known?.starred })
+  },
+
+  trashFile: async (id) => get().moveFile(id, { trashed: true }),
+  restoreFile: async (id) => get().moveFile(id, { trashed: false }),
+
+  // createFile — optionally seeded with template content and/or filed into a
+  // folder. `content` defaults to the blank shape for the type; `parentId`
+  // places the new file in a folder (validated + ACL-checked server-side).
+  createFile: async (name, type, { content, parentId } = {}) => {
+    const seed = content !== undefined ? content : defaultContent(type)
+    const file = await api.createFile(name, type, seed)
+    let placed = file
+    // If a folder was requested, move the freshly-created file into it. The
+    // server enforces that the caller owns both the file and the target folder.
+    if (parentId) {
+      try { placed = await api.moveFile(file.id, { parentId }) } catch { /* keep at root on failure */ }
+    }
+    set({ files: [placed, ...get().files] })
+    return placed
   },
 
   /**

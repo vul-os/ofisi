@@ -64,7 +64,9 @@ import { useServerCollab } from './useServerCollab.js'
 import P2PShareModal from './components/P2PShareModal.jsx'
 import { getSuggestionStore } from '../../lib/crdt/suggestions.js'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
+import { usePresence } from '@vulos/relay-client/presence'
 import { DocsCursorLayer } from '../../components/RemoteCursors.jsx'
+import PresenceBar from '../../components/PresenceBar.jsx'
 import { Button, IconButton, Tooltip, Topbar, LoadingState, SaveStatus, AvatarStack } from '../../components/ui'
 import { Skeleton } from '../../components/ui/LoadingState'
 import { getCommentStore } from '../../lib/crdt/comments'
@@ -894,6 +896,13 @@ export default function DocsEditor() {
       ? (() => { let h=0; for(const c of localCursorIdentity.current.accountId){h=(h<<5)-h+c.charCodeAt(0);h|=0} return `hsl(${Math.abs(h)%360},65%,50%)` })()
       : '#6366f1',
   })
+  // Presence roster (avatar bar + typing/active indicators). Reuses the SAME
+  // fabric + local identity as the cursor layer, so Docs now shows who is in the
+  // room — parity with Sheets/Slides — not just who is actively typing.
+  const { roster } = usePresence({
+    fabric: fabricForCursors,
+    localIdentity: localCursorIdentity.current,
+  })
   // Stable ref so the useEditor onSelectionUpdate closure can call the latest version.
   const broadcastDocCursorRef = useRef(null)
   broadcastDocCursorRef.current = broadcastDocCursor
@@ -1196,7 +1205,13 @@ export default function DocsEditor() {
                 title={saveStatus.error || undefined}
               />
             )}
-            {collaborators.length > 0 ? (
+            {/* Presence roster — avatar bar of everyone in the room (parity with
+                Sheets/Slides). Shows the full roster; a subtle "editing now" cue
+                still comes from the live cursor layer. Falls back to a peer-count
+                pill or a cursor-derived avatar stack when the roster is empty. */}
+            {roster && roster.length > 1 ? (
+              <PresenceBar roster={roster} className="ml-1" />
+            ) : collaborators.length > 0 ? (
               <Tooltip label={`${collaborators.length} editing now`}>
                 <AvatarStack people={collaborators} size={22} max={4} />
               </Tooltip>
@@ -1207,6 +1222,12 @@ export default function DocsEditor() {
               >
                 <Users size={11} />
                 {peerCount}
+              </span>
+            )}
+            {/* Typing/active indicator: someone has a live cursor in the doc. */}
+            {roster && roster.length > 1 && collaborators.length > 0 && (
+              <span className="text-2xs text-ink-faint italic" title={`${collaborators.length} actively editing`}>
+                {collaborators.length === 1 ? 'editing…' : `${collaborators.length} editing…`}
               </span>
             )}
             {/* WAVE-25: P2P collaboration status */}

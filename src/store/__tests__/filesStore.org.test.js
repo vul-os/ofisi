@@ -1,0 +1,108 @@
+/**
+ * filesStore.org.test.js — folder / star / trash client actions (parity).
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+vi.mock('../../lib/api', () => ({
+  api: {
+    listFolders: vi.fn(),
+    createFolder: vi.fn(),
+    updateFolder: vi.fn(),
+    trashFolder: vi.fn(),
+    deleteFolder: vi.fn(),
+    moveFile: vi.fn(),
+    createFile: vi.fn(),
+    listFiles: vi.fn(),
+  },
+}))
+vi.mock('../../lib/draftStore', () => ({
+  writeDraft: vi.fn().mockResolvedValue(undefined),
+  clearDraft: vi.fn().mockResolvedValue(undefined),
+}))
+
+import { api } from '../../lib/api'
+import { useFilesStore } from '../filesStore'
+
+beforeEach(() => {
+  Object.values(api).forEach((fn) => fn.mockReset?.())
+  useFilesStore.setState({
+    files: [{ id: 'f1', name: 'Doc', type: 'doc', content: 'v1', rev: 1, starred: false, trashed: false, parent_id: '' }],
+    folders: [],
+  })
+})
+
+describe('folders', () => {
+  it('createFolder appends the new folder', async () => {
+    api.createFolder.mockResolvedValueOnce({ id: 'fold1', name: 'Work', parent_id: '' })
+    const f = await useFilesStore.getState().createFolder('Work', '')
+    expect(api.createFolder).toHaveBeenCalledWith('Work', '')
+    expect(f.id).toBe('fold1')
+    expect(useFilesStore.getState().folders).toHaveLength(1)
+  })
+
+  it('fetchFolders populates state', async () => {
+    api.listFolders.mockResolvedValueOnce([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }])
+    await useFilesStore.getState().fetchFolders()
+    expect(useFilesStore.getState().folders).toHaveLength(2)
+  })
+
+  it('deleteFolder removes it and refreshes files', async () => {
+    useFilesStore.setState({ folders: [{ id: 'fold1', name: 'Work' }] })
+    api.deleteFolder.mockResolvedValueOnce({})
+    api.listFiles.mockResolvedValueOnce([])
+    await useFilesStore.getState().deleteFolder('fold1')
+    expect(api.deleteFolder).toHaveBeenCalledWith('fold1')
+    expect(useFilesStore.getState().folders).toHaveLength(0)
+  })
+})
+
+describe('star / trash / move', () => {
+  it('toggleStar flips the star and applies the server result', async () => {
+    api.moveFile.mockResolvedValueOnce({ id: 'f1', name: 'Doc', type: 'doc', rev: 1, starred: true, trashed: false, parent_id: '' })
+    await useFilesStore.getState().toggleStar('f1')
+    expect(api.moveFile).toHaveBeenCalledWith('f1', { starred: true })
+    expect(useFilesStore.getState().files[0].starred).toBe(true)
+  })
+
+  it('trashFile sets trashed via move', async () => {
+    api.moveFile.mockResolvedValueOnce({ id: 'f1', name: 'Doc', type: 'doc', rev: 1, trashed: true, parent_id: '' })
+    await useFilesStore.getState().trashFile('f1')
+    expect(api.moveFile).toHaveBeenCalledWith('f1', { trashed: true })
+    expect(useFilesStore.getState().files[0].trashed).toBe(true)
+  })
+
+  it('restoreFile clears trashed via move', async () => {
+    useFilesStore.setState({ files: [{ id: 'f1', name: 'Doc', type: 'doc', rev: 1, trashed: true, parent_id: '' }] })
+    api.moveFile.mockResolvedValueOnce({ id: 'f1', name: 'Doc', type: 'doc', rev: 1, trashed: false, parent_id: '' })
+    await useFilesStore.getState().restoreFile('f1')
+    expect(api.moveFile).toHaveBeenCalledWith('f1', { trashed: false })
+    expect(useFilesStore.getState().files[0].trashed).toBe(false)
+  })
+
+  it('moveFile reparents into a folder', async () => {
+    api.moveFile.mockResolvedValueOnce({ id: 'f1', name: 'Doc', type: 'doc', rev: 1, parent_id: 'fold1' })
+    await useFilesStore.getState().moveFile('f1', { parentId: 'fold1' })
+    expect(api.moveFile).toHaveBeenCalledWith('f1', { parentId: 'fold1' })
+    expect(useFilesStore.getState().files[0].parent_id).toBe('fold1')
+  })
+})
+
+describe('createFile with template + folder', () => {
+  it('seeds template content and files into a folder', async () => {
+    api.createFile.mockResolvedValueOnce({ id: 'new1', name: 'Résumé', type: 'doc', rev: 1, parent_id: '' })
+    api.moveFile.mockResolvedValueOnce({ id: 'new1', name: 'Résumé', type: 'doc', rev: 1, parent_id: 'fold1' })
+    const tpl = { type: 'doc', content: [{ type: 'paragraph' }] }
+    const f = await useFilesStore.getState().createFile('Résumé', 'doc', { content: tpl, parentId: 'fold1' })
+    expect(api.createFile).toHaveBeenCalledWith('Résumé', 'doc', tpl)
+    expect(api.moveFile).toHaveBeenCalledWith('new1', { parentId: 'fold1' })
+    expect(f.parent_id).toBe('fold1')
+  })
+
+  it('uses default content when no template given', async () => {
+    api.createFile.mockResolvedValueOnce({ id: 'new2', name: 'Blank', type: 'doc', rev: 1 })
+    await useFilesStore.getState().createFile('Blank', 'doc')
+    // Third arg is the blank default doc shape, not undefined.
+    const [, , content] = api.createFile.mock.calls[0]
+    expect(content).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] })
+  })
+})
