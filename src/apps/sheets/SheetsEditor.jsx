@@ -5,7 +5,7 @@ import '@fortune-sheet/react/dist/index.css'
 import {
   ArrowLeft, Save, Loader2, Download, Upload, AlertCircle, MessageSquare,
   ChevronDown, BarChart2, Filter, Table2, Tag, Sliders, Keyboard, Search,
-  Lock, MessageSquarePlus, X, MoreHorizontal, ListChecks,
+  Lock, MessageSquarePlus, X, MoreHorizontal, ListChecks, Share2,
 } from 'lucide-react'
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
@@ -23,6 +23,8 @@ import ConnectionPill from '../../components/ConnectionPill.jsx'
 import { useCollabFabric } from '../../lib/collab/useCollabFabric.js'
 import { getCollabIdentity, identityColor, deriveStatusPill, countLivePeers } from '../../lib/collab/presenceCommon.js'
 import { Button, IconButton, Tooltip, Topbar, Menu, useToast, useDialogA11y, SaveStatus } from '../../components/ui'
+import AccountShareModal from '../../components/AccountShareModal.jsx'
+import { useAuthStore } from '../../store/authStore'
 import { useSheetKeyboardShortcuts, KeyboardShortcutsHelp, useShortcutsHelp } from './KeyboardShortcuts.jsx'
 import SheetsFindReplace from './SheetsFindReplace.jsx'
 import NumberFormatMenu from './NumberFormatMenu.jsx'
@@ -346,6 +348,9 @@ export default function SheetsEditor() {
   const { files, saveFileWithDraft, markDirty } = useFilesStore()
   const [file, setFile] = useState(files.find((f) => f.id === id))
   const [title, setTitle] = useState(file?.name || 'Untitled Sheet')
+  // Account-based sharing (named users, role-scoped, ACL-enforced).
+  const [showShare, setShowShare] = useState(false)
+  const myAccountId = useAuthStore((s) => s.accountId)
   // clampCharts re-clamps any persisted chart geometry through makeChart so a
   // corrupt/legacy local descriptor can never reach render with NaN layout
   // (WAVE-61 defence-in-depth; the wave-55 peer-ingress clamp is separate).
@@ -997,6 +1002,12 @@ export default function SheetsEditor() {
         }
         actions={
           <>
+            {/* Share — account-based (named users) + P2P E2E link */}
+            <Tooltip label="Share">
+              <IconButton size="sm" active={showShare} onClick={() => setShowShare(true)}>
+                <Share2 size={14} />
+              </IconButton>
+            </Tooltip>
             {/* Find/Replace stays primary (always visible) */}
             <Tooltip label="Find / Replace (Ctrl+F)">
               <IconButton size="sm" active={showFindReplace} onClick={() => setShowFindReplace((v) => !v)}>
@@ -1325,6 +1336,14 @@ export default function SheetsEditor() {
 
       {/* Keyboard shortcuts help */}
       {showShortcutsHelp && <KeyboardShortcutsHelp onClose={closeHelp} />}
+
+      {/* Account-based sharing (named users, role-scoped, ACL-enforced) */}
+      <AccountShareModal
+        open={showShare}
+        onClose={() => setShowShare(false)}
+        file={{ id, name: title }}
+        me={myAccountId}
+      />
 
       {/* Transient notifier (import success / failure, …) */}
       {toast}

@@ -37,11 +37,16 @@ function isPublicRoute(pathname) {
 }
 
 export default function App() {
-  const { status, loading, fetchStatus } = useAuthStore()
+  const { status, loading, fetchStatus, fetchIdentity } = useAuthStore()
   const location = useLocation()
   const navigate = useNavigate()
 
   useEffect(() => { fetchStatus() }, [])
+  // Resolve "who am I" for share/ownership UI (best-effort, independent of auth
+  // gating). Re-runs when the authenticated status flips (e.g. after login).
+  useEffect(() => {
+    if (status?.authenticated !== false) fetchIdentity()
+  }, [status?.authenticated])
 
   // ── Protocol handler + deep-link ?goto= param ─────────────────────────────
   useEffect(() => {

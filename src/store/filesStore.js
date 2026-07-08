@@ -41,6 +41,9 @@ export const useFilesStore = create((set, get) => ({
   files: [],
   folders: [],
   loading: false,
+  // Files shared TO the current user by others (owned files excluded). Loaded
+  // from the ACL-safe /shared-files endpoint. Each entry carries { owner, role }.
+  sharedWithMe: [],
 
   fetchFiles: async () => {
     set({ loading: true })
@@ -49,6 +52,17 @@ export const useFilesStore = create((set, get) => ({
       set({ files, loading: false })
     } catch {
       set({ loading: false })
+    }
+  },
+
+  // "Shared with me": files granted to the caller by another account. A failure
+  // just leaves the section empty (it is additive UX).
+  fetchSharedWithMe: async () => {
+    try {
+      const res = await api.listSharedWithMe()
+      set({ sharedWithMe: res?.files || [] })
+    } catch {
+      set({ sharedWithMe: [] })
     }
   },
 

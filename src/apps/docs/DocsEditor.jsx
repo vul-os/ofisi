@@ -62,6 +62,8 @@ import { DocsCollabSession } from '../../lib/crdt/index.js'
 import { useP2PCollab } from './useP2PCollab.js'
 import { useServerCollab } from './useServerCollab.js'
 import P2PShareModal from './components/P2PShareModal.jsx'
+import AccountShareModal from '../../components/AccountShareModal.jsx'
+import { useAuthStore } from '../../store/authStore'
 import { getSuggestionStore } from '../../lib/crdt/suggestions.js'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { usePresence } from '@vulos/relay-client/presence'
@@ -360,6 +362,10 @@ export default function DocsEditor() {
   // Additive second collab mode — orthogonal to the cloud DocsCollabSession
   // above. Active only when the URL carries a #vp2p= invite or the user shares.
   const [showP2PShare, setShowP2PShare] = useState(false)
+  // Account-based sharing (named users, role-scoped, ACL-enforced). The primary
+  // Share entry point; it offers the complementary P2P E2E link path alongside.
+  const [showAccountShare, setShowAccountShare] = useState(false)
+  const myAccountId = useAuthStore((s) => s.accountId)
   const editorRefForP2P = useRef(null)   // set below once `editor` exists
   const applyRemoteP2PText = useCallback((remoteText) => {
     const ed = editorRefForP2P.current
@@ -1300,17 +1306,16 @@ export default function DocsEditor() {
                 </IconButton>
               </Tooltip>
             )}
-            {/* WAVE-25: Share → collaborate via link (P2P). Hidden for ro peers
-                who joined via a view-only link (they cannot re-share as owner). */}
+            {/* Share entry point. Opens account-based sharing (named users,
+                role-scoped, ACL-enforced) which also offers the complementary
+                P2P end-to-end-encrypted link path. Hidden for ro peers who
+                joined via a view-only link (they cannot re-share). */}
             {!p2p.readOnly && (
-              <Tooltip label="Collaborate via link (P2P, end-to-end encrypted)">
+              <Tooltip label="Share — with people (accounts) or via an E2E link">
                 <IconButton
                   size="sm"
-                  active={showP2PShare}
-                  onClick={async () => {
-                    setShowP2PShare(true)
-                    try { if (!p2p.links) await p2p.startShare() } catch { /* surfaced in modal */ }
-                  }}
+                  active={showAccountShare || showP2PShare}
+                  onClick={() => setShowAccountShare(true)}
                 >
                   <Share2 size={14} />
                 </IconButton>
@@ -1525,6 +1530,19 @@ export default function DocsEditor() {
       {showWordCount && (
         <WordCountModal editor={editor} onClose={() => setShowWordCount(false)} />
       )}
+
+      {/* Account-based sharing (named users, role-scoped, ACL-enforced) — the
+          primary Share dialog; offers the P2P E2E link path alongside. */}
+      <AccountShareModal
+        open={showAccountShare}
+        onClose={() => setShowAccountShare(false)}
+        file={{ id, name: title }}
+        me={myAccountId}
+        onSwitchToLink={async () => {
+          setShowP2PShare(true)
+          try { if (!p2p.links) await p2p.startShare() } catch { /* surfaced in modal */ }
+        }}
+      />
 
       {/* WAVE-25: P2P collaborate-via-link modal */}
       <P2PShareModal

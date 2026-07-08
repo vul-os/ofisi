@@ -247,6 +247,9 @@ func main() {
 
 	fileHandler := handlers.NewFileHandler(store)
 	protected.GET("/files", fileHandler.List)
+	// "Shared with me" — files shared TO the caller (owned excluded). Registered
+	// under a distinct prefix to avoid a route conflict with /files/:id.
+	protected.GET("/shared-files", fileHandler.SharedWithMe)
 	protected.GET("/files/:id", fileHandler.Get)
 	writes.POST("/files", fileHandler.Create)
 	writes.PUT("/files/:id", fileHandler.Update)

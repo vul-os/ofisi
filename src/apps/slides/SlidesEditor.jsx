@@ -18,7 +18,7 @@ import {
   AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Image as ImageIcon,
   StickyNote, Palette, Layout, Highlighter, RemoveFormatting,
   Copy, FileText, GripVertical, Monitor, Zap, Undo, Redo,
-  ChevronDown as ChevronDownIcon, Type as TypeIcon, LayoutGrid, X, Square,
+  ChevronDown as ChevronDownIcon, Type as TypeIcon, LayoutGrid, X, Square, Share2,
 } from 'lucide-react'
 import { sanitizeSlideHtml as sanitize } from '../../lib/sanitize'
 import { useFilesStore } from '../../store/filesStore'
@@ -46,6 +46,8 @@ import ConnectionPill from '../../components/ConnectionPill.jsx'
 import { useCollabFabric } from '../../lib/collab/useCollabFabric.js'
 import { getCollabIdentity, identityColor, deriveStatusPill, countLivePeers } from '../../lib/collab/presenceCommon.js'
 import { Button, IconButton, Tooltip, Topbar, Menu, UrlPopover, LoadingState, SaveStatus } from '../../components/ui'
+import AccountShareModal from '../../components/AccountShareModal.jsx'
+import { useAuthStore } from '../../store/authStore'
 import ThemeGallery from './ThemeGallery.jsx'
 import MasterSlideEditor from './MasterSlideEditor.jsx'
 import TransitionPanel from './TransitionPanel.jsx'
@@ -237,6 +239,9 @@ export default function SlidesEditor() {
   const [saved, setSaved] = useState(true)
   const [presenting, setPresenting] = useState(false)
   const [showComments, setShowComments] = useState(false)
+  // Account-based sharing (named users, role-scoped, ACL-enforced).
+  const [showShare, setShowShare] = useState(false)
+  const myAccountId = useAuthStore((s) => s.accountId)
   const [sidebarTab, setSidebarTab] = useState('slides')
 
   // Modal states
@@ -853,6 +858,12 @@ export default function SlidesEditor() {
         }
         actions={
           <>
+            {/* Share — account-based (named users) + P2P E2E link */}
+            <Tooltip label="Share">
+              <IconButton size="sm" active={showShare} onClick={() => setShowShare(true)} aria-label="Share">
+                <Share2 size={14} />
+              </IconButton>
+            </Tooltip>
             {/* New from Template */}
             <Tooltip label="New from Template">
               <IconButton size="sm" onClick={() => setShowTemplateGallery(true)} aria-label="New from template">
@@ -1663,6 +1674,14 @@ export default function SlidesEditor() {
           onClose={() => setShowTemplateGallery(false)}
         />
       )}
+
+      {/* Account-based sharing (named users, role-scoped, ACL-enforced) */}
+      <AccountShareModal
+        open={showShare}
+        onClose={() => setShowShare(false)}
+        file={{ id, name: title }}
+        me={myAccountId}
+      />
     </div>
   )
 }

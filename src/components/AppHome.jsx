@@ -5,12 +5,15 @@ import {
   Trash2, Pencil, ArrowUpRight, FileText, Table2, Presentation,
   HardDrive, Loader2, RefreshCw, FileSearch, Upload,
   Star, Folder, FolderPlus, RotateCcw, ChevronRight, Home, FolderInput,
+  Share2, Users,
 } from 'lucide-react'
 import { useFilesStore } from '../store/filesStore'
 import { useLocalFilesStore } from '../store/localFilesStore'
+import { useAuthStore } from '../store/authStore'
 import NewFileModal from './NewFileModal'
+import AccountShareModal from './AccountShareModal'
 import { importFromUrl, importFile, detectType } from '../lib/importFile'
-import { Button, IconButton, Input, Card, Tooltip, useToast, DocThumb, Skeleton } from './ui'
+import { Button, IconButton, Input, Card, Tooltip, useToast, DocThumb, Skeleton, Avatar, hueFor } from './ui'
 
 // ─── Token-aligned config ─────────────────────────────────────────────────────
 const CONFIG = {
@@ -79,10 +82,13 @@ export default function AppHome({ type }) {
   const {
     files, folders, loading, fetchFiles, fetchFolders, deleteFile, renameFile,
     toggleStar, trashFile, restoreFile, moveFile, createFolder, renameFolder,
-    trashFolder, deleteFolder,
+    trashFolder, deleteFolder, sharedWithMe, fetchSharedWithMe,
   } = useFilesStore()
   const { files: localFiles, loading: localLoading, scanned, scan } = useLocalFilesStore()
+  const myAccountId = useAuthStore((s) => s.accountId)
   const [showNew, setShowNew] = useState(false)
+  // The file currently open in the account-share dialog (or null).
+  const [sharing, setSharing] = useState(null)
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState('grid')
   const [menuOpen, setMenuOpen] = useState(null)
@@ -133,7 +139,7 @@ export default function AppHome({ type }) {
     if (file) await openImportedFile(file)
   }
 
-  useEffect(() => { fetchFiles(); fetchFolders() }, [])
+  useEffect(() => { fetchFiles(); fetchFolders(); fetchSharedWithMe() }, [])
   useEffect(() => { if (!scanned) scan() }, [scanned])
 
   const searchLc = search.toLowerCase()
@@ -161,6 +167,13 @@ export default function AppHome({ type }) {
   const myLocalFiles = localFiles
     .filter(f => cfg.localExts.includes(f.ext))
     .filter(f => f.name.toLowerCase().includes(searchLc))
+
+  // Files shared TO the user by others, scoped to this app's type + search.
+  const sharedFiles = useMemo(() => (
+    (sharedWithMe || [])
+      .filter(f => f.type === type)
+      .filter(f => (f.name || '').toLowerCase().includes(searchLc))
+  ), [sharedWithMe, type, searchLc])
 
   // Breadcrumb path from root → current folder.
   const crumbs = useMemo(() => {
@@ -413,6 +426,7 @@ export default function AppHome({ type }) {
                       onRenameCommit={() => commitRename(file.id)}
                       onStar={wrap('Star', () => toggleStar(file.id))}
                       onMove={() => { setMoving(file); setMenuOpen(null) }}
+                      onShare={() => { setSharing(file); setMenuOpen(null) }}
                       onTrash={wrap('Trash', () => trashFile(file.id))}
                       onRestore={wrap('Restore', () => restoreFile(file.id))}
                       onDelete={wrap('Delete', () => deleteFile(file.id))}
@@ -436,6 +450,7 @@ export default function AppHome({ type }) {
                   onRenameCommit={commitRename}
                   onStar={(id) => wrap('Star', () => toggleStar(id))()}
                   onMove={(file) => { setMoving(file); setMenuOpen(null) }}
+                  onShare={(file) => { setSharing(file); setMenuOpen(null) }}
                   onTrash={(id) => wrap('Trash', () => trashFile(id))()}
                   onRestore={(id) => wrap('Restore', () => restoreFile(id))()}
                   onDelete={(id) => wrap('Delete', () => deleteFile(id))()}
@@ -444,6 +459,50 @@ export default function AppHome({ type }) {
             </>
           )}
         </section>
+
+        {/* ── Shared with me (browse root only) ── */}
+        {view === 'browse' && !folderId && sharedFiles.length > 0 && (
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Users size={13} className="text-ink-faint" />
+              <p className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">Shared with me</p>
+              <span className="text-2xs text-ink-faint bg-bg-elev2 border border-line rounded-pill px-2 py-0.5">
+                {sharedFiles.length}
+              </span>
+            </div>
+            <Card>
+              {sharedFiles.map((file, i) => (
+                <button
+                  key={file.id}
+                  onClick={() => openFile(file)}
+                  className={[
+                    'w-full flex items-center gap-3 px-4 py-2.5 text-left group',
+                    'hover:bg-accent-tint transition-colors duration-fast ease-out',
+                    i < sharedFiles.length - 1 ? 'border-b border-line' : '',
+                  ].join(' ')}
+                >
+                  <div className={`w-7 h-7 ${cfg.bgCn} rounded-md flex items-center justify-center flex-shrink-0`}>
+                    <Icon size={13} className={cfg.iconCn} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-ink truncate tracking-tightish">{file.name}</p>
+                    <p className="text-2xs text-ink-faint truncate flex items-center gap-1">
+                      <Avatar name={file.owner} size={13} color={hueFor(file.owner)} />
+                      Shared by {file.owner}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0 text-2xs text-ink-faint tracking-tightish">
+                    <span className="px-1.5 py-0.5 rounded-xs bg-bg-elev2 border border-line font-semibold uppercase text-[9px] capitalize">
+                      {file.role || 'shared'}
+                    </span>
+                    <span>{formatDate(file.updated_at)}</span>
+                    <ArrowUpRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                </button>
+              ))}
+            </Card>
+          </section>
+        )}
 
         {/* ── On Your Computer (browse root only) ── */}
         {view === 'browse' && !folderId && myLocalFiles.length > 0 && (
@@ -508,6 +567,14 @@ export default function AppHome({ type }) {
             catch (e) { showToast(`Move failed: ${e.message}`, 'error') }
             setMoving(null)
           }}
+        />
+      )}
+      {sharing && (
+        <AccountShareModal
+          open
+          file={sharing}
+          me={myAccountId}
+          onClose={() => { setSharing(null); fetchSharedWithMe() }}
         />
       )}
       {menuOpen && <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(null)} />}
@@ -609,7 +676,7 @@ function MenuItem({ danger, onClick, children }) {
 function FileCard({
   file, Icon, type, view, renaming, renameValue, setRenaming, setRenameValue,
   menuOpen, setMenuOpen, onOpen, onRename, onRenameCommit,
-  onStar, onMove, onTrash, onRestore, onDelete,
+  onStar, onMove, onShare, onTrash, onRestore, onDelete,
 }) {
   const inTrash = view === 'trash'
   return (
@@ -681,6 +748,7 @@ function FileCard({
                   </>
                 ) : (
                   <>
+                    <MenuItem onClick={onShare}><Share2 size={12} className="text-ink-faint" /> Share</MenuItem>
                     <MenuItem onClick={onStar}>
                       <Star size={12} className="text-ink-faint" /> {file.starred ? 'Unstar' : 'Star'}
                     </MenuItem>
@@ -702,7 +770,7 @@ function FileCard({
 function FileListTable({
   files, cfg, Icon, view, renaming, renameValue, setRenaming, setRenameValue,
   menuOpen, setMenuOpen, onOpen, onRename, onRenameCommit,
-  onStar, onMove, onTrash, onRestore, onDelete,
+  onStar, onMove, onShare, onTrash, onRestore, onDelete,
 }) {
   const inTrash = view === 'trash'
   return (
@@ -764,6 +832,7 @@ function FileListTable({
                         </>
                       ) : (
                         <>
+                          <MenuItem onClick={() => onShare(file)}><Share2 size={12} className="text-ink-faint" /> Share</MenuItem>
                           <MenuItem onClick={() => onStar(file.id)}>
                             <Star size={12} className="text-ink-faint" /> {file.starred ? 'Unstar' : 'Star'}
                           </MenuItem>

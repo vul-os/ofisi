@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"vulos-office/backend/audit"
@@ -56,6 +57,59 @@ func (h *FileHandler) List(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, out)
+}
+
+// SharedWithMe returns the files that have been shared TO the caller by someone
+// else — i.e. files the caller can access but does NOT own. This powers the
+// "Shared with me" section in the app home.
+//
+// ACL-safety: the set is computed from the caller's OWN grants only
+// (AccessibleFileIDs(me) is keyed on requesterID), then the owned files are
+// removed by consulting each file's recorded owner. A file whose owner is the
+// caller (owned) or unrecorded/legacy (no cross-account share) is excluded, so
+// this can never surface another account's private document or leak the roster.
+// Each returned file carries its owner id so the UI can attribute it.
+//
+// GET /api/files/shared
+func (h *FileHandler) SharedWithMe(c *gin.Context) {
+	me := requesterID(c)
+	ids, err := h.authz.Store().AccessibleFileIDs(me)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	out := make([]gin.H, 0)
+	for id := range ids {
+		rec, ok, gerr := h.authz.Store().Get(id)
+		if gerr != nil || !ok {
+			continue // unowned/legacy — not a cross-account share
+		}
+		if rec.Owner == me || rec.Owner == "" {
+			continue // owned by the caller (or ownerless) — not "shared with me"
+		}
+		// Defence in depth: the caller must actually be a recorded collaborator
+		// (AccessibleFileIDs already guarantees this, but re-verify so a store
+		// inconsistency can never widen the result).
+		if !h.authz.canAccess(c, id) {
+			continue
+		}
+		file, ferr := h.store.GetFile(id)
+		if ferr != nil {
+			continue // metadata gone (deleted) — skip
+		}
+		// Include the caller's role so the UI can show "shared as viewer", etc.
+		role, _, _ := h.authz.Store().GetRole(id, me)
+		out = append(out, gin.H{
+			"id":         file.ID,
+			"name":       file.Name,
+			"type":       file.Type,
+			"owner":      rec.Owner,
+			"role":       string(role),
+			"updated_at": file.UpdatedAt,
+			"created_at": file.CreatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"files": out})
 }
 
 func (h *FileHandler) Get(c *gin.Context) {
@@ -348,7 +402,17 @@ func (h *FileHandler) Move(c *gin.Context) {
 // Share grants or revokes another account's access to a file.
 // Only the owner (or an admin) may manage collaborators.
 //
-// POST /api/files/:id/share  { "account_id": "...", "role": "editor"|"viewer", "revoke": false }
+// Role vocabulary: the account-share dialog grants one of three roles —
+//   - viewer    — read only.
+//   - commenter — read + comment (via the comment endpoints), but no content edits.
+//   - editor    — read + write content.
+//
+// Owner is not a grantable role here (transfer uses a dedicated path). The role
+// string is normalized through fileacl.NormalizeRole so long/short forms
+// (view/viewer, comment/commenter, edit/editor) all resolve; an empty role
+// defaults to editor for back-compat with the original two-role contract.
+//
+// POST /api/files/:id/share  { "account_id": "...", "role": "editor"|"commenter"|"viewer", "revoke": false }
 func (h *FileHandler) Share(c *gin.Context) {
 	id := c.Param("id")
 	// Only the owner may grant or revoke access.
@@ -362,23 +426,33 @@ func (h *FileHandler) Share(c *gin.Context) {
 	}
 	var req struct {
 		AccountID string `json:"account_id" binding:"required"`
-		Role      string `json:"role"`   // "editor" (default) or "viewer"
+		Role      string `json:"role"`   // "editor" (default), "commenter", or "viewer"
 		Revoke    bool   `json:"revoke"` // true to remove access
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Guard against sharing a file with its own owner (would clobber ownership
+	// with a lesser collaborator role). Revoking self is likewise meaningless.
+	if rec, ok, _ := h.authz.Store().Get(id); ok && rec.Owner == req.AccountID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot change the owner's own access"})
+		return
+	}
 	var err error
 	if req.Revoke {
 		err = h.authz.Store().Unshare(id, req.AccountID)
 	} else {
-		role := fileacl.Role(req.Role)
+		role := fileacl.NormalizeRole(req.Role)
 		if role == fileacl.RoleNone {
-			role = fileacl.RoleEditor // default
+			if strings.TrimSpace(req.Role) != "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "role must be 'editor', 'commenter', or 'viewer'"})
+				return
+			}
+			role = fileacl.RoleEditor // default (back-compat)
 		}
-		if role != fileacl.RoleEditor && role != fileacl.RoleViewer {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "role must be 'editor' or 'viewer'"})
+		if !fileacl.IsGrantableRole(role) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "role must be 'editor', 'commenter', or 'viewer'"})
 			return
 		}
 		err = h.authz.Store().ShareWithRole(id, req.AccountID, role)

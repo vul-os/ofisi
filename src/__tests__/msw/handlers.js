@@ -55,6 +55,10 @@ export function resetMock({ role = 'owner' } = {}) {
   mockState.collaborators = { doc1: [] }
   mockState.suggestions = { doc1: [] }
   mockState.collab = { doc1: { seq: 0, ops: [] } }
+  // Account-share identity defaults: the caller is the owner of the seeded doc.
+  mockState.me = 'you@vulos.test'
+  mockState.owner = 'you@vulos.test'
+  mockState.sharedWithMe = []
 }
 
 // WAVE37: only owner/editor may PUSH collab ops. viewer/commenter → 403.
@@ -115,11 +119,53 @@ export const handlers = [
     return HttpResponse.json(v)
   }),
 
+  // ── Identity + account-share ───────────────────────────────────────────────
+  // Caller identity (drives the share dialog's owner detection).
+  http.get('/api/system/info', () => {
+    log('GET', '/system/info')
+    return HttpResponse.json({ account_id: mockState.me || 'you@vulos.test', is_admin: false })
+  }),
+
+  // Owner-only grant/revoke of an account's role on a file. Mirrors the server:
+  // a non-owner caller → 403; an unknown role → 400.
+  http.post('/api/files/:id/share', async ({ params, request }) => {
+    log('POST', `/files/${params.id}/share`)
+    if (mockState.role !== 'owner') {
+      return HttpResponse.json(
+        { error: 'only the document owner may perform this action' },
+        { status: 403 },
+      )
+    }
+    const body = await request.json()
+    const list = (mockState.collaborators[params.id] ||= [])
+    const idx = list.findIndex((c) => c.account_id === body.account_id)
+    if (body.revoke) {
+      if (idx >= 0) list.splice(idx, 1)
+      return HttpResponse.json({ ok: true })
+    }
+    const role = body.role || 'editor'
+    if (!['editor', 'commenter', 'viewer'].includes(role)) {
+      return HttpResponse.json({ error: "role must be 'editor', 'commenter', or 'viewer'" }, { status: 400 })
+    }
+    if (idx >= 0) list[idx].role = role
+    else list.push({ account_id: body.account_id, role })
+    return HttpResponse.json({ ok: true })
+  }),
+
+  // "Shared with me" — files shared TO the caller (mock returns a fixed seed).
+  http.get('/api/shared-files', () => {
+    log('GET', '/shared-files')
+    return HttpResponse.json({ files: mockState.sharedWithMe || [] })
+  }),
+
   // ── Comments ─────────────────────────────────────────────────────────────
-  // Collaborator roster for @-mention autocomplete (parity).
+  // Collaborator roster for @-mention autocomplete AND the share dialog. The
+  // owner is included as an 'owner' entry so the dialog can detect ownership.
   http.get('/api/files/:id/collaborators', ({ params }) => {
     log('GET', `/files/${params.id}/collaborators`)
-    return HttpResponse.json({ collaborators: mockState.collaborators?.[params.id] || [] })
+    const collabs = mockState.collaborators?.[params.id] || []
+    const owner = mockState.owner || 'you@vulos.test'
+    return HttpResponse.json({ collaborators: [{ account_id: owner, role: 'owner' }, ...collabs] })
   }),
 
   http.get('/api/files/:id/comments', ({ params }) => {

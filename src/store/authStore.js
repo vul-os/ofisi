@@ -10,6 +10,12 @@ export const useAuthStore = create((set) => ({
   loading: true,
   error: null,
   remainingAttempts: null,
+  // The caller's own account id + admin flag, resolved from /system/info. Used
+  // by the account-share dialog (owner detection, self-share guard) and any
+  // surface that needs "who am I". null until fetched (or in local single-user
+  // mode where it resolves to the shared 'self' identity).
+  accountId: null,
+  isAdmin: false,
 
   fetchStatus: async () => {
     try {
@@ -17,6 +23,17 @@ export const useAuthStore = create((set) => ({
       set({ status, loading: false })
     } catch {
       set({ status: { enabled: false, authenticated: true }, loading: false })
+    }
+  },
+
+  // Resolve the caller's identity from the server. Best-effort: a failure leaves
+  // accountId null, which the share UI treats conservatively (local/owner mode).
+  fetchIdentity: async () => {
+    try {
+      const info = await api.systemInfo()
+      set({ accountId: info?.account_id || null, isAdmin: !!info?.is_admin })
+    } catch {
+      /* identity is optional UX; leave null */
     }
   },
 

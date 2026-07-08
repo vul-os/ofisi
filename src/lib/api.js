@@ -64,6 +64,10 @@ export const api = {
     }),
 
   listFiles: () => request('/files'),
+  // "Shared with me" — files shared TO the caller by others (owned excluded).
+  // Returns { files: [{ id, name, type, owner, role, updated_at, created_at }] }.
+  // ACL-safe: the server computes this from the caller's own grants only.
+  listSharedWithMe: () => request('/shared-files'),
   getFile: (id) => request(`/files/${id}`),
   createFile: (name, type, content) =>
     request('/files', { method: 'POST', body: JSON.stringify({ name, type, content }) }),
@@ -97,8 +101,27 @@ export const api = {
   deleteFolder: (id) =>
     request(`/folders/${id}`, { method: 'DELETE' }),
 
-  // Parity: collaborator roster (for @-mention autocomplete).
+  // Parity: collaborator roster (for @-mention autocomplete AND the account-share
+  // dialog). Returns { collaborators: [{ account_id, role }] } — role 'owner' for
+  // the file owner, otherwise the granted role (editor|commenter|viewer).
   listFileCollaborators: (id) => request(`/files/${id}/collaborators`),
+
+  // Account-based sharing (owner-only, enforced server-side).
+  //   shareFile   — grant/update a named account's role on a file.
+  //                 role ∈ {'editor','commenter','viewer'}.
+  //   revokeShare — remove a collaborator's access entirely.
+  // The server rejects a non-owner caller (403) and an unknown role (400); the
+  // UI is a convenience only — access is never granted client-side.
+  shareFile: (id, accountId, role) =>
+    request(`/files/${id}/share`, {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId, role }),
+    }),
+  revokeShare: (id, accountId) =>
+    request(`/files/${id}/share`, {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId, revoke: true }),
+    }),
 
   // Parity: in-app notifications (surfaces @-mentions).
   listNotifications: () => request('/notifications'),
