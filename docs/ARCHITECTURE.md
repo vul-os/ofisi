@@ -11,8 +11,8 @@ Vulos Office is a collaborative document editing + e-signing service. It exposes
 > **Scope:** Office is documents-only (Docs, Sheets, Slides, PDF/Signing). Calendar
 > and Contacts moved to the **Vulos Mail/PIM** product (vulos-mail CalDAV/CardDAV +
 > lilmail `/v1/calendar` + `/v1/contacts`). Video (Meet) lives in `vulos-meet` and
-> chat/spaces (Talk) lives in `vulos-talk`. Vulos Workspace is the suite shell that
-> combines the products.
+> chat/spaces (Talk) lives in `vulos-talk`. The Vulos OS is the shell that hosts the
+> apps; the Vulos Workspace hub app consolidates them into one cockpit.
 
 > **Collaboration transport note:** Live co-editing is CRDT-based and runs over
 > **three complementary transports**, all wired today:

@@ -12,8 +12,9 @@ across the network, with relay/TURN fallback.
 
 > **Product scope.** Vulos Office is documents-only. Team chat + Spaces ship as the
 > separate **vulos-talk** product and video calling as **vulos-meet**; the **Vulos
-> Workspace** shell combines Office, Talk, and Meet into one suite. Chat/calling
-> roadmap items previously tracked here now live in those repos.
+> OS** hosts the apps and the **Vulos Workspace** hub app consolidates Office, Talk,
+> and Meet into one cockpit. Chat/calling roadmap items previously tracked here now
+> live in those repos.
 
 The throughline: Vulos Office never invents its own network. Real-time document
 collaboration reuses the **same fabric the Vulos OS uses for device routing** —
@@ -227,8 +228,9 @@ pillar. They have since been **extracted into their own products**:
 
 Both ride the same Vulos peer fabric (CRDT/bucket sync for messages, WebRTC +
 relay/TURN for media) and share the one Vulos account identity with Office. The
-**Vulos Workspace** shell combines Office, Talk, and Meet into a single suite;
-Office's sidebar links out to Talk/Meet but never embeds them. See the
+the **Vulos OS** hosts the apps and the **Vulos Workspace** hub app consolidates
+Office, Talk, and Meet into a single cockpit; Office's sidebar links out to
+Talk/Meet but never embeds them. See the
 `vulos-talk` and `vulos-meet` repos for their roadmaps and threat models.
 
 ---

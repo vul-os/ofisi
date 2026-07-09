@@ -6,8 +6,8 @@ object storage for CDN delivery.
 > Vulos Office is the **documents-only** product (Docs, Sheets, Slides, PDF/Signing).
 > Calendar and Contacts ship as part of the separate **vulos-mail** product;
 > chat/Spaces ships as **vulos-talk** (`talk.vulos.org`) and video as **vulos-meet**
-> (`meet.vulos.org`); each is deployed from its own repo and combined by the Vulos
-> Workspace shell.
+> (`meet.vulos.org`); each is deployed from its own repo. The Vulos OS is the shell
+> that hosts the apps, and the Vulos Workspace hub app consolidates them into one cockpit.
 
 ## Prerequisites
 

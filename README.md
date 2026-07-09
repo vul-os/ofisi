@@ -14,7 +14,7 @@ Docs · Sheets · Slides · PDF Signing
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-<sub><img src="docs/assets/vulos-logo.png" height="14" alt="VulOS"> Part of <strong><a href="https://vulos.org">VulOS</a></strong> — the open, self-hostable web OS &amp; app suite. Runs standalone, or combined under one login by <a href="https://vulos.org">Vulos Workspace</a>.</sub>
+<sub><img src="docs/assets/vulos-logo.png" height="14" alt="VulOS"> Part of <strong><a href="https://vulos.org">VulOS</a></strong> — the open, self-hostable web OS &amp; app suite. Runs standalone, or as an app hosted by the Vulos OS.</sub>
 
 </div>
 
@@ -38,19 +38,19 @@ It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers wh
 
 ## Part of VulOS
 
-**VulOS** is an open, self-hostable web OS + app suite. Each product is independently self-hostable on its own, and they combine under one login via **Vulos Workspace**:
+**VulOS** is an open, self-hostable web OS + app suite. The **Vulos OS** is the shell (launcher, windows, dock, assistant) that hosts the apps; each product is also independently self-hostable on its own:
 
 - **Vulos Mail** — mail + calendar + contacts (engine: lilmail; server: vulos-mail)
 - **Vulos Talk** — team chat + channels/Spaces + huddles
 - **Vulos Meet** — video meetings (LiveKit SFU)
 - **Vulos Office** — documents: docs, sheets, slides, PDF *(this repo)*
 - **Vulos Relay** — sovereign connectivity fabric (`@vulos/relay-client`)
-- **Vulos Workspace** — the open suite shell (one login, app switcher, admin)
-- **Vulos OS** — the web-native desktop
+- **Vulos Workspace** — an OS-hosted productivity hub that consolidates Mail, Office, Talk & Meet
+- **Vulos OS** — the web-native desktop (the shell that hosts the suite apps)
 
-Products never import each other — Vulos Workspace *links/embeds* them across clean seams.
+Products never import each other — they are linked/embedded across clean seams.
 
-**Vulos Office's role:** the documents surface — Docs, Sheets, Slides, and PDF/Signing. It **runs standalone** as a single Go binary **and** is combined under one login by Vulos Workspace. Its sidebar links out to Vulos Talk and Vulos Meet, but never embeds them — chat lives in **vulos-talk** and video in **vulos-meet**. Calendar and Contacts are **not** part of Office; they are the canonical PIM surfaces of **Vulos Mail** (CalDAV/CardDAV + lilmail `/v1/calendar` + `/v1/contacts`).
+**Vulos Office's role:** the documents surface — Docs, Sheets, Slides, and PDF/Signing. It **runs standalone** as a single Go binary **and** as an app hosted by the Vulos OS, where the Workspace hub app can surface it. Its sidebar links out to Vulos Talk and Vulos Meet, but never embeds them — chat lives in **vulos-talk** and video in **vulos-meet**. Calendar and Contacts are **not** part of Office; they are the canonical PIM surfaces of **Vulos Mail** (CalDAV/CardDAV + lilmail `/v1/calendar` + `/v1/contacts`).
 
 ---
 
@@ -70,7 +70,7 @@ Products never import each other — Vulos Workspace *links/embeds* them across 
 | **PWA-ready** | Installable as a desktop / mobile app via web manifest |
 | **Observability** | Prometheus metrics at `/metrics` and optional OpenTelemetry traces |
 
-Every surface is also published as an npm library (`@vulos/office-client`) so Vulos Workspace — or your own app — can embed any editor as a native panel:
+Every surface is also published as an npm library (`@vulos/office-client`) so the Vulos Workspace hub app — or your own app — can embed any editor as a native panel:
 
 ```js
 import { DocsApp }     from '@vulos/office-client/docs'
