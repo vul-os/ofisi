@@ -11,6 +11,11 @@ import {
   Upload, RotateCw, FilePlus, Trash, FileSignature,
 } from 'lucide-react'
 import { Button, IconButton, Tabs, Topbar, Tooltip } from '../../components/ui'
+// SOVEREIGNTY: cursive signature fonts vendored locally via @fontsource
+// (self-hosted woff2) instead of an @import from fonts.googleapis.com at
+// runtime — no user-IP leak to Google, stays air-gappable. Same fonts.
+import '@fontsource/dancing-script/700.css'
+import '@fontsource/pinyon-script/400.css'
 
 /*
  * PDFEditor — single-user PDF editor with annotate / sign / page operations.
@@ -1693,9 +1698,10 @@ export default function PDFEditor() {
         }}
       />
 
-      {/* Cursive fonts for typed signatures */}
+      {/* Cursive signature fonts (Dancing Script, Pinyon Script) are vendored
+          locally via @fontsource imports at the top of this module — no runtime
+          Google Fonts @import. */}
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&family=Pinyon+Script&display=swap');
         .pdf-annot-text:focus { outline: none; }
         .pdf-annot-text[contenteditable="true"] { cursor: text; }
         .pdf-annot-text {

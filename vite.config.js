@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { stripExternalCssImports } from './vite.strip-external-css-imports.js'
 
 // emptyOutDir wipes dist/ on every build, including the dist/.gitkeep
 // placeholder that lets `go build` (//go:embed all:dist) compile before any
@@ -24,7 +25,7 @@ export default defineConfig({
     setupFiles: ['./src/test-setup.js'],
     include: ['src/**/*.test.{js,jsx}', 'src/__tests__/**/*.test.{js,jsx}'],
   },
-  plugins: [react(), keepGitkeep],
+  plugins: [react(), keepGitkeep, stripExternalCssImports()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

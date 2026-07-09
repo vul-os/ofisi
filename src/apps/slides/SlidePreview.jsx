@@ -1,5 +1,17 @@
 import { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
+// SOVEREIGNTY: reveal.js core + theme CSS are served from the locally-bundled
+// npm package (self-hosted), NOT fetched from cdnjs.cloudflare.com at runtime.
+// A self-host product must never depend on a third-party CDN for its assets.
+import 'reveal.js/dist/reveal.css'
+// All reveal themes bundled as local asset URLs; picked by name below.
+const REVEAL_THEMES = import.meta.glob('/node_modules/reveal.js/dist/theme/*.css', {
+  query: '?url', import: 'default', eager: true,
+})
+function revealThemeUrl(name) {
+  const key = `/node_modules/reveal.js/dist/theme/${name || 'black'}.css`
+  return REVEAL_THEMES[key] || REVEAL_THEMES['/node_modules/reveal.js/dist/theme/black.css']
+}
 // Shared DOMPurify config (see src/lib/sanitize.js) — allows Tiptap/Reveal HTML
 // tags, strips anything that could execute code (<script>, on* handlers,
 // javascript: URLs, <iframe>).
@@ -110,8 +122,9 @@ export default function SlidePreview({ data, onClose }) {
         </button>
       </div>
 
-      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.css" />
-      <link rel="stylesheet" href={`https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/theme/${data.theme || 'black'}.min.css`} />
+      {/* reveal core CSS bundled via the module import above; theme CSS served
+          from the local package asset (no cdnjs runtime fetch). */}
+      <link rel="stylesheet" href={revealThemeUrl(data.theme)} />
 
       <div ref={containerRef} className="reveal flex-1 w-full">
         <div className="slides">

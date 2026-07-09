@@ -68,6 +68,11 @@
     "LICENSE"
   ],
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource/dancing-script": "^5.2.8",
+    "@fontsource/pacifico": "^5.2.7",
+    "@fontsource/pinyon-script": "^5.2.8",
+    "@fontsource/satisfy": "^5.2.7",
     "@fortune-sheet/react": "^1.0.4",
     "@tiptap/extension-character-count": "^2.11.7",
     "@tiptap/extension-color": "^2.11.7",

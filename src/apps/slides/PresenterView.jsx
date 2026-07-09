@@ -23,6 +23,24 @@ import { useEffect, useRef, useCallback } from 'react'
 // Shared DOMPurify config — see src/lib/sanitize.js.
 import { sanitizeSlideHtml as sanitize } from '../../lib/sanitize'
 
+// SOVEREIGNTY: the presenter popup previously pulled reveal.js core CSS, its
+// theme CSS, and the reveal.js runtime from cdnjs.cloudflare.com. A self-host
+// product must never depend on a third-party CDN at runtime, so these are now
+// served from the locally-bundled npm package. The popup is a same-origin blob
+// document, so it can load these absolute app-origin asset URLs. reveal.js/dist
+// is a UMD build that assigns window.Reveal — exactly what the popup expects.
+import REVEAL_CORE_CSS_URL from 'reveal.js/dist/reveal.css?url'
+import REVEAL_JS_URL from 'reveal.js/dist/reveal.js?url'
+const PRESENTER_REVEAL_THEMES = import.meta.glob(
+  '/node_modules/reveal.js/dist/theme/*.css',
+  { query: '?url', import: 'default', eager: true },
+)
+function presenterThemeUrl(name) {
+  const key = `/node_modules/reveal.js/dist/theme/${name || 'black'}.css`
+  return PRESENTER_REVEAL_THEMES[key] ||
+    PRESENTER_REVEAL_THEMES['/node_modules/reveal.js/dist/theme/black.css']
+}
+
 // Serialise a value for embedding inside an inline <script> block. JSON.stringify
 // ALONE is NOT safe here: it escapes quotes/backslashes but leaves `<`, `>` and
 // `&` literal, so a field value containing `</script>` (e.g. an untrusted slide
@@ -58,10 +76,8 @@ export function buildPresenterHTML(slides, activeIdx, themeId) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Presenter View — Vulos Slides</title>
-  <link rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.css" />
-  <link rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/theme/${themeId || 'black'}.min.css" />
+  <link rel="stylesheet" href="${REVEAL_CORE_CSS_URL}" />
+  <link rel="stylesheet" href="${presenterThemeUrl(themeId)}" />
   <style>
     *,*::before,*::after{box-sizing:border-box}
     :root{
@@ -269,7 +285,7 @@ export function buildPresenterHTML(slides, activeIdx, themeId) {
 
   // Boot reveal.js
   var script = document.createElement('script');
-  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.js';
+  script.src = ${scriptSafeJson(REVEAL_JS_URL)};
   script.onload = function() {
     // Build slides HTML
     var slidesEl = document.getElementById('reveal-slides');

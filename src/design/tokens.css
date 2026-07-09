@@ -17,7 +17,14 @@
  * ships near-black like vulos-cloud.
  * ========================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&display=swap');
+/* SOVEREIGNTY: Inter is vendored locally via @fontsource (self-hosted woff2),
+ * NOT fetched from Google Fonts at runtime. A self-host product must never leak
+ * the user's IP to fonts.googleapis.com / fonts.gstatic.com, and must stay
+ * air-gappable. The variable `opsz` axis mirrors the previous
+ * `Inter:ital,opsz,wght@…14..32…` request exactly. system-ui fallback preserved
+ * in --font-sans below. */
+@import '@fontsource-variable/inter/opsz.css';
+@import '@fontsource-variable/inter/opsz-italic.css';
 
 :root {
   /* ── Near-black neutral ramp (oat-* names kept for back-compat) ──────────

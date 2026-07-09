@@ -15,6 +15,11 @@ import {
   Type,
   Upload,
 } from 'lucide-react'
+// SOVEREIGNTY: signature preview fonts vendored locally (self-hosted woff2),
+// not fetched from Google Fonts at runtime. Same faces as before.
+import '@fontsource/dancing-script/600.css'
+import '@fontsource/pacifico/400.css'
+import '@fontsource/satisfy/400.css'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -62,15 +67,11 @@ const TYPED_FONTS = [
   { label: 'Formal',  value: 'Georgia, serif' },
 ]
 
-// Load Google Fonts for typed signature preview
-const GFONTS_LINK = 'https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&family=Pacifico&family=Satisfy&display=swap'
-function ensureGFonts() {
-  if (document.querySelector(`link[href="${GFONTS_LINK}"]`)) return
-  const link = document.createElement('link')
-  link.rel = 'stylesheet'
-  link.href = GFONTS_LINK
-  document.head.appendChild(link)
-}
+// SOVEREIGNTY: typed-signature preview fonts are vendored locally via the
+// @fontsource imports below (self-hosted woff2) — NOT injected from
+// fonts.googleapis.com at runtime. No user-IP leak to Google, air-gappable.
+// Same faces (Dancing Script 600, Pacifico, Satisfy).
+function ensureGFonts() { /* no-op: fonts are bundled locally, nothing to inject */ }
 
 // ── DrawPad: canvas-based draw mode using signature_pad ──────────
 function DrawPad({ onDataUrl }) {

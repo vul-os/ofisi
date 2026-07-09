@@ -10,6 +10,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
+import { stripExternalCssImports } from './vite.strip-external-css-imports.js'
 
 const dir = import.meta.dirname
 
@@ -22,7 +23,7 @@ const entries = {
 }
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), stripExternalCssImports()],
   define: {
     'import.meta.env.VITE_BUILD_TARGET': JSON.stringify('lib'),
   },
