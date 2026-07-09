@@ -290,8 +290,17 @@ func main() {
 	// Anonymous, token-gated, READ-ONLY document view (no auth — the token IS the
 	// credential). GET returns metadata (and content when no password); POST with
 	// the password returns content for password-gated links.
+	//
+	// The POST path calls bcrypt.CompareHashAndPassword on the link password. It is
+	// UNAUTHENTICATED, so without a limit it is an online brute-force oracle against
+	// the share-link password — exactly the risk /auth/login and /auth/password
+	// already guard against. Rate-limit the POST per client IP (10/min), matching
+	// those sensitive endpoints. GET is NOT password-bearing (its content is gated
+	// by the 256-bit token capability, not a guessable secret), so it is left
+	// unthrottled to avoid falsely blocking many legitimate viewers behind one NAT.
+	shareViewLimiter := middleware.NewRateLimiter(10, time.Minute)
 	api.GET("/share/:token", shareLinkHandler.ViewMeta)
-	api.POST("/share/:token", shareLinkHandler.View)
+	api.POST("/share/:token", shareViewLimiter.Middleware(), shareLinkHandler.View)
 
 	// OFFICE-28: activity feed + named snapshots.
 	activityHandler := handlers.NewActivityHandler(store)
