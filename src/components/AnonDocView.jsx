@@ -149,7 +149,7 @@ export default function AnonDocView() {
         )}
 
         {!loading && file && (
-          <div className="bg-paper border border-line rounded-lg shadow-sm p-8">
+          <div className="bg-paper border border-line rounded-lg shadow-e2 p-8">
             <div className="flex items-center gap-2 pb-4 mb-4 border-b border-line">
               <FileText size={16} className="text-ink-faint" />
               <h1 className="text-lg font-semibold text-ink tracking-tightish truncate">{file.name || 'Untitled'}</h1>

@@ -179,6 +179,11 @@ export default function SlideCanvas({
     const d = dragRef.current
     if (!d) return
     const cur = toFrac(e)
+    // The stage can lose layout mid-gesture (unmount, display:none, or — in
+    // jsdom — a getBoundingClientRect stub reset by an unrelated test). Without
+    // a rect, toFrac returns null; bail rather than deref null and crash the
+    // pointermove handler (which fires at window scope, so the throw is uncaught).
+    if (!cur) return
     d.moved = true  // a real drag happened → commit on pointer-up
 
     if (d.kind === 'move') {

@@ -23,19 +23,13 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { X, MessageSquare, CheckCircle, RotateCcw, Trash2, Send, ChevronDown, ChevronUp, Crosshair } from 'lucide-react'
 import { api } from '../lib/api'
 import { getCommentStore } from '../lib/crdt/comments'
+import { formatTs } from '../lib/format'
 import { IconButton, Tabs, LoadingState, EmptyState } from './ui'
 import MentionInput, { getMentions, renderMentions } from './MentionInput'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatTs(isoStr) {
-  if (!isoStr) return ''
-  const d = new Date(isoStr)
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
-    ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-}
 
 function anchorLabel(anchor) {
   if (!anchor) return ''

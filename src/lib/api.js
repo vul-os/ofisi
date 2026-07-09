@@ -16,6 +16,19 @@ export function apiUrl(path) {
   return currentEndpoint() + API_PREFIX + path
 }
 
+// Absolutise a same-origin API URL. selectEndpoint() returns '' for same-origin,
+// so `base + path` is a relative URL like "/api/files/x". Browsers resolve those
+// against location.href, but a bare `fetch()` in a non-DOM context (undici under
+// vitest/MSW) throws ERR_INVALID_URL on a relative input. Prefixing the current
+// origin keeps the URL identical in the browser while making it always parseable.
+function absolutize(url) {
+  if (/^https?:\/\//i.test(url)) return url
+  if (typeof location !== 'undefined' && location.origin && location.origin !== 'null') {
+    return location.origin + url
+  }
+  return url
+}
+
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers }
 
@@ -24,14 +37,14 @@ async function request(path, options = {}) {
   const base = await apiBase()
   let res
   try {
-    res = await fetch(base + path, { ...options, headers, credentials: 'include' })
+    res = await fetch(absolutize(base + path), { ...options, headers, credentials: 'include' })
   } catch (netErr) {
     // Network-level failure (endpoint unreachable): invalidate the selection,
     // re-probe (cloud↔LAN failover), and retry once against the new endpoint.
     invalidateEndpoint()
     const retryBase = (await selectEndpoint({ force: true })) + API_PREFIX
     if (retryBase !== base) {
-      res = await fetch(retryBase + path, { ...options, headers, credentials: 'include' })
+      res = await fetch(absolutize(retryBase + path), { ...options, headers, credentials: 'include' })
     } else {
       throw netErr
     }

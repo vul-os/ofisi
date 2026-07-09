@@ -14,6 +14,7 @@ import NewFileModal from './NewFileModal'
 import AccountShareModal from './AccountShareModal'
 import { importFromUrl, importFile, detectType } from '../lib/importFile'
 import { api } from '../lib/api'
+import { timeAgo, formatBytes } from '../lib/format'
 import { Button, IconButton, Input, Card, Tooltip, useToast, DocThumb, Skeleton, Avatar, hueFor } from './ui'
 
 // ─── Token-aligned config ─────────────────────────────────────────────────────
@@ -58,21 +59,6 @@ const CONFIG = {
     importExts: '.pdf',
     canCreate: false,
   },
-}
-
-function formatDate(s) {
-  const diff = Date.now() - new Date(s).getTime()
-  if (diff < 60000)    return 'just now'
-  if (diff < 3600000)  return `${Math.floor(diff / 60000)}m ago`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-  if (diff < 604800000)return `${Math.floor(diff / 86400000)}d ago`
-  return new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
-function formatSize(b) {
-  if (b < 1024)         return b + ' B'
-  if (b < 1024 * 1024)  return (b / 1024).toFixed(0) + ' KB'
-  return (b / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
 export default function AppHome({ type }) {
@@ -534,7 +520,7 @@ export default function AppHome({ type }) {
                     <span className="px-1.5 py-0.5 rounded-xs bg-bg-elev2 border border-line font-semibold uppercase text-[9px] capitalize">
                       {file.role || 'shared'}
                     </span>
-                    <span>{formatDate(file.updated_at)}</span>
+                    <span>{timeAgo(file.updated_at)}</span>
                     <ArrowUpRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 </button>
@@ -580,7 +566,7 @@ export default function AppHome({ type }) {
                     <p className="text-2xs text-ink-faint truncate">{file.path.replace(/\/Users\/[^/]+/, '~')}</p>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0 text-2xs text-ink-faint tracking-tightish">
-                    <span>{formatSize(file.size)}</span>
+                    <span>{formatBytes(file.size)}</span>
                     <span className={`px-1.5 py-0.5 rounded-xs ${cfg.bgCn} ${cfg.iconCn} font-semibold uppercase text-[9px]`}>
                       {file.ext.slice(1)}
                     </span>
@@ -641,7 +627,7 @@ function ViewTab({ active, onClick, children }) {
 // just names) with a highlighted snippet. The server returns only files the
 // caller may read (ACL enforced at query time), so nothing here can leak another
 // account's content.
-function ContentSearchResults({ results, searching, query, cfg, onOpen, myAccountId }) {
+export function ContentSearchResults({ results, searching, query, cfg, onOpen, myAccountId }) {
   // Idle (results === null) with no in-flight request → render nothing.
   if (results === null && !searching) return null
 
@@ -683,7 +669,7 @@ function ContentSearchResults({ results, searching, query, cfg, onOpen, myAccoun
 // SnippetText renders a server snippet, highlighting the «matched» span the
 // backend delimits with « » guillemets. Rendered as plain text nodes (no HTML
 // injection) so document content can never inject markup.
-function SnippetText({ snippet }) {
+export function SnippetText({ snippet }) {
   if (!snippet) return null
   const parts = []
   let rest = snippet
@@ -694,7 +680,7 @@ function SnippetText({ snippet }) {
     const close = rest.indexOf('»', open)
     if (close < 0) { parts.push(<span key={k++}>{rest}</span>); break }
     if (open > 0) parts.push(<span key={k++}>{rest.slice(0, open)}</span>)
-    parts.push(<mark key={k++} className="bg-warning/25 text-ink rounded-px px-0.5">{rest.slice(open + 1, close)}</mark>)
+    parts.push(<mark key={k++} className="bg-warning/25 text-ink rounded-xs px-0.5">{rest.slice(open + 1, close)}</mark>)
     rest = rest.slice(close + 1)
   }
   return <p className="text-2xs text-ink-muted mt-0.5 leading-relaxed line-clamp-2">{parts}</p>
@@ -832,7 +818,7 @@ function FileCard({
         )}
         <div className="flex items-center justify-between mt-1.5">
           <span className="text-2xs text-ink-faint flex items-center gap-1 tracking-tightish">
-            <Clock size={9} />{formatDate(file.updated_at)}
+            <Clock size={9} />{timeAgo(file.updated_at)}
           </span>
           <div className="relative" onClick={e => e.stopPropagation()}>
             <button
@@ -916,7 +902,7 @@ function FileListTable({
                   )}
                 </div>
               </td>
-              <td className="px-4 py-3 text-2xs text-ink-faint tracking-tightish">{formatDate(file.updated_at)}</td>
+              <td className="px-4 py-3 text-2xs text-ink-faint tracking-tightish">{timeAgo(file.updated_at)}</td>
               <td className="px-2 py-3" onClick={e => e.stopPropagation()}>
                 <div className="relative">
                   <button

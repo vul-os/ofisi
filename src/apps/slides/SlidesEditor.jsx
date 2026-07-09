@@ -510,6 +510,10 @@ export default function SlidesEditor() {
     saveTimer.current = setTimeout(() => autosave(sd), 2000)
   }
 
+  // Cancel any pending debounced autosave when the editor unmounts, so a save
+  // can't fire (and hit the network) against a torn-down component.
+  useEffect(() => () => clearTimeout(saveTimer.current), [])
+
   // ── Slide field update ────────────────────────────────────────────────────
   const updateSlideField = (idx, field, value) => {
     setSlidesData((prev) => {

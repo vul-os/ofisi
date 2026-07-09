@@ -14,6 +14,9 @@ import { X, Upload, Check, Palette } from 'lucide-react'
 import { PRESET_THEMES, getTheme } from './themes.js'
 import { useDialogA11y } from '../../components/ui'
 
+// Tab list (key, label) — drives both the tablist render and its keyboard nav.
+const TABS = [['gallery', 'Presets'], ['custom', 'Custom']]
+
 const FONT_OPTIONS = [
   '"Inter", sans-serif',
   '"Sora", sans-serif',
@@ -121,6 +124,24 @@ export default function ThemeGallery({ currentThemeId, customTheme, onApply, onC
     setCustom((prev) => ({ ...(prev || {}), [key]: value }))
   }
 
+  // Roving arrow-key navigation across the tablist (WAI-ARIA tabs pattern):
+  // Left/Right move + activate; Home/End jump to the ends.
+  const onTabKeyDown = (e) => {
+    const keys = TABS.map(([k]) => k)
+    const i = keys.indexOf(tab)
+    let next = null
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = keys[(i + 1) % keys.length]
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = keys[(i - 1 + keys.length) % keys.length]
+    else if (e.key === 'Home') next = keys[0]
+    else if (e.key === 'End') next = keys[keys.length - 1]
+    if (next) {
+      e.preventDefault()
+      setTab(next)
+      // Move DOM focus to the newly-selected tab so keyboard focus follows.
+      requestAnimationFrame(() => document.getElementById(`themetab-${next}`)?.focus())
+    }
+  }
+
   return (
     <div
       ref={dialogRef}
@@ -158,14 +179,21 @@ export default function ThemeGallery({ currentThemeId, customTheme, onApply, onC
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-line">
-          {[['gallery', 'Presets'], ['custom', 'Custom']].map(([key, label]) => (
+        <div className="flex border-b border-line" role="tablist" aria-label="Theme source">
+          {TABS.map(([key, label]) => (
             <button
               key={key}
               type="button"
+              role="tab"
+              id={`themetab-${key}`}
+              aria-selected={tab === key}
+              aria-controls={`themepanel-${key}`}
+              tabIndex={tab === key ? 0 : -1}
               onClick={() => setTab(key)}
+              onKeyDown={onTabKeyDown}
               className={[
                 'px-4 py-2.5 text-xs font-semibold transition-colors border-b-2 -mb-px',
+                'focus-visible:outline-none focus-visible:shadow-focus rounded-t-sm',
                 tab === key
                   ? 'border-accent text-accent'
                   : 'border-transparent text-ink-muted hover:text-ink',
@@ -178,7 +206,12 @@ export default function ThemeGallery({ currentThemeId, customTheme, onApply, onC
 
         <div className="flex-1 overflow-y-auto p-4">
           {tab === 'gallery' && (
-            <div className="grid grid-cols-5 gap-2.5">
+            <div
+              className="grid grid-cols-5 gap-2.5"
+              role="tabpanel"
+              id="themepanel-gallery"
+              aria-labelledby="themetab-gallery"
+            >
               {PRESET_THEMES.map((theme) => (
                 <ThemeTile
                   key={theme.id}
@@ -191,19 +224,25 @@ export default function ThemeGallery({ currentThemeId, customTheme, onApply, onC
           )}
 
           {tab === 'custom' && (
-            <div className="space-y-4">
+            <div
+              className="space-y-4"
+              role="tabpanel"
+              id="themepanel-custom"
+              aria-labelledby="themetab-custom"
+            >
               <p className="text-xs text-ink-muted">
                 Start from the selected preset, then override any values.
               </p>
               {/* Base preset */}
               <div>
-                <label className="block text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow mb-1">
+                <label htmlFor="theme-base-preset" className="block text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow mb-1">
                   Base Preset
                 </label>
                 <select
+                  id="theme-base-preset"
                   value={selected}
                   onChange={(e) => setSelected(e.target.value)}
-                  className="w-full bg-bg text-ink text-xs rounded-sm px-2 h-8 border border-line"
+                  className="w-full bg-bg text-ink text-xs rounded-sm px-2 h-8 border border-line focus:outline-none focus-visible:shadow-focus focus:border-accent"
                 >
                   {PRESET_THEMES.map((t) => (
                     <option key={t.id} value={t.id}>{t.label}</option>
@@ -214,25 +253,27 @@ export default function ThemeGallery({ currentThemeId, customTheme, onApply, onC
               {/* Fonts */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow mb-1">
+                  <label htmlFor="theme-heading-font" className="block text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow mb-1">
                     Heading Font
                   </label>
                   <select
+                    id="theme-heading-font"
                     value={custom?.headingFont || previewTheme.headingFont}
                     onChange={(e) => updateCustom('headingFont', e.target.value)}
-                    className="w-full bg-bg text-ink text-xs rounded-sm px-2 h-8 border border-line"
+                    className="w-full bg-bg text-ink text-xs rounded-sm px-2 h-8 border border-line focus:outline-none focus-visible:shadow-focus focus:border-accent"
                   >
                     {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f.split('"')[1] || f}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow mb-1">
+                  <label htmlFor="theme-body-font" className="block text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow mb-1">
                     Body Font
                   </label>
                   <select
+                    id="theme-body-font"
                     value={custom?.bodyFont || previewTheme.bodyFont}
                     onChange={(e) => updateCustom('bodyFont', e.target.value)}
-                    className="w-full bg-bg text-ink text-xs rounded-sm px-2 h-8 border border-line"
+                    className="w-full bg-bg text-ink text-xs rounded-sm px-2 h-8 border border-line focus:outline-none focus-visible:shadow-focus focus:border-accent"
                   >
                     {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f.split('"')[1] || f}</option>)}
                   </select>
@@ -250,15 +291,16 @@ export default function ThemeGallery({ currentThemeId, customTheme, onApply, onC
                   ['textMuted', 'Text Muted'],
                 ].map(([key, lbl]) => (
                   <div key={key}>
-                    <label className="block text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow mb-1">
+                    <label htmlFor={`theme-color-${key}`} className="block text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow mb-1">
                       {lbl}
                     </label>
                     <div className="flex items-center gap-1.5">
                       <input
+                        id={`theme-color-${key}`}
                         type="color"
                         value={custom?.[key] || previewTheme[key] || '#000000'}
                         onChange={(e) => updateCustom(key, e.target.value)}
-                        className="w-8 h-8 rounded border border-line cursor-pointer bg-transparent"
+                        className="w-8 h-8 rounded-sm border border-line cursor-pointer bg-transparent focus:outline-none focus-visible:shadow-focus"
                         style={{ padding: 2 }}
                       />
                       <span className="text-xs text-ink-muted font-mono">

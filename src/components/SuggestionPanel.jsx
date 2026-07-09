@@ -18,16 +18,10 @@
 
 import { useState } from 'react'
 import { Check, XCircle, Type, Trash2, ChevronDown, ChevronUp, X, GitBranch } from 'lucide-react'
+import { formatTs } from '../lib/format'
 import { Tabs, Button, IconButton, EmptyState } from './ui'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatTs(isoStr) {
-  if (!isoStr) return ''
-  const d = new Date(isoStr)
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
-    ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-}
 
 function kindColor(kind) {
   return kind === 'insert'

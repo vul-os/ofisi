@@ -7,6 +7,7 @@ import {
 import { useFilesStore } from '../store/filesStore'
 import { useLocalFilesStore } from '../store/localFilesStore'
 import { importFromUrl } from '../lib/importFile'
+import { timeAgo, formatBytes } from '../lib/format'
 import NewFileModal from './NewFileModal'
 import { Card, Button, Tooltip, useToast, Skeleton, DocThumb } from './ui'
 
@@ -22,21 +23,6 @@ const localTypeInfo = {
   sheet: { icon: Table2,       iconCn: 'text-app-sheets', bgCn: 'bg-app-sheets-bg', label: 'Spreadsheet'  },
   slide: { icon: Presentation, iconCn: 'text-app-slides', bgCn: 'bg-app-slides-bg', label: 'Presentation' },
   pdf:   { icon: FileSearch,   iconCn: 'text-app-pdf',    bgCn: 'bg-app-pdf-bg',    label: 'PDF'          },
-}
-
-function formatDate(ms) {
-  const diff = Date.now() - ms
-  if (diff < 60000)    return 'just now'
-  if (diff < 3600000)  return `${Math.floor(diff / 60000)}m ago`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-  if (diff < 604800000)return `${Math.floor(diff / 86400000)}d ago`
-  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
-function formatSize(bytes) {
-  if (bytes < 1024)         return bytes + ' B'
-  if (bytes < 1024 * 1024)  return (bytes / 1024).toFixed(0) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
 async function openLocalFile(file, navigate, setImporting, showToast) {
@@ -165,7 +151,7 @@ export default function Home() {
                     <span className="text-sm font-medium text-ink flex-1 truncate tracking-tightish">{file.name}</span>
                     <span className="font-mono text-2xs text-ink-faint flex items-center gap-1.5 flex-shrink-0">
                       <Clock size={10} />
-                      {formatDate(new Date(file.updated_at).getTime())}
+                      {timeAgo(file.updated_at)}
                     </span>
                     <ArrowUpRight
                       size={14}
@@ -270,8 +256,8 @@ export default function Home() {
                         </p>
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0 font-mono text-2xs text-ink-faint">
-                        <span>{formatSize(file.size)}</span>
-                        <span>{formatDate(file.modified)}</span>
+                        <span>{formatBytes(file.size)}</span>
+                        <span>{timeAgo(file.modified)}</span>
                         <span className={`px-1.5 py-0.5 rounded-sm ${info.bgCn} ${info.iconCn} border border-line font-semibold uppercase text-[9px]`}>
                           {file.ext.slice(1)}
                         </span>
