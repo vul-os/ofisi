@@ -12,10 +12,12 @@ test.describe('P2P "Collaborate via link" (E2E)', () => {
     await page.goto('/docs/doc1')
     await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
 
-    // Open the P2P share modal (Share2 icon button, labelled via its tooltip).
-    await page.getByRole('button', { name: /Collaborate via link/i }).click()
+    // The Share entry point now opens account-based sharing first; the P2P E2E
+    // link path is reached from there via "Share via link (P2P)".
+    await page.getByRole('button', { name: /Share — with people/i }).click()
+    await page.getByRole('button', { name: /Share via link \(P2P\)/i }).click()
 
-    // The modal titled "Collaborate via link (P2P)" surfaces both links.
+    // The P2P modal surfaces both end-to-end-encrypted links.
     await expect(page.getByText('Editor link')).toBeVisible({ timeout: 10_000 })
     await expect(page.getByText('View-only link')).toBeVisible()
     await expect(page.getByText(/end-to-end encrypted/i)).toBeVisible()
@@ -28,10 +30,11 @@ test.describe('P2P "Collaborate via link" (E2E)', () => {
   })
 
   test('the ro invite link is well-formed and its fragment survives navigation', async ({ officePage: page }) => {
-    // Mint a ro link from the share modal.
+    // Mint a ro link from the share modal (via account-share → P2P link path).
     await page.goto('/docs/doc1')
     await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
-    await page.getByRole('button', { name: /Collaborate via link/i }).click()
+    await page.getByRole('button', { name: /Share — with people/i }).click()
+    await page.getByRole('button', { name: /Share via link \(P2P\)/i }).click()
     await expect(page.getByText('View-only link')).toBeVisible({ timeout: 10_000 })
 
     const roLink = await page.locator('input[readonly]').evaluateAll((els) => {

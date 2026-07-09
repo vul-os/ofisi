@@ -16,12 +16,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Activity, Bookmark, Loader2, AlertCircle, RotateCcw,
+  Activity, Bookmark, Loader2, RotateCcw,
   Plus, CheckCircle, Edit3, MessageSquare, Shield, X,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { timeAgoLong as formatRelative } from '../lib/format'
-import { Tabs, Button, IconButton, Input, Modal, LoadingState } from './ui'
+import { Tabs, Button, IconButton, Input, Modal, LoadingState, EmptyState, ErrorState } from './ui'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -83,21 +83,15 @@ function ActivityList({ fileId }) {
 
   useEffect(() => { load() }, [load])
 
-  if (error) return (
-    <div className="flex flex-col items-center gap-2 py-10 px-4 text-center">
-      <AlertCircle size={18} className="text-danger" />
-      <p className="text-xs text-danger">{error}</p>
-      <Button variant="link" size="sm" onClick={load}>Retry</Button>
-    </div>
-  )
+  if (error) return <ErrorState size="sm" message={error} onRetry={load} />
 
   if (events.length === 0) return (
-    <div className="py-12 px-4 text-center">
-      <p className="font-serif text-sm text-ink-muted italic">No activity yet.</p>
-      <p className="text-2xs text-ink-faint mt-1.5 leading-snug">
-        Edits, comments, and signings appear here.
-      </p>
-    </div>
+    <EmptyState
+      icon={Activity}
+      size="sm"
+      title="No activity yet."
+      hint="Edits, comments, and signings appear here."
+    />
   )
 
   // Group events by day for date separators
@@ -252,15 +246,11 @@ function SnapshotsTab({ fileId, onRestore }) {
 
         <div className="flex-1 overflow-y-auto">
           {loading && (
-            <LoadingState size="sm" label="Loading activity…" className="py-8" />
+            <LoadingState size="sm" label="Loading snapshots…" className="py-8" />
           )}
 
           {error && !loading && (
-            <div className="flex flex-col items-center gap-2 py-8 px-4 text-center">
-              <AlertCircle size={18} className="text-danger" />
-              <p className="text-xs text-danger">{error}</p>
-              <Button variant="link" size="sm" onClick={load}>Retry</Button>
-            </div>
+            <ErrorState size="sm" message={error} onRetry={load} />
           )}
 
           {!loading && !error && (
@@ -287,13 +277,12 @@ function SnapshotsTab({ fileId, onRestore }) {
               )}
 
               {named.length === 0 && (
-                <div className="px-4 py-8 text-center">
-                  <Bookmark size={18} className="mx-auto text-ink-faint mb-2" />
-                  <p className="font-serif text-sm text-ink-muted italic">No named snapshots yet.</p>
-                  <p className="text-2xs text-ink-faint mt-1 leading-snug">
-                    Give a name above to pin this state.
-                  </p>
-                </div>
+                <EmptyState
+                  icon={Bookmark}
+                  size="sm"
+                  title="No named snapshots yet."
+                  hint="Give a name above to pin this state."
+                />
               )}
 
               {/* Auto-saves */}

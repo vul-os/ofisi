@@ -13,6 +13,7 @@ vi.mock('../../lib/api', () => ({
     moveFile: vi.fn(),
     createFile: vi.fn(),
     listFiles: vi.fn(),
+    listSharedWithMe: vi.fn(),
   },
 }))
 vi.mock('../../lib/draftStore', () => ({
@@ -53,6 +54,37 @@ describe('folders', () => {
     await useFilesStore.getState().deleteFolder('fold1')
     expect(api.deleteFolder).toHaveBeenCalledWith('fold1')
     expect(useFilesStore.getState().folders).toHaveLength(0)
+  })
+})
+
+// Regression guard: a malformed (non-array) list response from the backend must
+// coerce to [], never poison store state. A poisoned `files`/`folders` would
+// crash every consumer that does .filter/.map/.slice — including the app-shell
+// rail, which took down the WHOLE UI (all routes) when /notifications answered a
+// non-array. These stores must be robust to that at the seam.
+describe('non-array list responses coerce to [] (shell-crash regression)', () => {
+  it('fetchFiles: an object response yields an empty array, not the object', async () => {
+    api.listFiles.mockResolvedValueOnce({})
+    await useFilesStore.getState().fetchFiles()
+    const { files } = useFilesStore.getState()
+    expect(Array.isArray(files)).toBe(true)
+    expect(files).toHaveLength(0)
+  })
+
+  it('fetchFolders: a null response yields an empty array', async () => {
+    api.listFolders.mockResolvedValueOnce(null)
+    await useFilesStore.getState().fetchFolders()
+    const { folders } = useFilesStore.getState()
+    expect(Array.isArray(folders)).toBe(true)
+    expect(folders).toHaveLength(0)
+  })
+
+  it('fetchSharedWithMe: a non-array files field yields an empty array', async () => {
+    api.listSharedWithMe.mockResolvedValueOnce({ files: { nope: true } })
+    await useFilesStore.getState().fetchSharedWithMe()
+    const { sharedWithMe } = useFilesStore.getState()
+    expect(Array.isArray(sharedWithMe)).toBe(true)
+    expect(sharedWithMe).toHaveLength(0)
   })
 })
 

@@ -32,6 +32,33 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   guard) before render; embedded images are extracted (never fetched) and remote
   refs dropped.
 
+### Fixed
+
+- **App-shell crash on a non-array list response** (flagship, browser-level): the
+  `@-mention` notifications poll in the sidebar rail did `items.filter(...)`, and
+  `items` was set from the raw `/notifications` response guarded only by
+  `items || []`. A non-array body (an `{}` envelope, an error body that slipped a
+  200, or an unmodeled endpoint) is truthy, so it poisoned the store and threw
+  during render — taking down the **entire UI on every route** (Docs, Sheets,
+  Slides), intermittently (it raced the first poll). Hardened at the seam:
+  `notificationsStore.fetch` and `filesStore.{fetchFiles,fetchFolders,
+  fetchSharedWithMe}` now coerce any non-array to `[]`. Added store regression
+  tests + a hermetic `/notifications` fixture so the E2E harness matches reality.
+- **P2P "Collaborate via link" E2E** was asserting a share button
+  (`Collaborate via link`) that no longer exists — the share entry point was
+  refactored to open account-based sharing first, with the P2P E2E-link path
+  reached via "Share via link (P2P)". The stale tests left the whole P2P sharer
+  flow with no working browser-level coverage; updated to drive the real flow.
+
+### Changed — UI/UX polish
+
+- New shared **`ErrorState`** primitive (role="alert", tokenised, optional Retry)
+  completing the loading / empty / error async-state family alongside
+  `LoadingState` / `EmptyState`; adopted in `ActivityFeed` and `HistoryPanel`,
+  replacing three near-identical ad-hoc error blocks. `ActivityFeed` empty states
+  now use `EmptyState`, and its snapshots-tab "Loading…" label was corrected
+  (it read "Loading activity…" while loading snapshots).
+
 ### Deferred
 
 - Legacy **binary** `.doc` / `.xls` / `.ppt` (OLE2) are not supported — users are

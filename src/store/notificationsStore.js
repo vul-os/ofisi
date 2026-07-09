@@ -12,7 +12,12 @@ export const useNotificationsStore = create((set, get) => ({
     set({ loading: true })
     try {
       const items = await api.listNotifications()
-      set({ items: items || [], loading: false })
+      // Coerce to an array: a malformed/enveloped/non-array response (or an
+      // error body that slipped a 200) must never poison `items`, or every
+      // consumer that does `items.filter(...)` — including the app-shell rail —
+      // throws and takes down the whole UI. `items || []` is NOT enough: an
+      // object body ({}) is truthy and would pass through.
+      set({ items: Array.isArray(items) ? items : [], loading: false })
     } catch {
       set({ loading: false })
     }

@@ -79,6 +79,11 @@ vi.mock('../../../lib/api', () => ({
   },
 }))
 
+// Hoisted at the top level (vitest hoists all vi.mock calls to module top; the
+// HTML-export test below relies on this mock, so declaring it here reflects the
+// real execution order and silences the "not at top level" warning).
+vi.mock('file-saver', () => ({ saveAs: vi.fn() }))
+
 // ─── 1. Toolbar: bold command wires through editor.chain ──────────────────────
 
 describe('Toolbar formatting commands', () => {
@@ -403,7 +408,6 @@ describe('HTML export', () => {
   it('exportToHtml produces a valid HTML blob and calls saveAs', async () => {
     const { exportToHtml } = await import('../docsExport')
     const { saveAs } = await import('file-saver')
-    vi.mock('file-saver', () => ({ saveAs: vi.fn() }))
 
     const editor = makeEditor({
       getHTML: vi.fn().mockReturnValue('<p>Hello <strong>world</strong></p>'),

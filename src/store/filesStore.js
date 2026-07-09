@@ -49,7 +49,10 @@ export const useFilesStore = create((set, get) => ({
     set({ loading: true })
     try {
       const files = await api.listFiles()
-      set({ files, loading: false })
+      // Coerce to an array: `files` feeds .filter/.map/.slice across AppHome and
+      // the app-shell rail, so a malformed/non-array response must never poison
+      // it (that would crash the whole shell, not just this list).
+      set({ files: Array.isArray(files) ? files : [], loading: false })
     } catch {
       set({ loading: false })
     }
@@ -60,7 +63,7 @@ export const useFilesStore = create((set, get) => ({
   fetchSharedWithMe: async () => {
     try {
       const res = await api.listSharedWithMe()
-      set({ sharedWithMe: res?.files || [] })
+      set({ sharedWithMe: Array.isArray(res?.files) ? res.files : [] })
     } catch {
       set({ sharedWithMe: [] })
     }
@@ -70,7 +73,7 @@ export const useFilesStore = create((set, get) => ({
   fetchFolders: async () => {
     try {
       const folders = await api.listFolders()
-      set({ folders: folders || [] })
+      set({ folders: Array.isArray(folders) ? folders : [] })
     } catch {
       /* folders are optional UX; a failure just hides the tree */
     }

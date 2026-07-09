@@ -7,12 +7,13 @@
  * titles) so a future refactor can't silently break the suite's shared chrome.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { FileText } from 'lucide-react'
 import SaveStatus from './SaveStatus'
 import Avatar, { AvatarStack, hueFor } from './Avatar'
 import EmptyState from './EmptyState'
+import ErrorState from './ErrorState'
 import DocThumb from './DocThumb'
 import ToolbarButton from './ToolbarButton'
 
@@ -116,6 +117,27 @@ describe('EmptyState', () => {
     render(<EmptyState icon={FileText} title="No comments yet" hint="Add the first note." />)
     expect(screen.getByText('No comments yet')).toBeInTheDocument()
     expect(screen.getByText('Add the first note.')).toBeInTheDocument()
+  })
+})
+
+describe('ErrorState', () => {
+  it('announces the failure (role=alert) and shows the message', () => {
+    render(<ErrorState message="Failed to load activity" />)
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('Failed to load activity')
+  })
+
+  it('renders a Retry control that fires onRetry', async () => {
+    const onRetry = vi.fn()
+    render(<ErrorState message="boom" onRetry={onRetry} />)
+    const btn = screen.getByRole('button', { name: /retry/i })
+    btn.click()
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it('omits the Retry control when no onRetry is given', () => {
+    render(<ErrorState message="boom" />)
+    expect(screen.queryByRole('button', { name: /retry/i })).toBeNull()
   })
 })
 

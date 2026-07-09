@@ -15,10 +15,10 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { History, RotateCcw, Loader2, AlertCircle, Bookmark, X, GitCompare, User } from 'lucide-react'
+import { History, RotateCcw, Loader2, Bookmark, X, GitCompare, User } from 'lucide-react'
 import { api } from '../lib/api'
 import { timeAgoLong as formatRelative } from '../lib/format'
-import { Button, IconButton, Modal, LoadingState, EmptyState } from './ui'
+import { Button, IconButton, Modal, LoadingState, EmptyState, ErrorState } from './ui'
 
 // ─── VersionRow ───────────────────────────────────────────────────────────────
 function VersionRow({ v, idx, isLatest, restoring, onRestoreClick, onCompareClick }) {
@@ -251,13 +251,7 @@ export default function HistoryPanel({ fileId, onRestore, onClose }) {
           )}
 
           {error && !loading && (
-            <div className="flex flex-col items-center gap-2 py-10 px-4 text-center animate-fade-in">
-              <div className="w-11 h-11 rounded-full bg-danger-bg flex items-center justify-center">
-                <AlertCircle size={18} className="text-danger" aria-hidden />
-              </div>
-              <p className="text-xs text-danger max-w-[16rem]">{error}</p>
-              <Button variant="secondary" size="sm" onClick={load}>Retry</Button>
-            </div>
+            <ErrorState size="sm" message={error} onRetry={load} />
           )}
 
           {!loading && !error && versions.length === 0 && (

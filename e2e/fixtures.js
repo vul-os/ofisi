@@ -56,6 +56,13 @@ export async function installBackend(page, opts = {}) {
     if (path === '/auth/status' || path === '/auth/me')
       return json(route, { enabled: false, authenticated: true, account_id: 'you@vulos.test' })
 
+    // ── @-mention notifications — the app-shell rail polls this on every route
+    // (SidebarContent). It calls .filter() on the result, so it MUST be an
+    // array; model it explicitly rather than let it fall through to the {}
+    // catch-all below (which would poison the rail and crash the whole shell). ─
+    if (path === '/notifications' && method === 'GET')
+      return json(route, [])
+
     // ── local files (self-host disk scan) — the AppHome home lists these; the
     // store calls .filter() on the result, so it MUST be an array. ────────────
     if (path === '/local-files' && method === 'GET')
