@@ -13,6 +13,7 @@ import { useAuthStore } from '../store/authStore'
 import NewFileModal from './NewFileModal'
 import AccountShareModal from './AccountShareModal'
 import { importFromUrl, importFile, detectType } from '../lib/importFile'
+import { api } from '../lib/api'
 import { Button, IconButton, Input, Card, Tooltip, useToast, DocThumb, Skeleton, Avatar, hueFor } from './ui'
 
 // ─── Token-aligned config ─────────────────────────────────────────────────────
@@ -90,6 +91,11 @@ export default function AppHome({ type }) {
   // The file currently open in the account-share dialog (or null).
   const [sharing, setSharing] = useState(null)
   const [search, setSearch] = useState('')
+  // Global full-text search across the caller's ACL-scoped documents (owned +
+  // shared). Fires against the backend, debounced, when the query is >= 2 chars.
+  // Results carry per-file snippets; ACL is enforced server-side at query time.
+  const [contentResults, setContentResults] = useState(null) // null = idle, [] = no matches
+  const [contentSearching, setContentSearching] = useState(false)
   const [viewMode, setViewMode] = useState('grid')
   const [menuOpen, setMenuOpen] = useState(null)
   const [renaming, setRenaming] = useState(null)
@@ -141,6 +147,27 @@ export default function AppHome({ type }) {
 
   useEffect(() => { fetchFiles(); fetchFolders(); fetchSharedWithMe() }, [])
   useEffect(() => { if (!scanned) scan() }, [scanned])
+
+  // Debounced backend full-text search (content, not just names). Scoped to this
+  // app's type so a Docs search doesn't surface Sheets. The server enforces ACL
+  // at query time, so results only ever include the caller's own + shared files.
+  useEffect(() => {
+    const q = search.trim()
+    if (q.length < 2) { setContentResults(null); setContentSearching(false); return }
+    setContentSearching(true)
+    let live = true
+    const t = setTimeout(async () => {
+      try {
+        const res = await api.searchDocs(q, type)
+        if (live) setContentResults(res?.results || [])
+      } catch {
+        if (live) setContentResults([])
+      } finally {
+        if (live) setContentSearching(false)
+      }
+    }, 250)
+    return () => { live = false; clearTimeout(t) }
+  }, [search, type])
 
   const searchLc = search.toLowerCase()
 
@@ -329,6 +356,18 @@ export default function AppHome({ type }) {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-6 space-y-8">
+        {/* ── Full-text content matches (backend search) ── */}
+        {search.trim().length >= 2 && (
+          <ContentSearchResults
+            results={contentResults}
+            searching={contentSearching}
+            query={search.trim()}
+            cfg={cfg}
+            onOpen={openFile}
+            myAccountId={myAccountId}
+          />
+        )}
+
         <section>
           {loading && (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4" role="status" aria-label={`Loading ${cfg.label.toLowerCase()}`}>
@@ -595,6 +634,70 @@ function ViewTab({ active, onClick, children }) {
       {children}
     </button>
   )
+}
+
+// ─── ContentSearchResults ─────────────────────────────────────────────────────
+// Renders backend full-text search hits (matches inside document content, not
+// just names) with a highlighted snippet. The server returns only files the
+// caller may read (ACL enforced at query time), so nothing here can leak another
+// account's content.
+function ContentSearchResults({ results, searching, query, cfg, onOpen, myAccountId }) {
+  // Idle (results === null) with no in-flight request → render nothing.
+  if (results === null && !searching) return null
+
+  return (
+    <section aria-label="Content search results">
+      <h2 className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase mb-2 flex items-center gap-1.5">
+        <Search size={11} /> Matches in content
+        {searching && <Loader2 size={11} className="animate-spin" />}
+      </h2>
+      {!searching && results && results.length === 0 && (
+        <p className="text-2xs text-ink-faint">No content matches for “{query}”.</p>
+      )}
+      {results && results.length > 0 && (
+        <ul className="rounded-lg border border-line divide-y divide-line overflow-hidden bg-paper">
+          {results.map((r) => (
+            <li key={r.id}>
+              <button
+                onClick={() => onOpen(r)}
+                className="w-full text-left px-3.5 py-2.5 hover:bg-accent-tint transition-colors focus:outline-none focus-visible:shadow-focus"
+              >
+                <div className="flex items-center gap-2">
+                  <p className="text-xs font-medium text-ink truncate tracking-tightish">{r.name || 'Untitled'}</p>
+                  {r.shared && (
+                    <span className="text-2xs text-ink-faint flex items-center gap-0.5">
+                      <Users size={9} /> shared{r.owner ? ` by ${r.owner}` : ''}
+                    </span>
+                  )}
+                </div>
+                <SnippetText snippet={r.snippet} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+// SnippetText renders a server snippet, highlighting the «matched» span the
+// backend delimits with « » guillemets. Rendered as plain text nodes (no HTML
+// injection) so document content can never inject markup.
+function SnippetText({ snippet }) {
+  if (!snippet) return null
+  const parts = []
+  let rest = snippet
+  let k = 0
+  while (true) {
+    const open = rest.indexOf('«')
+    if (open < 0) { parts.push(<span key={k++}>{rest}</span>); break }
+    const close = rest.indexOf('»', open)
+    if (close < 0) { parts.push(<span key={k++}>{rest}</span>); break }
+    if (open > 0) parts.push(<span key={k++}>{rest.slice(0, open)}</span>)
+    parts.push(<mark key={k++} className="bg-warning/25 text-ink rounded-px px-0.5">{rest.slice(open + 1, close)}</mark>)
+    rest = rest.slice(close + 1)
+  }
+  return <p className="text-2xs text-ink-muted mt-0.5 leading-relaxed line-clamp-2">{parts}</p>
 }
 
 // ─── FolderCard ───────────────────────────────────────────────────────────────

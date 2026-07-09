@@ -35,16 +35,19 @@ const (
 	ActionInviteConsume Action = "invite.consume"
 	ActionInviteRevoke  Action = "invite.revoke"
 	ActionRoleChange    Action = "role.change"
+	// Share-link lifecycle (anonymous read-only doc links).
+	ActionShareLinkMint   Action = "sharelink.mint"
+	ActionShareLinkRevoke Action = "sharelink.revoke"
 )
 
 // Entry is one immutable audit record.
 type Entry struct {
-	ID        string `json:"id"`
-	At        int64  `json:"at"`      // unix nanoseconds
-	Actor     string `json:"actor"`   // who performed the action (account id) — may be "" for anonymous
-	Action    Action `json:"action"`  // what happened
-	Target    string `json:"target"`  // the object acted upon (file id, account id, invite id, …)
-	Detail    string `json:"detail"`  // free-form context (grantee id, note, outcome)
+	ID     string `json:"id"`
+	At     int64  `json:"at"`     // unix nanoseconds
+	Actor  string `json:"actor"`  // who performed the action (account id) — may be "" for anonymous
+	Action Action `json:"action"` // what happened
+	Target string `json:"target"` // the object acted upon (file id, account id, invite id, …)
+	Detail string `json:"detail"` // free-form context (grantee id, note, outcome)
 }
 
 // Store is the append-only audit persistence interface.

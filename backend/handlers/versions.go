@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"vulos-office/backend/docindex"
 	"vulos-office/backend/models"
 	"vulos-office/backend/storage"
 
@@ -91,4 +92,84 @@ func (h *VersionHandler) RestoreVersion(c *gin.Context) {
 
 	updated, _ := h.store.GetFile(fileID)
 	c.JSON(http.StatusOK, updated)
+}
+
+// Diff handles GET /api/files/:id/versions/:vid/diff?against=current|prior.
+//
+// It compares the chosen version against either the file's CURRENT content
+// (default) or the version immediately PRIOR to it in history (against=prior),
+// returning a readable line-level diff for Docs and a coarser summary for
+// Sheets/Slides (see docindex.DiffContent). Read-only: requires only view access.
+func (h *VersionHandler) Diff(c *gin.Context) {
+	fileID := c.Param("id")
+	versionID := c.Param("vid")
+	if !h.authz.require(c, fileID) {
+		return
+	}
+
+	file, err := h.store.GetFile(fileID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		return
+	}
+	target, err := h.store.GetVersion(fileID, versionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "version not found"})
+		return
+	}
+
+	// Determine the "other side" of the diff.
+	var (
+		oldContent, newContent interface{}
+		oldLabel, newLabel     string
+	)
+	against := c.DefaultQuery("against", "current")
+	switch against {
+	case "prior":
+		// Compare the version immediately older than the target against it.
+		versions, verr := h.store.ListVersions(fileID)
+		if verr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": verr.Error()})
+			return
+		}
+		// versions is newest-first; find target and the one after it (older).
+		var prior *models.FileVersion
+		for i, v := range versions {
+			if v.ID == versionID {
+				if i+1 < len(versions) {
+					prior = versions[i+1]
+				}
+				break
+			}
+		}
+		if prior == nil {
+			// No older version — diff against an empty document.
+			oldContent, oldLabel = nil, "(nothing)"
+		} else {
+			oldContent, oldLabel = prior.Content, versionLabel(prior)
+		}
+		newContent, newLabel = target.Content, versionLabel(target)
+	default: // "current"
+		oldContent, oldLabel = target.Content, versionLabel(target)
+		newContent, newLabel = file.Content, "current"
+	}
+
+	diff := docindex.DiffContent(string(file.Type), oldContent, newContent)
+	c.JSON(http.StatusOK, gin.H{
+		"file_id":   fileID,
+		"type":      file.Type,
+		"against":   against,
+		"old_label": oldLabel,
+		"new_label": newLabel,
+		"diff":      diff,
+	})
+}
+
+// versionLabel returns a short human label for a version (its custom label if
+// set, otherwise a timestamp-based fallback).
+func versionLabel(v *models.FileVersion) string {
+	if v.Label != "" {
+		return v.Label
+	}
+	return v.CreatedAt.Format("Jan 2, 15:04")
 }

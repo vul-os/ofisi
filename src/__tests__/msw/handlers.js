@@ -47,10 +47,15 @@ export function resetMock({ role = 'owner' } = {}) {
   }
   mockState.versions = {
     doc1: [
-      { id: 'v2', name: 'Design Notes', created_at: new Date(Date.now() - 60_000).toISOString(), label: '' },
-      { id: 'v1', name: 'Design Notes', created_at: new Date(Date.now() - 3_600_000).toISOString(), label: 'First draft' },
+      { id: 'v2', name: 'Design Notes', author: 'alice@vulos.test', created_at: new Date(Date.now() - 60_000).toISOString(), label: '' },
+      { id: 'v1', name: 'Design Notes', author: 'bob@vulos.test', created_at: new Date(Date.now() - 3_600_000).toISOString(), label: 'First draft' },
     ],
   }
+  // Share links keyed by fileId (owner view) and by token (anon view).
+  mockState.shareLinks = {}   // fileId → [link]
+  mockState.linksByToken = {} // token → { link, content, requires_password, password }
+  // Backend full-text search corpus (name/_body matched by the /search handler).
+  mockState.searchResults = []
   mockState.comments = { doc1: [] }
   mockState.collaborators = { doc1: [] }
   mockState.suggestions = { doc1: [] }
@@ -237,6 +242,130 @@ export const handlers = [
     const s = (mockState.suggestions[params.id] || []).find((x) => x.id === params.sid)
     if (s) Object.assign(s, { state: b.state, reviewer_id: b.reviewer_id })
     return HttpResponse.json(s || { id: params.sid, ...b })
+  }),
+
+  // ── Version diff ───────────────────────────────────────────────────────────
+  http.get('/api/files/:id/versions/:vid/diff', ({ params, request }) => {
+    log('GET', `/files/${params.id}/versions/${params.vid}/diff`)
+    const url = new URL(request.url)
+    return HttpResponse.json({
+      file_id: params.id,
+      type: 'doc',
+      against: url.searchParams.get('against') || 'current',
+      old_label: 'First draft',
+      new_label: 'current',
+      diff: {
+        kind: 'line',
+        added: 1,
+        removed: 1,
+        summary: '1 line added, 1 line removed',
+        lines: [
+          { op: 'equal', text: 'Intro paragraph' },
+          { op: 'delete', text: 'old sentence' },
+          { op: 'insert', text: 'new sentence' },
+        ],
+      },
+    })
+  }),
+
+  // ── Global full-text search ────────────────────────────────────────────────
+  http.get('/api/search', ({ request }) => {
+    log('GET', '/search')
+    const url = new URL(request.url)
+    const q = (url.searchParams.get('q') || '').toLowerCase()
+    if (!q) return HttpResponse.json({ results: [], query: '' })
+    const results = (mockState.searchResults || []).filter((r) =>
+      r.name.toLowerCase().includes(q) || (r._body || '').toLowerCase().includes(q),
+    ).map((r) => ({
+      id: r.id, name: r.name, type: r.type || 'doc',
+      snippet: r.snippet || `…contains «${q}» here…`,
+      owner: r.owner || '', shared: !!r.shared,
+    }))
+    return HttpResponse.json({ results, query: q })
+  }),
+
+  // ── Share links (owner management) ─────────────────────────────────────────
+  http.get('/api/files/:id/share-links', ({ params }) => {
+    log('GET', `/files/${params.id}/share-links`)
+    return HttpResponse.json({ links: mockState.shareLinks[params.id] || [] })
+  }),
+
+  http.post('/api/files/:id/share-links', async ({ params, request }) => {
+    log('POST', `/files/${params.id}/share-links`)
+    if (mockState.role !== 'owner') {
+      return HttpResponse.json({ error: 'only the document owner may perform this action' }, { status: 403 })
+    }
+    const body = await request.json().catch(() => ({}))
+    const token = uid('tok')
+    const link = {
+      id: uid('link'),
+      file_id: params.id,
+      token,
+      created_by: mockState.me,
+      has_password: !!body.password,
+      expires_at: body.expires_in_seconds > 0
+        ? new Date(Date.now() + body.expires_in_seconds * 1000).toISOString()
+        : null,
+      revoked: false,
+      created_at: new Date().toISOString(),
+    }
+    ;(mockState.shareLinks[params.id] ||= []).push(link)
+    mockState.linksByToken[token] = {
+      link,
+      content: mockState.files[params.id]?.content ?? null,
+      name: mockState.files[params.id]?.name,
+      requires_password: !!body.password,
+      password: body.password || '',
+    }
+    return HttpResponse.json(link, { status: 201 })
+  }),
+
+  http.delete('/api/files/:id/share-links/:lid', ({ params }) => {
+    log('DELETE', `/files/${params.id}/share-links/${params.lid}`)
+    const list = mockState.shareLinks[params.id] || []
+    const link = list.find((l) => l.id === params.lid)
+    if (link) {
+      link.revoked = true
+      delete mockState.linksByToken[link.token]
+    }
+    return HttpResponse.json({ ok: true })
+  }),
+
+  // ── Transfer ownership ─────────────────────────────────────────────────────
+  http.post('/api/files/:id/transfer-owner', async ({ params, request }) => {
+    log('POST', `/files/${params.id}/transfer-owner`)
+    if (mockState.role !== 'owner') {
+      return HttpResponse.json({ error: 'only the document owner may perform this action' }, { status: 403 })
+    }
+    const body = await request.json()
+    mockState.owner = body.new_owner
+    return HttpResponse.json({ ok: true, owner: body.new_owner })
+  }),
+
+  // ── Anonymous read-only view (token-gated) ─────────────────────────────────
+  http.get('/api/share/:token', ({ params }) => {
+    log('GET', `/share/${params.token}`)
+    const entry = mockState.linksByToken[params.token]
+    if (!entry || entry.link.revoked) return HttpResponse.json({ error: 'link not found' }, { status: 404 })
+    if (entry.requires_password) return HttpResponse.json({ requires_password: true, type: 'doc' })
+    return HttpResponse.json({
+      requires_password: false, id: entry.link.file_id, name: entry.name,
+      type: 'doc', content: entry.content, read_only: true,
+    })
+  }),
+
+  http.post('/api/share/:token', async ({ params, request }) => {
+    log('POST', `/share/${params.token}`)
+    const entry = mockState.linksByToken[params.token]
+    if (!entry || entry.link.revoked) return HttpResponse.json({ error: 'link not found' }, { status: 404 })
+    const body = await request.json().catch(() => ({}))
+    if (entry.requires_password && body.password !== entry.password) {
+      return HttpResponse.json({ error: 'incorrect password', requires_password: true }, { status: 401 })
+    }
+    return HttpResponse.json({
+      id: entry.link.file_id, name: entry.name, type: 'doc',
+      content: entry.content, read_only: true,
+    })
   }),
 
   // Image upload used by the docs toolbar (returns a fake URL).

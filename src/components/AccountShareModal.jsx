@@ -30,9 +30,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   UserPlus, Eye, MessageSquare, Pencil, Crown, Trash2, Loader2, Users, Link2,
+  Lock, Clock, Copy, Check, KeyRound, ArrowRightLeft,
 } from 'lucide-react'
 import { Modal, Button, Input, Avatar, hueFor, useToast } from './ui'
 import { api } from '../lib/api'
+
+// Expiry presets offered when minting a link (seconds). 0 = never.
+const EXPIRY_OPTIONS = [
+  { label: 'Never',    seconds: 0 },
+  { label: '1 hour',   seconds: 60 * 60 },
+  { label: '1 day',    seconds: 24 * 60 * 60 },
+  { label: '7 days',   seconds: 7 * 24 * 60 * 60 },
+  { label: '30 days',  seconds: 30 * 24 * 60 * 60 },
+]
+
+// Build the absolute anonymous view URL for a link token. Uses the current
+// origin so it works for both the standalone office deployment and self-host.
+function shareLinkUrl(token) {
+  if (typeof window === 'undefined') return `/view/${token}`
+  return `${window.location.origin}/view/${token}`
+}
 
 // The three grantable roles, in ascending privilege. Owner is intentionally not
 // grantable through this dialog.
@@ -143,6 +160,22 @@ export default function AccountShareModal({ open, onClose, file, me = '', onSwit
     }
   }
 
+  // Transfer ownership to another account. Owner-only; the server demotes the
+  // previous owner to editor. Confirmed before firing.
+  const transferOwnership = async (newOwner) => {
+    setBusy(true)
+    setError('')
+    try {
+      await api.transferOwnership(fileId, newOwner)
+      await refresh()
+      showToast(`Ownership transferred to ${newOwner}`, 'success')
+    } catch (err) {
+      setError(err.message || 'Could not transfer ownership')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <Modal open={open} onClose={onClose} title={`Share “${file?.name || 'document'}”`} size="lg">
       <Modal.Body className="space-y-4">
@@ -226,6 +259,18 @@ export default function AccountShareModal({ open, onClose, file, me = '', onSwit
             )}
           </div>
         </div>
+
+        {/* Share links + transfer ownership (owner only) */}
+        {isOwner && fileId && (
+          <>
+            <ShareLinksSection fileId={fileId} onError={setError} showToast={showToast} />
+            <TransferOwnershipSection
+              collaborators={collaborators}
+              onTransfer={transferOwnership}
+              busy={busy}
+            />
+          </>
+        )}
       </Modal.Body>
       <Modal.Footer>
         {onSwitchToLink && (
@@ -290,6 +335,220 @@ function PersonRow({ accountId, role, isMe, editable, onChangeRole, onRevoke }) 
           <meta.icon size={11} /> {meta.label}
         </span>
       )}
+    </div>
+  )
+}
+
+// ─── ShareLinksSection ───────────────────────────────────────────────────────
+// Owner-only: mint expiring / password-protected read-only links, list them,
+// copy their URL, and revoke. Access is granted by the server on the anonymous
+// view route — the UI never conveys access itself.
+function ShareLinksSection({ fileId, onError, showToast }) {
+  const [links, setLinks] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [minting, setMinting] = useState(false)
+  const [password, setPassword] = useState('')
+  const [expiry, setExpiry] = useState(0)
+  const [copiedId, setCopiedId] = useState(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await api.listShareLinks(fileId)
+      setLinks(res?.links || [])
+    } catch (e) {
+      onError?.(e.message || 'Could not load links')
+    } finally {
+      setLoading(false)
+    }
+  }, [fileId, onError])
+
+  useEffect(() => { refresh() }, [refresh])
+
+  const mint = async () => {
+    setMinting(true)
+    onError?.('')
+    try {
+      await api.createShareLink(fileId, { password: password.trim(), expiresInSeconds: expiry })
+      setPassword('')
+      setExpiry(0)
+      await refresh()
+      showToast?.('Link created', 'success')
+    } catch (e) {
+      onError?.(e.message || 'Could not create link')
+    } finally {
+      setMinting(false)
+    }
+  }
+
+  const revoke = async (linkId) => {
+    onError?.('')
+    try {
+      await api.revokeShareLink(fileId, linkId)
+      await refresh()
+      showToast?.('Link revoked', 'success')
+    } catch (e) {
+      onError?.(e.message || 'Could not revoke link')
+    }
+  }
+
+  const copy = async (link) => {
+    const url = shareLinkUrl(link.token)
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedId(link.id)
+      setTimeout(() => setCopiedId(null), 1800)
+    } catch {
+      // Clipboard blocked — surface the URL so the user can copy manually.
+      showToast?.(url, 'success')
+    }
+  }
+
+  const active = links.filter((l) => !l.revoked)
+
+  return (
+    <div className="space-y-2 pt-2 border-t border-line">
+      <p className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase flex items-center gap-1.5">
+        <Link2 size={11} /> Anyone-with-the-link (read only)
+      </p>
+
+      {/* Mint controls */}
+      <div className="flex flex-wrap items-stretch gap-2">
+        <div className="flex-1 min-w-[9rem]">
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password (optional)"
+            aria-label="Optional link password"
+            leading={<KeyRound size={13} />}
+          />
+        </div>
+        <label className="sr-only" htmlFor="link-expiry">Link expiry</label>
+        <select
+          id="link-expiry"
+          value={expiry}
+          onChange={(e) => setExpiry(Number(e.target.value))}
+          className="rounded-md border border-line bg-paper text-ink text-xs px-2 focus:outline-none focus-visible:shadow-focus"
+        >
+          {EXPIRY_OPTIONS.map((o) => (
+            <option key={o.seconds} value={o.seconds}>{o.label}</option>
+          ))}
+        </select>
+        <Button variant="secondary" size="sm" onClick={mint} disabled={minting}>
+          {minting ? <Loader2 size={13} className="animate-spin" /> : <Link2 size={13} />}
+          Create link
+        </Button>
+      </div>
+
+      {/* Existing links */}
+      {loading ? (
+        <div className="flex items-center gap-2 text-2xs text-ink-faint px-1 py-1">
+          <Loader2 size={12} className="animate-spin" /> Loading links…
+        </div>
+      ) : active.length === 0 ? (
+        <p className="text-2xs text-ink-faint px-1">No active links.</p>
+      ) : (
+        <ul className="rounded-md border border-line divide-y divide-line overflow-hidden">
+          {active.map((l) => (
+            <li key={l.id} className="flex items-center gap-2 px-2.5 py-1.5">
+              <Link2 size={12} className="text-ink-faint flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-2xs text-ink truncate font-mono">{shareLinkUrl(l.token)}</p>
+                <p className="text-2xs text-ink-faint flex items-center gap-2 mt-px">
+                  {l.has_password && <span className="flex items-center gap-0.5"><Lock size={9} /> password</span>}
+                  {l.expires_at
+                    ? <span className="flex items-center gap-0.5"><Clock size={9} /> expires {new Date(l.expires_at).toLocaleDateString()}</span>
+                    : <span className="flex items-center gap-0.5"><Clock size={9} /> never expires</span>}
+                </p>
+              </div>
+              <button
+                onClick={() => copy(l)}
+                aria-label="Copy link URL"
+                title="Copy link"
+                className="p-1 rounded-sm text-ink-faint hover:text-accent hover:bg-accent-tint focus:outline-none focus-visible:shadow-focus"
+              >
+                {copiedId === l.id ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+              </button>
+              <button
+                onClick={() => revoke(l.id)}
+                aria-label="Revoke link"
+                title="Revoke link"
+                className="p-1 rounded-sm text-ink-faint hover:text-danger hover:bg-danger-bg focus:outline-none focus-visible:shadow-focus"
+              >
+                <Trash2 size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// ─── TransferOwnershipSection ────────────────────────────────────────────────
+// Owner-only: hand full ownership to an existing collaborator (or any account),
+// with an explicit confirm. The server demotes the previous owner to editor.
+function TransferOwnershipSection({ collaborators, onTransfer, busy }) {
+  const [target, setTarget] = useState('')
+  const [confirming, setConfirming] = useState(false)
+
+  const submit = () => {
+    const acct = target.trim()
+    if (!acct) return
+    setConfirming(true)
+  }
+
+  const doTransfer = async () => {
+    setConfirming(false)
+    await onTransfer(target.trim())
+    setTarget('')
+  }
+
+  return (
+    <div className="space-y-2 pt-2 border-t border-line">
+      <p className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase flex items-center gap-1.5">
+        <ArrowRightLeft size={11} /> Transfer ownership
+      </p>
+      <div className="flex items-stretch gap-2">
+        <div className="flex-1 min-w-0">
+          <Input
+            list="transfer-collab-list"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            placeholder="New owner (account or email)"
+            aria-label="New owner account"
+            leading={<Crown size={13} />}
+          />
+          <datalist id="transfer-collab-list">
+            {(collaborators || []).map((c) => (
+              <option key={c.account_id} value={c.account_id} />
+            ))}
+          </datalist>
+        </div>
+        <Button variant="secondary" size="sm" onClick={submit} disabled={busy || !target.trim()}>
+          <ArrowRightLeft size={13} /> Transfer
+        </Button>
+      </div>
+      <p className="text-2xs text-ink-faint">
+        You will be demoted to editor and keep access unless you remove yourself.
+      </p>
+
+      <Modal open={confirming} onClose={() => setConfirming(false)} title="Transfer ownership?" size="sm">
+        <Modal.Body>
+          <p className="text-sm text-ink-muted leading-relaxed">
+            <span className="text-ink font-medium">{target}</span> will become the sole
+            owner of this document. You will keep editor access. This cannot be undone
+            without the new owner transferring it back.
+          </p>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" size="md" onClick={() => setConfirming(false)}>Cancel</Button>
+          <Button variant="primary" size="md" onClick={doTransfer}>
+            <ArrowRightLeft size={13} /> Transfer ownership
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </div>
   )
 }

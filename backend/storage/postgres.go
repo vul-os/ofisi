@@ -109,6 +109,21 @@ func (s *PostgresStorage) migrate() error {
 			PRIMARY KEY (file_id, id)
 		);
 		CREATE INDEX IF NOT EXISTS file_versions_file_id_created ON file_versions (file_id, created_at DESC);
+		-- Per-version author (who made the edit that superseded this snapshot).
+		-- Idempotent migration for pre-existing deployments.
+		ALTER TABLE file_versions ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
+		ALTER TABLE file_versions ADD COLUMN IF NOT EXISTS label  TEXT NOT NULL DEFAULT '';
+		CREATE TABLE IF NOT EXISTS share_links (
+			id            TEXT NOT NULL,
+			file_id       TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+			token         TEXT PRIMARY KEY,
+			created_by    TEXT NOT NULL DEFAULT '',
+			password_hash TEXT NOT NULL DEFAULT '',
+			expires_at    TIMESTAMPTZ,
+			revoked       BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS share_links_file ON share_links (file_id);
 	`)
 	return err
 }
@@ -218,6 +233,7 @@ func (s *PostgresStorage) UpdateFile(f *models.File) error {
 		ID:        fmt.Sprintf("%d", existing.UpdatedAt.UnixNano()),
 		FileID:    existing.ID,
 		Name:      existing.Name,
+		Author:    f.EditorID, // who made the edit that superseded this snapshot
 		Content:   existing.Content,
 		CreatedAt: existing.UpdatedAt,
 	}
@@ -353,16 +369,16 @@ func (s *PostgresStorage) CreateVersion(v *models.FileVersion) error {
 		return err
 	}
 	_, err = s.pool.Exec(context.Background(),
-		`INSERT INTO file_versions (id, file_id, name, content, created_at) VALUES ($1,$2,$3,$4,$5)
+		`INSERT INTO file_versions (id, file_id, name, author, content, created_at) VALUES ($1,$2,$3,$4,$5,$6)
 		 ON CONFLICT (file_id, id) DO NOTHING`,
-		v.ID, v.FileID, v.Name, data, v.CreatedAt,
+		v.ID, v.FileID, v.Name, v.Author, data, v.CreatedAt,
 	)
 	return err
 }
 
 func (s *PostgresStorage) ListVersions(fileID string) ([]*models.FileVersion, error) {
 	rows, err := s.pool.Query(context.Background(),
-		`SELECT id, file_id, name, content, created_at FROM file_versions
+		`SELECT id, file_id, name, author, label, content, created_at FROM file_versions
 		 WHERE file_id=$1 ORDER BY created_at DESC`, fileID)
 	if err != nil {
 		return nil, err
@@ -372,7 +388,7 @@ func (s *PostgresStorage) ListVersions(fileID string) ([]*models.FileVersion, er
 	for rows.Next() {
 		var v models.FileVersion
 		var contentJSON []byte
-		if err := rows.Scan(&v.ID, &v.FileID, &v.Name, &contentJSON, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.FileID, &v.Name, &v.Author, &v.Label, &contentJSON, &v.CreatedAt); err != nil {
 			return nil, err
 		}
 		if contentJSON != nil {
@@ -387,9 +403,9 @@ func (s *PostgresStorage) GetVersion(fileID, versionID string) (*models.FileVers
 	var v models.FileVersion
 	var contentJSON []byte
 	err := s.pool.QueryRow(context.Background(),
-		`SELECT id, file_id, name, content, created_at FROM file_versions WHERE file_id=$1 AND id=$2`,
+		`SELECT id, file_id, name, author, label, content, created_at FROM file_versions WHERE file_id=$1 AND id=$2`,
 		fileID, versionID,
-	).Scan(&v.ID, &v.FileID, &v.Name, &contentJSON, &v.CreatedAt)
+	).Scan(&v.ID, &v.FileID, &v.Name, &v.Author, &v.Label, &contentJSON, &v.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("version not found")
 	}
@@ -915,6 +931,64 @@ DELETE FROM suggestions WHERE file_id=$1 AND id=$2`, fileID, suggestionID)
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("suggestion not found")
+	}
+	return nil
+}
+
+// ============================================================
+// Share links (anonymous, read-only, token-gated doc access)
+// ============================================================
+
+func (s *PostgresStorage) CreateShareLink(l *models.ShareLink) error {
+	_, err := s.pool.Exec(context.Background(),
+		`INSERT INTO share_links (id, file_id, token, created_by, password_hash, expires_at, revoked, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		l.ID, l.FileID, l.Token, l.CreatedBy, l.PasswordHash, l.ExpiresAt, l.Revoked, l.CreatedAt,
+	)
+	return err
+}
+
+func (s *PostgresStorage) GetShareLinkByToken(token string) (*models.ShareLink, error) {
+	var l models.ShareLink
+	err := s.pool.QueryRow(context.Background(),
+		`SELECT id, file_id, token, created_by, password_hash, expires_at, revoked, created_at
+		 FROM share_links WHERE token=$1`, token,
+	).Scan(&l.ID, &l.FileID, &l.Token, &l.CreatedBy, &l.PasswordHash, &l.ExpiresAt, &l.Revoked, &l.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("share link not found")
+	}
+	l.HasPassword = l.PasswordHash != ""
+	return &l, nil
+}
+
+func (s *PostgresStorage) ListShareLinks(fileID string) ([]*models.ShareLink, error) {
+	rows, err := s.pool.Query(context.Background(),
+		`SELECT id, file_id, token, created_by, password_hash, expires_at, revoked, created_at
+		 FROM share_links WHERE file_id=$1 ORDER BY created_at DESC`, fileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var links []*models.ShareLink
+	for rows.Next() {
+		var l models.ShareLink
+		if err := rows.Scan(&l.ID, &l.FileID, &l.Token, &l.CreatedBy, &l.PasswordHash, &l.ExpiresAt, &l.Revoked, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		l.HasPassword = l.PasswordHash != ""
+		links = append(links, &l)
+	}
+	return links, rows.Err()
+}
+
+func (s *PostgresStorage) RevokeShareLink(fileID, linkID string) error {
+	cmd, err := s.pool.Exec(context.Background(),
+		`UPDATE share_links SET revoked=TRUE WHERE file_id=$1 AND id=$2`, fileID, linkID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return fmt.Errorf("share link not found")
 	}
 	return nil
 }

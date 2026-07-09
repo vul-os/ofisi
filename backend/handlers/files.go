@@ -223,6 +223,9 @@ func (h *FileHandler) Update(c *gin.Context) {
 		// P2 optimistic concurrency: echo the rev the client last read. The store
 		// rejects a stale PUT with ErrRevConflict (→ 409) instead of clobbering.
 		Rev: req.Rev,
+		// EditorID stamps the version snapshot's Author with the VERIFIED requester
+		// (never trusted from the body). Transient — not persisted on the file row.
+		EditorID: account,
 	}
 
 	// STORAGE GATE: atomically check AND reserve the quota for the new content

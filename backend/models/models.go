@@ -35,6 +35,12 @@ type File struct {
 	TrashedAt *time.Time `json:"trashed_at,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
+	// EditorID is a TRANSIENT, request-scoped field: the verified account id of
+	// the caller performing an UpdateFile. It is NEVER persisted on the file row —
+	// the store reads it only to stamp the version snapshot's Author (who made the
+	// edit that superseded the prior content). Stamped server-side from the
+	// verified requester, never trusted from the client body.
+	EditorID string `json:"-"`
 }
 
 // Folder is a container in the per-account file tree. Folders themselves are
@@ -78,10 +84,16 @@ type MoveFileRequest struct {
 
 // FileVersion is an immutable snapshot of a file's content taken before each save.
 type FileVersion struct {
-	ID        string      `json:"id"`
-	FileID    string      `json:"file_id"`
-	Name      string      `json:"name"`      // file name at snapshot time
-	Label     string      `json:"label,omitempty"` // optional user-defined label e.g. "v1 final draft"
+	ID     string `json:"id"`
+	FileID string `json:"file_id"`
+	Name   string `json:"name"`            // file name at snapshot time
+	Label  string `json:"label,omitempty"` // optional user-defined label e.g. "v1 final draft"
+	// Author records the account id that produced the edit which this snapshot
+	// captured (the identity of the save that superseded it). Empty for legacy
+	// snapshots created before authorship was recorded, and for the single-user /
+	// auth-disabled "self" identity when no account is bound. Never trusted from
+	// the client — always stamped server-side from the verified requester id.
+	Author    string      `json:"author,omitempty"`
 	Content   interface{} `json:"content"`
 	CreatedAt time.Time   `json:"created_at"`
 }
@@ -90,9 +102,9 @@ type FileVersion struct {
 type ActivityEventKind string
 
 const (
-	ActivityEdit    ActivityEventKind = "edit"
-	ActivityComment ActivityEventKind = "comment"
-	ActivitySign    ActivityEventKind = "sign"
+	ActivityEdit     ActivityEventKind = "edit"
+	ActivityComment  ActivityEventKind = "comment"
+	ActivitySign     ActivityEventKind = "sign"
 	ActivitySnapshot ActivityEventKind = "snapshot"
 )
 
@@ -112,6 +124,59 @@ type ActivityEvent struct {
 // LabelVersionRequest is the request body for PUT /api/files/:id/versions/:vid/label.
 type LabelVersionRequest struct {
 	Label string `json:"label" binding:"required"`
+}
+
+// ShareLink is an anonymous, read-only, token-gated access grant to a single
+// document. Unlike an account-share (which grants a named Vulos account a role),
+// a share link lets anyone holding the (unguessable, signed) token open the doc
+// in a read-only viewer — optionally until an expiry, and optionally behind a
+// password. It NEVER conveys write access and is independent of the ACL roster.
+//
+// Security invariants (enforced server-side, never by the client):
+//   - Token is a signed opaque credential minted server-side; possession alone
+//     grants access, so it MUST be unguessable and revocable.
+//   - PasswordHash, when set, is a bcrypt hash — the plaintext is never stored
+//     and the view route rejects access until the correct password is supplied.
+//   - ExpiresAt, when non-nil, hard-bounds the link's lifetime; an expired link
+//     is treated as if it did not exist.
+//   - Revoked links are dead permanently (the owner can kill a leaked link).
+//   - The view route this backs is READ-ONLY: it returns document content only,
+//     with no path to edit, share, or escalate.
+type ShareLink struct {
+	ID     string `json:"id"`
+	FileID string `json:"file_id"`
+	// Token is the opaque, signed credential embedded in the share URL. It is
+	// returned to the owner on mint (so they can copy the URL) and used to look
+	// the link up on the anonymous view route. It is the primary key for lookup.
+	Token string `json:"token"`
+	// CreatedBy records the owner account that minted the link (audit/authz).
+	CreatedBy string `json:"created_by"`
+	// PasswordHash is the bcrypt hash of the link password, or "" for no password.
+	// Never serialized to clients (the hash must not leak); `json:"-"`.
+	PasswordHash string `json:"-"`
+	// HasPassword is a derived, safe-to-expose flag telling the UI/view route
+	// whether a password prompt is required, without exposing the hash.
+	HasPassword bool       `json:"has_password"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Revoked     bool       `json:"revoked"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// CreateShareLinkRequest is the body for POST /api/files/:id/share-links.
+type CreateShareLinkRequest struct {
+	// Password, when non-empty, gates the link behind a bcrypt-verified prompt.
+	Password string `json:"password,omitempty"`
+	// ExpiresInSeconds, when > 0, bounds the link lifetime (TTL from now). 0/omitted
+	// mints a non-expiring link.
+	ExpiresInSeconds int64 `json:"expires_in_seconds,omitempty"`
+}
+
+// TransferOwnerRequest is the body for POST /api/files/:id/transfer-owner.
+type TransferOwnerRequest struct {
+	// NewOwner is the account id that will become the file's sole owner. The
+	// current owner is demoted to editor so they retain access unless they
+	// explicitly remove themselves.
+	NewOwner string `json:"new_owner" binding:"required"`
 }
 
 type CreateFileRequest struct {
@@ -144,9 +209,9 @@ type LoginResponse struct {
 }
 
 type ErrorResponse struct {
-	Error           string `json:"error"`
-	RemainingAttempts int  `json:"remaining_attempts,omitempty"`
-	LockedUntil     string `json:"locked_until,omitempty"`
+	Error             string `json:"error"`
+	RemainingAttempts int    `json:"remaining_attempts,omitempty"`
+	LockedUntil       string `json:"locked_until,omitempty"`
 }
 
 type AuthStatusResponse struct {

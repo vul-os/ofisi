@@ -179,11 +179,14 @@ func (s *LocalStorage) UpdateFile(file *models.File) error {
 		return ErrRevConflict
 	}
 
-	// Snapshot the current content before overwriting.
+	// Snapshot the current content before overwriting. Author records who made
+	// the edit that superseded this snapshot (the current saver), stamped from the
+	// verified requester by the handler — never from the client body.
 	snap := &models.FileVersion{
 		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
 		FileID:    existing.ID,
 		Name:      existing.Name,
+		Author:    file.EditorID,
 		Content:   existing.Content,
 		CreatedAt: time.Now(),
 	}
@@ -1051,4 +1054,3 @@ func (s *LocalStorage) DeleteSuggestion(fileID, suggestionID string) error {
 	}
 	return nil
 }
-

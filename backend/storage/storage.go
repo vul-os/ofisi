@@ -63,6 +63,20 @@ type Storage interface {
 	// LabelVersion sets a human-readable label on an existing version (OFFICE-28).
 	LabelVersion(fileID, versionID, label string) error
 
+	// --- Share links (anonymous, read-only, token-gated doc access) ---
+	// A share link is independent of the ACL roster: it grants read-only access
+	// to a single file to anyone holding its signed token, optionally until an
+	// expiry and/or behind a password. The store is credential-agnostic (it does
+	// not verify tokens/passwords — the handler does); it only persists records.
+	CreateShareLink(l *models.ShareLink) error
+	// GetShareLinkByToken resolves a link by its opaque token. Returns an error if
+	// no such link exists. Callers MUST still check Revoked/ExpiresAt.
+	GetShareLinkByToken(token string) (*models.ShareLink, error)
+	// ListShareLinks returns all links for a file (owner management view).
+	ListShareLinks(fileID string) ([]*models.ShareLink, error)
+	// RevokeShareLink marks a link revoked (dead permanently). Idempotent.
+	RevokeShareLink(fileID, linkID string) error
+
 	// --- Signing envelope CRUD (OFFICE-40) ---
 	CreateEnvelope(env *models.Envelope) error
 	GetEnvelope(id string) (*models.Envelope, error)

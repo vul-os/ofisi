@@ -15,6 +15,7 @@ import Settings from './components/Settings'
 import SignView from './apps/pdf/SignView'
 import EnvelopeDashboard from './components/EnvelopeDashboard'
 import Verify from './components/Verify'
+import AnonDocView from './components/AnonDocView'
 
 // Chat + huddles ("Spaces"/Talk) is now the standalone Vulos Talk product, and
 // Calendar + Contacts moved to the Vulos Mail/PIM product. seam-C handoff:
@@ -29,8 +30,9 @@ const MEET_URL = import.meta.env.VITE_MEET_URL || ''
 const MAIL_URL = import.meta.env.VITE_MAIL_URL || ''
 
 // Public routes that bypass Vulos auth entirely.
-// External signers and external verifiers have no Vulos account.
-const PUBLIC_PREFIXES = ['/sign/', '/verify']
+// External signers and external verifiers have no Vulos account; anonymous
+// share-link viewers ("/view/:token") are gated only by the unguessable token.
+const PUBLIC_PREFIXES = ['/sign/', '/verify', '/view/']
 
 function isPublicRoute(pathname) {
   return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))
@@ -90,6 +92,7 @@ export default function App() {
       <Routes>
         <Route path="/sign/:token" element={<SignView />} />
         <Route path="/verify" element={<Verify />} />
+        <Route path="/view/:token" element={<AnonDocView />} />
       </Routes>
     )
   }

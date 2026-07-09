@@ -273,6 +273,25 @@ func main() {
 	versionHandler := handlers.NewVersionHandler(store)
 	protected.GET("/files/:id/versions", versionHandler.ListVersions)
 	writes.POST("/files/:id/versions/:vid/restore", versionHandler.RestoreVersion)
+	// Version diff (readable for Docs, coarse summary for Sheets/Slides). Read-only.
+	protected.GET("/files/:id/versions/:vid/diff", versionHandler.Diff)
+
+	// Global full-text search across the caller's ACL-scoped documents. Query time
+	// ACL enforcement (owned + shared only); no cross-account content leak.
+	searchHandler := handlers.NewSearchHandler(store)
+	protected.GET("/search", searchHandler.Search)
+
+	// Expiring / password-protected read-only share links + transfer ownership.
+	shareLinkHandler := handlers.NewShareLinkHandler(store)
+	protected.GET("/files/:id/share-links", shareLinkHandler.List)
+	writes.POST("/files/:id/share-links", shareLinkHandler.Create)
+	writes.DELETE("/files/:id/share-links/:lid", shareLinkHandler.Revoke)
+	writes.POST("/files/:id/transfer-owner", fileHandler.TransferOwner)
+	// Anonymous, token-gated, READ-ONLY document view (no auth — the token IS the
+	// credential). GET returns metadata (and content when no password); POST with
+	// the password returns content for password-gated links.
+	api.GET("/share/:token", shareLinkHandler.ViewMeta)
+	api.POST("/share/:token", shareLinkHandler.View)
 
 	// OFFICE-28: activity feed + named snapshots.
 	activityHandler := handlers.NewActivityHandler(store)

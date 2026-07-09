@@ -17,12 +17,13 @@
  */
 
 import { lazy, Suspense } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import RequireAuth from './RequireAuth.jsx'
 import Layout from '../components/Layout.jsx'
 import Home from '../components/Home.jsx'
 import AppHome from '../components/AppHome.jsx'
 import Settings from '../components/Settings.jsx'
+import AnonDocView from '../components/AnonDocView.jsx'
 import { LoadingState } from '../components/ui'
 
 const DocsEditor   = lazy(() => import('../apps/docs/DocsEditor.jsx'))
@@ -39,6 +40,18 @@ function Loading() {
 }
 
 export default function OfficeShell() {
+  const location = useLocation()
+
+  // Anonymous read-only share-link view bypasses auth entirely (the unguessable
+  // token is the credential) — it must render OUTSIDE <RequireAuth>/<Layout>.
+  if (location.pathname.startsWith('/view/')) {
+    return (
+      <Routes>
+        <Route path="/view/:token" element={<AnonDocView />} />
+      </Routes>
+    )
+  }
+
   return (
     <RequireAuth>
       <Layout>

@@ -15,7 +15,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { History, RotateCcw, Loader2, AlertCircle, Bookmark, X } from 'lucide-react'
+import { History, RotateCcw, Loader2, AlertCircle, Bookmark, X, GitCompare, User } from 'lucide-react'
 import { api } from '../lib/api'
 import { Button, IconButton, Modal, LoadingState, EmptyState } from './ui'
 
@@ -35,7 +35,7 @@ function formatRelative(dateStr) {
 }
 
 // ─── VersionRow ───────────────────────────────────────────────────────────────
-function VersionRow({ v, idx, isLatest, restoring, onRestoreClick }) {
+function VersionRow({ v, idx, isLatest, restoring, onRestoreClick, onCompareClick }) {
   const isNamed = !!v.label
 
   return (
@@ -71,8 +71,14 @@ function VersionRow({ v, idx, isLatest, restoring, onRestoreClick }) {
         <p className="text-xs font-medium text-ink truncate tracking-tightish" title={v.name}>
           {v.name || 'Untitled'}
         </p>
-        <div className="flex items-center gap-2 mt-0.5">
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           <span className="text-2xs text-ink-faint tracking-tightish">{formatRelative(v.created_at)}</span>
+          {v.author && (
+            <span className="text-2xs text-ink-faint tracking-tightish flex items-center gap-0.5" title={`Edited by ${v.author}`}>
+              <User size={9} className="flex-shrink-0" />
+              <span className="truncate max-w-[7rem]">{v.author}</span>
+            </span>
+          )}
           {isLatest && !isNamed && (
             <span className="text-2xs font-semibold text-accent bg-accent-tint px-1.5 py-px rounded-pill tracking-tightish">
               latest
@@ -81,27 +87,112 @@ function VersionRow({ v, idx, isLatest, restoring, onRestoreClick }) {
         </div>
       </div>
 
-      {/* Restore button — only shows on hover */}
-      <button
-        onClick={() => onRestoreClick(v)}
-        disabled={restoring === v.id}
-        title="Restore this version"
+      {/* Actions — only show on hover */}
+      <div
         className={[
-          'flex-shrink-0 self-start mt-0.5 flex items-center gap-1',
-          'h-6 px-2 text-2xs font-medium rounded-sm',
-          'text-accent-press hover:bg-accent-tint-2',
-          'transition-[opacity,background] duration-fast ease-out',
-          'opacity-0 group-hover:opacity-100',
-          'disabled:opacity-40 disabled:cursor-not-allowed',
+          'flex-shrink-0 self-start mt-0.5 flex items-center gap-0.5',
+          'transition-opacity duration-fast ease-out',
+          'opacity-0 group-hover:opacity-100 focus-within:opacity-100',
         ].join(' ')}
       >
-        {restoring === v.id
-          ? <Loader2 size={11} className="animate-spin" />
-          : <RotateCcw size={11} />
-        }
-        Restore
-      </button>
+        <button
+          onClick={() => onCompareClick(v)}
+          title="Compare with current version"
+          className="flex items-center gap-1 h-6 px-2 text-2xs font-medium rounded-sm text-ink-muted hover:bg-accent-tint-2 focus:outline-none focus-visible:shadow-focus"
+        >
+          <GitCompare size={11} /> Diff
+        </button>
+        <button
+          onClick={() => onRestoreClick(v)}
+          disabled={restoring === v.id}
+          title="Restore this version"
+          className={[
+            'flex items-center gap-1 h-6 px-2 text-2xs font-medium rounded-sm',
+            'text-accent-press hover:bg-accent-tint-2 focus:outline-none focus-visible:shadow-focus',
+            'disabled:opacity-40 disabled:cursor-not-allowed',
+          ].join(' ')}
+        >
+          {restoring === v.id
+            ? <Loader2 size={11} className="animate-spin" />
+            : <RotateCcw size={11} />
+          }
+          Restore
+        </button>
+      </div>
     </li>
+  )
+}
+
+// ─── DiffModal ────────────────────────────────────────────────────────────────
+// Renders a readable line-level diff (Docs) or a coarse summary (Sheets/Slides).
+function DiffModal({ fileId, version, onClose }) {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [diff, setDiff] = useState(null)
+
+  useEffect(() => {
+    let live = true
+    if (!version) return
+    setLoading(true)
+    setError(null)
+    api.diffVersion(fileId, version.id, 'current')
+      .then((d) => { if (live) setDiff(d) })
+      .catch((e) => { if (live) setError(e.message || 'Could not load diff') })
+      .finally(() => { if (live) setLoading(false) })
+    return () => { live = false }
+  }, [fileId, version])
+
+  const body = diff?.diff
+  return (
+    <Modal open={!!version} onClose={onClose} title="Compare version" size="lg">
+      <Modal.Body>
+        <p className="text-2xs text-ink-faint mb-3">
+          <span className="font-medium text-ink-muted">{diff?.old_label || (version ? formatRelative(version.created_at) : '')}</span>
+          {' → '}
+          <span className="font-medium text-ink-muted">{diff?.new_label || 'current'}</span>
+        </p>
+        {loading && <LoadingState size="sm" label="Computing diff…" className="py-8" />}
+        {error && !loading && (
+          <p className="text-xs text-danger" role="alert">{error}</p>
+        )}
+        {!loading && !error && body && (
+          <>
+            <div className="flex items-center gap-3 mb-2 text-2xs">
+              <span className="text-success font-medium">+{body.added} added</span>
+              <span className="text-danger font-medium">−{body.removed} removed</span>
+              {body.summary && <span className="text-ink-faint">{body.summary}</span>}
+            </div>
+            {body.kind === 'line' && body.lines?.length > 0 ? (
+              <div className="rounded-md border border-line overflow-hidden max-h-[50vh] overflow-y-auto font-mono text-2xs leading-relaxed">
+                {body.lines.map((l, i) => (
+                  <div
+                    key={i}
+                    className={[
+                      'px-3 py-0.5 whitespace-pre-wrap break-words flex gap-2',
+                      l.op === 'insert' ? 'bg-success-bg text-success' :
+                        l.op === 'delete' ? 'bg-danger-bg text-danger line-through decoration-danger/40' :
+                          'text-ink-muted',
+                    ].join(' ')}
+                  >
+                    <span className="select-none opacity-60 w-3 flex-shrink-0">
+                      {l.op === 'insert' ? '+' : l.op === 'delete' ? '−' : ' '}
+                    </span>
+                    <span>{l.text || ' '}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-ink-muted bg-bg-elev2 border border-line rounded-md px-3 py-3">
+                {body.summary || 'No textual changes.'}
+              </p>
+            )}
+          </>
+        )}
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" size="md" onClick={onClose}>Close</Button>
+      </Modal.Footer>
+    </Modal>
   )
 }
 
@@ -112,6 +203,7 @@ export default function HistoryPanel({ fileId, onRestore, onClose }) {
   const [error, setError] = useState(null)
   const [restoring, setRestoring] = useState(null)
   const [confirmVersion, setConfirmVersion] = useState(null)  // version to confirm restore
+  const [compareVersion, setCompareVersion] = useState(null)  // version to diff vs current
   const [toast, setToast] = useState(null)
 
   const showToast = (msg, ok = true) => {
@@ -201,6 +293,7 @@ export default function HistoryPanel({ fileId, onRestore, onClose }) {
                   isLatest={idx === 0}
                   restoring={restoring}
                   onRestoreClick={setConfirmVersion}
+                  onCompareClick={setCompareVersion}
                 />
               ))}
               {/* Rail bottom cap */}
@@ -256,6 +349,13 @@ export default function HistoryPanel({ fileId, onRestore, onClose }) {
           </Button>
         </Modal.Footer>
       </Modal>
+
+      {/* ── Version diff modal ── */}
+      <DiffModal
+        fileId={fileId}
+        version={compareVersion}
+        onClose={() => setCompareVersion(null)}
+      />
     </>
   )
 }

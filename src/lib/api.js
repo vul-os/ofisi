@@ -132,6 +132,54 @@ export const api = {
   listVersions: (id) => request(`/files/${id}/versions`),
   restoreVersion: (id, vid) =>
     request(`/files/${id}/versions/${vid}/restore`, { method: 'POST' }),
+  // Version diff: compare a version against the current content (default) or the
+  // version immediately prior to it. Read-only; server enforces view access.
+  // Returns { type, against, old_label, new_label, diff: { kind, lines[], added, removed, summary } }.
+  diffVersion: (id, vid, against = 'current') =>
+    request(`/files/${id}/versions/${vid}/diff?against=${encodeURIComponent(against)}`),
+
+  // Global full-text search across the caller's ACL-scoped documents (owned +
+  // shared). The server extracts + matches text only over files the caller may
+  // read, so a result NEVER leaks another account's content. Optional `type`
+  // narrows to doc|sheet|slide. Returns { query, results: [{ id, name, type,
+  // snippet, owner, shared }] }.
+  searchDocs: (query, type = '') => {
+    const params = new URLSearchParams({ q: query })
+    if (type) params.set('type', type)
+    return request(`/search?${params.toString()}`)
+  },
+
+  // Expiring / password-protected read-only share links (owner-only management).
+  //   createShareLink — mint a link; { password?, expiresInSeconds? }.
+  //   listShareLinks  — list a file's links (owner view).
+  //   revokeShareLink — kill a link permanently.
+  // The anonymous view route (viewShareLink*) needs no auth — the token IS the
+  // credential; it returns strictly read-only content.
+  listShareLinks: (id) => request(`/files/${id}/share-links`),
+  createShareLink: (id, { password = '', expiresInSeconds = 0 } = {}) =>
+    request(`/files/${id}/share-links`, {
+      method: 'POST',
+      body: JSON.stringify({ password, expires_in_seconds: expiresInSeconds }),
+    }),
+  revokeShareLink: (id, linkId) =>
+    request(`/files/${id}/share-links/${linkId}`, { method: 'DELETE' }),
+  // Anonymous read-only view of a shared doc by token. viewShareLinkMeta returns
+  // { requires_password, ... } (and content when no password). viewShareLink
+  // POSTs the password (or nothing) and returns { id, name, type, content, read_only }.
+  viewShareLinkMeta: (token) => request(`/share/${encodeURIComponent(token)}`),
+  viewShareLink: (token, password = '') =>
+    request(`/share/${encodeURIComponent(token)}`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+
+  // Transfer ownership of a file to another account (owner-only; the previous
+  // owner is demoted to editor server-side so they keep access).
+  transferOwnership: (id, newOwner) =>
+    request(`/files/${id}/transfer-owner`, {
+      method: 'POST',
+      body: JSON.stringify({ new_owner: newOwner }),
+    }),
 
   // OFFICE-28: activity feed + named snapshots
   getActivity: (id) => request(`/files/${id}/activity`),

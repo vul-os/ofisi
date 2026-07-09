@@ -109,39 +109,43 @@ func (m *memStorage) DeleteFolder(id string) error {
 }
 
 // --- unused interface methods (panic if hit) ---
-func (m *memStorage) ListVersions(string) ([]*models.FileVersion, error)     { panic("unused") }
-func (m *memStorage) GetVersion(string, string) (*models.FileVersion, error) { panic("unused") }
-func (m *memStorage) CreateVersion(*models.FileVersion) error                { panic("unused") }
-func (m *memStorage) PruneVersions(string, int) error                        { panic("unused") }
-func (m *memStorage) LabelVersion(string, string, string) error              { panic("unused") }
-func (m *memStorage) CreateEnvelope(*models.Envelope) error                  { panic("unused") }
-func (m *memStorage) GetEnvelope(string) (*models.Envelope, error)           { panic("unused") }
-func (m *memStorage) ListEnvelopes() ([]*models.Envelope, error)             { panic("unused") }
-func (m *memStorage) UpdateEnvelope(*models.Envelope) error                  { panic("unused") }
-func (m *memStorage) DeleteEnvelope(string) error                            { panic("unused") }
-func (m *memStorage) UpsertSigner(*models.Signer) error                      { panic("unused") }
-func (m *memStorage) GetSigner(string) (*models.Signer, error)               { panic("unused") }
-func (m *memStorage) ListSignersByEnvelope(string) ([]*models.Signer, error) { panic("unused") }
-func (m *memStorage) AppendAuditEvent(*models.AuditEvent) error              { panic("unused") }
-func (m *memStorage) ListAuditEvents(string) ([]*models.AuditEvent, error)   { panic("unused") }
-func (m *memStorage) StoreSignerToken(string, string, string) error          { panic("unused") }
-func (m *memStorage) ResolveToken(string) (string, string, error)            { panic("unused") }
-func (m *memStorage) StoreSealedPDF(string, []byte) error                    { panic("unused") }
-func (m *memStorage) GetSealedPDF(string) ([]byte, error)                    { panic("unused") }
-func (m *memStorage) CreateComment(*models.Comment) error                    { panic("unused") }
-func (m *memStorage) GetComment(string, string) (*models.Comment, error)     { panic("unused") }
-func (m *memStorage) ListComments(string) ([]*models.Comment, error)         { panic("unused") }
-func (m *memStorage) UpdateComment(*models.Comment) error                    { panic("unused") }
-func (m *memStorage) DeleteComment(string, string) error                     { panic("unused") }
-func (m *memStorage) CreateReply(*models.CommentReply) error                 { panic("unused") }
-func (m *memStorage) GetReply(string, string) (*models.CommentReply, error)  { panic("unused") }
-func (m *memStorage) ListReplies(string) ([]*models.CommentReply, error)     { panic("unused") }
+func (m *memStorage) ListVersions(string) ([]*models.FileVersion, error)       { panic("unused") }
+func (m *memStorage) GetVersion(string, string) (*models.FileVersion, error)   { panic("unused") }
+func (m *memStorage) CreateVersion(*models.FileVersion) error                  { panic("unused") }
+func (m *memStorage) PruneVersions(string, int) error                          { panic("unused") }
+func (m *memStorage) LabelVersion(string, string, string) error                { panic("unused") }
+func (m *memStorage) CreateEnvelope(*models.Envelope) error                    { panic("unused") }
+func (m *memStorage) GetEnvelope(string) (*models.Envelope, error)             { panic("unused") }
+func (m *memStorage) ListEnvelopes() ([]*models.Envelope, error)               { panic("unused") }
+func (m *memStorage) UpdateEnvelope(*models.Envelope) error                    { panic("unused") }
+func (m *memStorage) DeleteEnvelope(string) error                              { panic("unused") }
+func (m *memStorage) UpsertSigner(*models.Signer) error                        { panic("unused") }
+func (m *memStorage) GetSigner(string) (*models.Signer, error)                 { panic("unused") }
+func (m *memStorage) ListSignersByEnvelope(string) ([]*models.Signer, error)   { panic("unused") }
+func (m *memStorage) AppendAuditEvent(*models.AuditEvent) error                { panic("unused") }
+func (m *memStorage) ListAuditEvents(string) ([]*models.AuditEvent, error)     { panic("unused") }
+func (m *memStorage) StoreSignerToken(string, string, string) error            { panic("unused") }
+func (m *memStorage) ResolveToken(string) (string, string, error)              { panic("unused") }
+func (m *memStorage) StoreSealedPDF(string, []byte) error                      { panic("unused") }
+func (m *memStorage) GetSealedPDF(string) ([]byte, error)                      { panic("unused") }
+func (m *memStorage) CreateComment(*models.Comment) error                      { panic("unused") }
+func (m *memStorage) GetComment(string, string) (*models.Comment, error)       { panic("unused") }
+func (m *memStorage) ListComments(string) ([]*models.Comment, error)           { panic("unused") }
+func (m *memStorage) UpdateComment(*models.Comment) error                      { panic("unused") }
+func (m *memStorage) DeleteComment(string, string) error                       { panic("unused") }
+func (m *memStorage) CreateReply(*models.CommentReply) error                   { panic("unused") }
+func (m *memStorage) GetReply(string, string) (*models.CommentReply, error)    { panic("unused") }
+func (m *memStorage) ListReplies(string) ([]*models.CommentReply, error)       { panic("unused") }
 func (m *memStorage) UpdateReply(*models.CommentReply) error                   { panic("unused") }
 func (m *memStorage) CreateSuggestion(*models.Suggestion) error                { panic("unused") }
 func (m *memStorage) GetSuggestion(string, string) (*models.Suggestion, error) { panic("unused") }
 func (m *memStorage) ListSuggestions(string) ([]*models.Suggestion, error)     { panic("unused") }
 func (m *memStorage) UpdateSuggestion(*models.Suggestion) error                { panic("unused") }
 func (m *memStorage) DeleteSuggestion(string, string) error                    { panic("unused") }
+func (m *memStorage) CreateShareLink(*models.ShareLink) error                   { panic("unused") }
+func (m *memStorage) GetShareLinkByToken(string) (*models.ShareLink, error)     { panic("unused") }
+func (m *memStorage) ListShareLinks(string) ([]*models.ShareLink, error)        { panic("unused") }
+func (m *memStorage) RevokeShareLink(string, string) error                      { panic("unused") }
 
 var _ storage.Storage = (*memStorage)(nil)
 
