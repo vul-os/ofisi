@@ -38,13 +38,6 @@ var Version = "dev"
 //go:embed all:dist
 var distFS embed.FS
 
-// siteFS holds the small dark marketing landing served at "/" to logged-out
-// visitors (the root auth-gate). Its assets are mounted at /site/ so the page's
-// relative ./assets/… URLs resolve once a <base href="/site/"> is injected.
-//
-//go:embed all:site
-var siteFS embed.FS
-
 func main() {
 	// One-shot CLI subcommand: migrate a legacy shared-password deploy to a
 	// per-user credential so an upgrade doesn't silently lock everyone out.
@@ -513,50 +506,12 @@ func main() {
 	}
 	staticServer := http.FileServer(http.FS(staticFS))
 
-	// ── Root auth-gate ────────────────────────────────────────────────────────
-	// Mount the embedded marketing landing's assets under /site/ so the page's
-	// relative ./assets/… URLs resolve (a <base href="/site/"> is injected below).
-	if siteSub, serr := fs.Sub(siteFS, "site"); serr == nil {
-		r.StaticFS("/site", http.FS(siteSub))
-	} else {
-		log.Printf("[root-gate] embedded site assets unavailable: %v", serr)
-	}
-
-	// Pre-build the landing HTML once, injecting <base href="/site/"> so the
-	// page's relative asset refs resolve to the mounted /site/ tree.
-	var landingHTML []byte
-	if raw, rerr := siteFS.ReadFile("site/index.html"); rerr == nil {
-		landingHTML = []byte(strings.Replace(string(raw), "<head>", `<head><base href="/site/">`, 1))
-	} else {
-		log.Printf("[root-gate] embedded site/index.html unavailable: %v", rerr)
-	}
-
-	// serveSPAIndex serves the SPA's index.html (the same content NoRoute serves
-	// for "/"): the React app then drives routing and shows the login screen when
-	// appropriate.
-	serveSPAIndex := func(c *gin.Context) {
+	// "/" serves the SPA for everyone (it shows the login screen when the
+	// visitor is unauthenticated). The marketing landing that used to gate the
+	// root moved to the centralized vulos-cloud site.
+	r.GET("/", func(c *gin.Context) {
 		c.Request.URL.Path = "/"
 		staticServer.ServeHTTP(c.Writer, c.Request)
-	}
-
-	// Explicit GET "/" overrides the NoRoute fallback (which would otherwise serve
-	// the SPA for "/"). Authenticated visitors get the SPA; logged-out visitors get
-	// the marketing landing with a "Sign in" CTA. Auth state is determined by the
-	// SAME session validation the API middleware uses (Authorization bearer or the
-	// HttpOnly "session" cookie, HS256). When auth is disabled, SessionIdentity
-	// reports ok=true (single-user self-host), so the SPA is served directly.
-	r.GET("/", func(c *gin.Context) {
-		if _, _, ok := middleware.SessionIdentity(cfg, c.Request); ok {
-			serveSPAIndex(c)
-			return
-		}
-		if len(landingHTML) == 0 {
-			// No landing available — fall back to the SPA (shows the login screen).
-			serveSPAIndex(c)
-			return
-		}
-		c.Header("Cache-Control", "no-store")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", landingHTML)
 	})
 
 	r.NoRoute(func(c *gin.Context) {
