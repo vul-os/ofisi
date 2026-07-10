@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useEditor, EditorContent, Extension, Mark } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
@@ -556,11 +556,12 @@ export default function DocsEditor() {
       }
     },
     onSelectionUpdate: ({ editor: ed }) => {
-      // OFFICE-25: broadcast local caret/selection position to peers.
-      if (broadcastDocCursorRef.current) {
-        const { from, to } = ed.state.selection
-        broadcastDocCursorRef.current(from, to)
-      }
+      // OFFICE-25: broadcast local caret/selection position to peers over BOTH
+      // transports — the p2p fabric (when reachable) and the server presence
+      // relay (the cloud fallback). Whichever a given peer is on will see us.
+      const { from, to } = ed.state.selection
+      if (broadcastDocCursorRef.current) broadcastDocCursorRef.current(from, to)
+      if (broadcastServerCursorRef.current) broadcastServerCursorRef.current(from, to)
     },
   })
 
@@ -913,6 +914,58 @@ export default function DocsEditor() {
   const broadcastDocCursorRef = useRef(null)
   broadcastDocCursorRef.current = broadcastDocCursor
 
+  // ── Server-mediated presence (CLOUD path) ─────────────────────────────────
+  // The p2p fabric above carries presence when a relay/peer is reachable. When
+  // it is NOT (the fabric's degrade-to-local-only gap), presence would be empty
+  // — so we ALSO ride the server collab session's presence relay, which is ACL-
+  // gated + identity-stamped server-side. The two are merged: p2p wins when
+  // present (E2E), the server fills the gap otherwise. This is what makes "who
+  // is here" + live cursors work on the account/cloud path, not just p2p.
+  const localColor = localCursorIdentity.current
+    ? (() => { let h = 0; for (const c of localCursorIdentity.current.accountId) { h = (h << 5) - h + c.charCodeAt(0); h |= 0 } return `hsl(${Math.abs(h) % 360},65%,50%)` })()
+    : '#6366f1'
+  const broadcastServerCursorRef = useRef(null)
+  broadcastServerCursorRef.current = (from, to) => {
+    server.broadcastPresence?.({
+      displayName: localCursorIdentity.current?.displayName || 'Me',
+      color: localColor,
+      cursor: { type: 'doc', from, to },
+    })
+  }
+
+  // Merge p2p + server presence into a single remoteCursors Map + roster. p2p
+  // entries take precedence (E2E/local-first); server entries fill peers the
+  // fabric can't reach. Keyed by accountId so the same peer never double-counts.
+  const mergedRemoteCursors = useMemo(() => {
+    const merged = new Map(remoteCursors || [])
+    for (const p of server.roster || []) {
+      if (!p?.accountId || merged.has(p.accountId)) continue
+      const cur = p.cursor || {}
+      if (cur.type !== 'doc' || typeof cur.from !== 'number') continue
+      merged.set(p.accountId, {
+        accountId: p.accountId,
+        displayName: p.displayName || 'Guest',
+        color: p.color || '#6366f1',
+        type: 'doc',
+        from: cur.from,
+        to: typeof cur.to === 'number' ? cur.to : cur.from,
+      })
+    }
+    return merged
+  }, [remoteCursors, server.roster])
+
+  const mergedRoster = useMemo(() => {
+    // Start from the p2p roster (already includes the local user); fold in any
+    // server-only peers so the avatar bar reflects everyone on either transport.
+    const byId = new Map()
+    for (const r of roster || []) if (r?.accountId) byId.set(r.accountId, r)
+    for (const p of server.roster || []) {
+      if (!p?.accountId || byId.has(p.accountId)) continue
+      byId.set(p.accountId, { accountId: p.accountId, displayName: p.displayName || 'Guest', color: p.color })
+    }
+    return [...byId.values()]
+  }, [roster, server.roster])
+
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e) => {
@@ -1153,8 +1206,8 @@ export default function DocsEditor() {
 
   const peerCount = Object.values(collabPeers)
     .filter((s) => s === 'connected' || s === 'relay').length
-  // Live collaborators (from the cursor layer) → crafted avatar stack.
-  const collaborators = Array.from(remoteCursors?.values?.() || [])
+  // Live collaborators (from the merged p2p + server cursor layer) → avatar stack.
+  const collaborators = Array.from(mergedRemoteCursors?.values?.() || [])
     .filter((p) => p && p.accountId)
     .map((p) => ({ id: p.accountId, name: p.displayName || 'Guest', color: p.color }))
   const pendingSuggestions = suggestions.filter((s) => s.state === 'pending').length
@@ -1215,8 +1268,8 @@ export default function DocsEditor() {
                 Sheets/Slides). Shows the full roster; a subtle "editing now" cue
                 still comes from the live cursor layer. Falls back to a peer-count
                 pill or a cursor-derived avatar stack when the roster is empty. */}
-            {roster && roster.length > 1 ? (
-              <PresenceBar roster={roster} className="ml-1" />
+            {mergedRoster && mergedRoster.length > 1 ? (
+              <PresenceBar roster={mergedRoster} className="ml-1" />
             ) : collaborators.length > 0 ? (
               <Tooltip label={`${collaborators.length} editing now`}>
                 <AvatarStack people={collaborators} size={22} max={4} />
@@ -1231,7 +1284,7 @@ export default function DocsEditor() {
               </span>
             )}
             {/* Typing/active indicator: someone has a live cursor in the doc. */}
-            {roster && roster.length > 1 && collaborators.length > 0 && (
+            {mergedRoster && mergedRoster.length > 1 && collaborators.length > 0 && (
               <span className="text-2xs text-ink-faint italic" title={`${collaborators.length} actively editing`}>
                 {collaborators.length === 1 ? 'editing…' : `${collaborators.length} editing…`}
               </span>
@@ -1419,7 +1472,7 @@ export default function DocsEditor() {
             )}
             <div className="tiptap-cursor-host relative animate-fade-in">
               <EditorContent editor={editor} className="tiptap" />
-              <DocsCursorLayer editor={editor} remoteCursors={remoteCursors} />
+              <DocsCursorLayer editor={editor} remoteCursors={mergedRemoteCursors} />
               {/* P1: rendered page-break separators. Positioned by measured
                   y-offsets; purely visual, never part of the document. */}
               {pageBreaks.map((y, i) => (

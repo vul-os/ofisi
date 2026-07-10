@@ -42,6 +42,17 @@ const PUBLISH_DEBOUNCE_MS = 250
 // If the SSE stream drops and cannot re-open within this window we treat it as
 // "not live" so the caller can reflect degraded status.
 const RECONNECT_GRACE_MS = 8000
+// Coalesce rapid cursor moves into at most one presence POST per this window —
+// the presence endpoint has its own (generous) token bucket, but a caret that
+// moves on every keystroke would still hammer it without this.
+const PRESENCE_DEBOUNCE_MS = 120
+// A roster entry we haven't heard from within this window is considered gone
+// (the peer closed the tab without a clean "gone" beacon, e.g. crash / network
+// drop). Presence pings on cursor move; an idle peer re-announces via heartbeat.
+const PRESENCE_TTL_MS = 15000
+// How often we re-announce our own presence so peers' TTL doesn't expire us
+// while we sit idle (below PRESENCE_TTL_MS so we never lapse under normal net).
+const PRESENCE_HEARTBEAT_MS = 8000
 
 export class ServerCollabSession extends EventTarget {
   /**
@@ -67,6 +78,17 @@ export class ServerCollabSession extends EventTarget {
     this._publishTimer = null
     // Server-assigned sequence high-water mark we've observed (informational).
     this._seq = 0
+
+    // ── Presence (live cursors + roster) ──────────────────────────────────────
+    // roster: accountId → { accountId, displayName, color, cursor, lastSeen }.
+    // Ephemeral — never persisted, pruned by TTL. Keyed by the SERVER-STAMPED
+    // account id so a peer cannot occupy another account's roster slot.
+    this._roster = new Map()
+    this._presence = null        // last local presence we announced {displayName,color,cursor}
+    this._presenceTimer = null   // debounce timer for outbound presence
+    this._presencePending = false
+    this._presenceHeartbeat = null
+    this._presenceSweep = null
   }
 
   // ─── Public API (mirrors DocsCollabSession) ─────────────────────────────────
@@ -89,6 +111,14 @@ export class ServerCollabSession extends EventTarget {
 
     // Open the live server-push stream.
     this._openStream()
+
+    // Presence: re-announce our own cursor on a heartbeat so peers' TTL doesn't
+    // expire us while idle, and sweep stale roster entries (peers that vanished
+    // without a clean "gone" beacon).
+    this._presenceHeartbeat = setInterval(() => {
+      if (this._presence) this._flushPresence(true)
+    }, PRESENCE_HEARTBEAT_MS)
+    this._presenceSweep = setInterval(() => this._sweepRoster(), PRESENCE_TTL_MS / 3)
   }
 
   /**
@@ -108,15 +138,94 @@ export class ServerCollabSession extends EventTarget {
   /** Current visible text from the CRDT. */
   getText() { return this._crdt.toString() }
 
+  // ─── Presence (live cursors + roster) ───────────────────────────────────────
+
+  /**
+   * Announce this tab's live cursor + roster identity to the other viewers.
+   * Debounced. `presence` is { displayName, color, cursor } where cursor is an
+   * opaque client-shaped value (e.g. { type:'doc', from, to } for Docs, or
+   * { type:'sheet', from:'r,c' } for Sheets). Loss is never fatal.
+   */
+  setPresence(presence) {
+    if (!presence) return
+    this._presence = presence
+    if (this._presenceTimer) { this._presencePending = true; return }
+    this._flushPresence()
+    this._presenceTimer = setTimeout(() => {
+      this._presenceTimer = null
+      if (this._presencePending) { this._presencePending = false; this._flushPresence() }
+    }, PRESENCE_DEBOUNCE_MS)
+  }
+
+  /** Current roster snapshot as an array (excludes stale entries). */
+  getRoster() {
+    this._sweepRoster()
+    return [...this._roster.values()]
+  }
+
+  _flushPresence(heartbeat = false) {
+    if (!this._presence || !this._joined) return
+    const { displayName, color, cursor } = this._presence
+    api.docCollabPresence(this._fileId, { origin: this._peerId, displayName, color, cursor })
+      .catch((err) => {
+        // Presence is best-effort. A 403/404 (viewer racing a share revoke) just
+        // means no presence; never surface it as an error. Heartbeats swallow all.
+        if (!heartbeat) console.debug?.('[server-collab] presence skipped:', err?.message)
+      })
+  }
+
+  _applyRemotePresence(payload, origin) {
+    if (!payload) return
+    // Drop our own echo — we render our local caret separately.
+    if (origin && origin === this._peerId) return
+    const accountId = payload.account_id
+    if (!accountId) return
+    if (payload.gone) {
+      if (this._roster.delete(accountId)) this._emitPresence()
+      return
+    }
+    this._roster.set(accountId, {
+      accountId,
+      displayName: payload.display_name || '',
+      color: payload.color || '',
+      cursor: payload.cursor || null,
+      lastSeen: Date.now(),
+    })
+    this._emitPresence()
+  }
+
+  _sweepRoster() {
+    const now = Date.now()
+    let changed = false
+    for (const [k, v] of this._roster) {
+      if (now - (v.lastSeen || 0) > PRESENCE_TTL_MS) { this._roster.delete(k); changed = true }
+    }
+    if (changed) this._emitPresence()
+  }
+
+  _emitPresence() {
+    this.dispatchEvent(new CustomEvent('presence', { detail: { roster: [...this._roster.values()] } }))
+  }
+
   /** Disconnect and release resources. */
   leave() {
     this._joined = false
     this._live = false
     clearTimeout(this._snapTimer)
     clearTimeout(this._publishTimer)
+    if (this._presenceTimer) { clearTimeout(this._presenceTimer); this._presenceTimer = null }
+    if (this._presenceHeartbeat) { clearInterval(this._presenceHeartbeat); this._presenceHeartbeat = null }
+    if (this._presenceSweep) { clearInterval(this._presenceSweep); this._presenceSweep = null }
     if (this._graceTimer) { clearTimeout(this._graceTimer); this._graceTimer = null }
     // Flush any pending ops best-effort so a fast unmount doesn't drop the last edit.
     this._flushPublish()
+    // Fire a "gone" beacon so peers drop us from the roster promptly (keepalive
+    // lets it survive tab close). Best-effort — TTL sweep is the backstop.
+    if (this._presence) {
+      try { api.docCollabPresence(this._fileId, { origin: this._peerId, gone: true }) } catch { /* ignore */ }
+    }
+    this._roster.clear()
+    this._presence = null
     if (this._es) { try { this._es.close() } catch { /* ignore */ } this._es = null }
   }
 
@@ -178,6 +287,10 @@ export class ServerCollabSession extends EventTarget {
       if (!ev || !ev.type) return
       if (ev.type === 'ping') {
         this._clearGrace(); this._live = true
+        return
+      }
+      if (ev.type === 'presence') {
+        this._applyRemotePresence(ev.payload, ev.origin)
         return
       }
       if (ev.type === 'op' && ev.payload) {

@@ -9,7 +9,7 @@
 Docs · Sheets · Slides · PDF Signing
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-informational)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.1-informational)](CHANGELOG.md)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -61,7 +61,7 @@ Products never import each other — they are linked/embedded across clean seams
 | **Docs** | Rich-text editing via TipTap — headings, tables, inline images (resize/align/alt), footnotes, task lists, links; anchored **comments**, **suggestions** (track-changes with accept/reject), **version history** with restore, find/replace, live document outline + word count |
 | **Sheets** | Full spreadsheet grid via Fortune Sheet — formulas, number formats, conditional formatting, **data validation**, **charts** (column/bar/line/area/pie), **filters**, **pivot tables**, **named ranges**, freeze panes |
 | **Slides** | Presentation editor on a **from-scratch positioned-object canvas** — free drag/resize/rotate of text, shapes, and images in normalized slide space, per-element **animations**, **themes**, editable **master slides**, per-slide **transitions**, **presenter view** (notes + timer in a second window), template gallery, `.pptx`/`.odp` import. The full-screen *present* overlay uses Reveal.js only as the slide-transition host for those positioned objects |
-| **Signing** | View, **annotate** (text/draw/shapes), and **sign** PDFs (draw/type/upload); multi-party signing envelopes (sequential or parallel) with a public signer page and a cryptographic audit trail; page reorder/rotate/insert/extract |
+| **Signing** | View, **annotate** (text/draw/shapes), **fill interactive form fields** (AcroForm detection + one-click fill), and **sign** PDFs (draw/type/upload); multi-party signing envelopes (sequential or parallel) with a public signer page and a cryptographic audit trail; page reorder/rotate/insert/extract |
 | **Real-time collab** | CRDT co-editing over three transports: always-on **server-mediated (SSE, ACL-gated)**, low-latency **cloud P2P fabric**, and **E2E-encrypted P2P** via invite link. Live presence + remote cursors |
 | **Import / Export** | Docs `.docx` / Markdown / HTML / PDF · Sheets `.xlsx` / `.csv` · Slides `.pptx` / PDF · PDF signing; import from URL |
 | **Storage** | Local files + SQLite by default; optional PostgreSQL (schema `office`) for multi-user; optional S3-compatible object store |
@@ -193,12 +193,18 @@ double-apply:
 
 | Transport | When | Notes |
 |-----------|------|-------|
-| **Server-mediated (SSE)** | Always-on account path | Ops stream over SSE, are ACL-gated, and persisted authoritatively — a doc converges and stays saved even with **zero peers**, and a late joiner catches up from the server. |
+| **Server-mediated (SSE)** | Always-on account path | Ops **and live presence** stream over SSE, are ACL-gated, and (ops) persisted authoritatively — a doc converges and stays saved even with **zero peers**, and a late joiner catches up from the server. |
 | **Cloud P2P fabric** | When peers can connect | Low-latency WebRTC + relay-fallback over the Vulos peer fabric (plaintext). |
 | **E2E-encrypted P2P** | "Collaborate via link" | Ops sealed with AES-256-GCM; the room key is HKDF-derived and carried in the URL **fragment** (never sent to the server). While active, the server path is **suppressed** so encrypted ops never traverse a readable relay. |
 
-Live **presence** (avatar stack + peer count) and **remote cursors/selections**
-render on top of whichever transport is active.
+Live **presence** — avatar stack, roster, and **remote cursors/selections** —
+renders on top of whichever transport is active. Presence is **not p2p-only**:
+it also rides the server SSE path (`POST /collab/presence`, `VIEWER+`,
+identity-stamped server-side, **ephemeral / never persisted**), so "who is here"
+and live carets work on the account/cloud path even when **no relay or WebRTC
+peer is reachable**. The two transports are merged; a peer is never
+double-counted. A read-only **viewer** legitimately shows a caret and appears in
+the roster, but a viewer's content **ops** are still refused (`403`).
 
 ---
 

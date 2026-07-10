@@ -11,6 +11,7 @@ import {
   Upload, RotateCw, FilePlus, Trash, FileSignature,
 } from 'lucide-react'
 import { Button, IconButton, Tabs, Topbar, Tooltip } from '../../components/ui'
+import { extractFields, fieldsToAnnotations } from './formFields.js'
 // SOVEREIGNTY: cursive signature fonts vendored locally via @fontsource
 // (self-hosted woff2) instead of an @import from fonts.googleapis.com at
 // runtime — no user-IP leak to Google, stays air-gappable. Same fonts.
@@ -98,6 +99,11 @@ export default function PDFEditor() {
   const [annotations, setAnnotations] = useState({})
   const [selectedId, setSelectedId] = useState(null)
 
+  // AcroForm (interactive form) field detection — DocuSign/Adobe "fill forms".
+  // formFieldsByPage: { [displaySlot]: fieldDescriptor[] } detected via pdf.js.
+  const [formFieldsByPage, setFormFieldsByPage] = useState({})
+  const [filledPages, setFilledPages] = useState({})
+
   // Signatures
   const [savedSigs, setSavedSigs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('vulos_pdf_sigs') || '[]') }
@@ -163,6 +169,8 @@ export default function PDFEditor() {
       setPageOrder(Array.from({ length: doc.numPages }, (_, i) => i + 1))
       setPageRotations({})
       blankPageBuffers.current = {}
+      setFormFieldsByPage({})
+      setFilledPages({})
       showToast('PDF loaded')
     } catch (e) {
       showToast('Error loading PDF: ' + e.message)
@@ -187,6 +195,8 @@ export default function PDFEditor() {
       setPageOrder(Array.from({ length: doc.numPages }, (_, i) => i + 1))
       setPageRotations({})
       blankPageBuffers.current = {}
+      setFormFieldsByPage({})
+      setFilledPages({})
       showToast('PDF loaded')
     } catch (e) {
       showToast('Error loading PDF: ' + e.message)
@@ -266,6 +276,58 @@ export default function PDFEditor() {
       renderThumbnail(i)
     }
   }, [pdfJsDoc, pageOrder, pageRotations])
+
+  // ─── AcroForm field detection ─────────────────────────────────────────────
+  // Detect interactive form fields on each page so the user can one-click "Fill
+  // fields" (DocuSign/Adobe parity). Detection is display-slot-keyed and reuses
+  // the existing annotation pipeline for render + export, so filled values save
+  // through the SAME path as manual annotations.
+  useEffect(() => {
+    if (!pdfJsDoc || pageOrder.length === 0) { setFormFieldsByPage({}); return }
+    let cancelled = false
+    ;(async () => {
+      const byPage = {}
+      for (let slot = 1; slot <= pageOrder.length; slot++) {
+        const orig = pageOrder[slot - 1]
+        if (!orig || orig < 1) continue // blank / inserted page has no AcroForm
+        try {
+          const page = await pdfJsDoc.getPage(orig)
+          const annots = await page.getAnnotations()
+          const fields = extractFields(annots)
+          if (fields.length) byPage[slot] = fields
+        } catch { /* page annotations unavailable — skip */ }
+      }
+      if (!cancelled) setFormFieldsByPage(byPage)
+    })()
+    return () => { cancelled = true }
+  }, [pdfJsDoc, pageOrder])
+
+  // One-click fill: seed editable annotations at the detected field boxes for the
+  // current page. Idempotent per page (guarded by filledPages) so re-clicking
+  // doesn't stack duplicates.
+  const fillCurrentPageFields = useCallback(async () => {
+    const fields = formFieldsByPage[currentPage]
+    if (!fields || fields.length === 0 || !pdfJsDoc) return
+    if (filledPages[currentPage]) { showToast('Fields already added — edit them on the page'); return }
+    try {
+      const orig = pageOrder[currentPage - 1]
+      const page = await pdfJsDoc.getPage(orig)
+      const pageHeightPdf = page.getViewport({ scale: 1 }).height
+      const seeds = fieldsToAnnotations(fields, currentPage, pageHeightPdf, zoom, ANNOT_INK, genId)
+      if (seeds.length === 0) { showToast('No fillable fields on this page'); return }
+      setAnnotations(prev => ({
+        ...prev,
+        [currentPage]: [...(prev[currentPage] || []), ...seeds],
+      }))
+      setFilledPages(prev => ({ ...prev, [currentPage]: true }))
+      setActiveTool(TOOLS.SELECT)
+      showToast(`Added ${seeds.length} fillable field${seeds.length === 1 ? '' : 's'}`)
+    } catch (e) {
+      showToast('Could not read form fields: ' + e.message)
+    }
+  }, [formFieldsByPage, currentPage, pdfJsDoc, pageOrder, zoom, filledPages, showToast])
+
+  const currentPageFieldCount = (formFieldsByPage[currentPage] || []).length
 
   const renderThumbnail = async (displaySlot) => {
     const canvas = thumbnailRefs.current[displaySlot]
@@ -1077,6 +1139,24 @@ export default function PDFEditor() {
             </IconButton>
           </Tooltip>
         ))}
+
+        {/* AcroForm fill — appears only when the current page has form fields. */}
+        {currentPageFieldCount > 0 && (
+          <>
+            <span aria-hidden className="h-5 w-px bg-line mx-1" />
+            <Tooltip label={`Add ${currentPageFieldCount} fillable field${currentPageFieldCount === 1 ? '' : 's'} from this form`}>
+              <Button
+                variant={filledPages[currentPage] ? 'secondary' : 'primary'}
+                size="sm"
+                onClick={fillCurrentPageFields}
+                disabled={!!filledPages[currentPage]}
+              >
+                <FileSignature size={13} />
+                {filledPages[currentPage] ? 'Fields added' : `Fill ${currentPageFieldCount} field${currentPageFieldCount === 1 ? '' : 's'}`}
+              </Button>
+            </Tooltip>
+          </>
+        )}
 
         <span aria-hidden className="h-5 w-px bg-line mx-1" />
 

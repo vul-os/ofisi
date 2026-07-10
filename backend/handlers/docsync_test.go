@@ -59,7 +59,12 @@ func docSyncRouter(h *DocSyncHandler, user string, admin bool) *gin.Engine {
 	r.GET("/v1/documents/:id/collab/stream", h.Stream)
 	r.GET("/v1/documents/:id/collab/state", h.State)
 	r.POST("/v1/documents/:id/collab/ops", h.Publish)
+	r.POST("/v1/documents/:id/collab/presence", h.Presence)
 	return r
+}
+
+func postPresence(r *gin.Engine, id string, req presenceRequest) *httptest.ResponseRecorder {
+	return doReq(r, http.MethodPost, "/v1/documents/"+id+"/collab/presence", req)
 }
 
 // seedDoc creates a document owned by `owner` in storage + ACL.
@@ -423,5 +428,175 @@ func TestDocSync_NullStoreDegradesGracefully(t *testing.T) {
 	state, _ := ops.Load("doc1")
 	if state.Seq != 1 || len(state.Ops) != 1 {
 		t.Fatalf("degraded persistence failed: seq=%d ops=%d", state.Seq, len(state.Ops))
+	}
+}
+
+// ─── Presence (live cursors + roster) — WAVE-COLLAB-PRESENCE ─────────────────
+//
+// Presence is the CLOUD-path live-cursor/roster relay. Its security contract:
+//   - VIEWER+ (a read-only viewer legitimately shows a caret) — unlike op
+//     ingest, which is EDITOR-gated.
+//   - A stranger (no access) is refused 404 (no existence leak).
+//   - The producing account id is STAMPED SERVER-SIDE — a peer cannot spoof
+//     another account's roster identity via the body.
+//   - No cross-doc leakage: presence fans out strictly per doc id.
+//   - Ephemeral: presence is NEVER persisted to the op log.
+
+// A viewer (read-only) MAY publish presence — this is the deliberate difference
+// from op ingest (Publish), which a viewer cannot do.
+func TestDocSyncPresence_ViewerMayBroadcast(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	if err := acl.ShareWithRole("doc1", "vic", fileacl.RoleViewer); err != nil {
+		t.Fatal(err)
+	}
+	vic := docSyncRouter(h, "vic", false)
+	w := postPresence(vic, "doc1", presenceRequest{Origin: "vic-tab", DisplayName: "Vic", Color: "#abc"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("viewer presence: expected 200 (viewer may show a caret), got %d (%s)", w.Code, w.Body.String())
+	}
+	// Presence must NOT have been persisted — it is ephemeral.
+	state, _ := h.ops.Load("doc1")
+	if state.Seq != 0 || len(state.Ops) != 0 {
+		t.Fatalf("presence leaked into the op log (must be ephemeral): seq=%d ops=%d", state.Seq, len(state.Ops))
+	}
+}
+
+// A stranger (no ACL grant) is refused 404 on presence — no existence leak, same
+// as every other file-scoped read.
+func TestDocSyncPresence_StrangerGets404(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	mallory := docSyncRouter(h, "mallory", false)
+	w := postPresence(mallory, "doc1", presenceRequest{Origin: "m", DisplayName: "Mallory"})
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("stranger presence: expected 404, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+// The account id in the relayed presence frame is the VERIFIED session identity,
+// never a client-supplied one — a collaborator cannot occupy another account's
+// roster slot even if they try to set account_id in the body.
+func TestDocSyncPresence_IdentityStampedServerSide(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	if err := acl.ShareWithRole("doc1", "bob", fileacl.RoleEditor); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alice subscribes so she receives bob's presence frame.
+	events, cleanup := startSSE(t, h, "alice", "doc1")
+	defer cleanup()
+	deadline := time.Now().Add(2 * time.Second)
+	for h.hub.SubscriberCount("doc1") == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Bob broadcasts presence. Even if a malicious client crafted an account_id
+	// in the body, the handler ignores it and stamps requesterID = "bob".
+	bob := docSyncRouter(h, "bob", false)
+	if w := postPresence(bob, "doc1", presenceRequest{Origin: "bob-tab", DisplayName: "Bob"}); w.Code != http.StatusOK {
+		t.Fatalf("bob presence: %d (%s)", w.Code, w.Body.String())
+	}
+
+	select {
+	case ev := <-events:
+		if ev.Type == "ping" {
+			ev = <-events
+		}
+		if ev.Type != "presence" || ev.DocID != "doc1" {
+			t.Fatalf("unexpected relayed event: %+v", ev)
+		}
+		payload, ok := ev.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("presence payload not an object: %T", ev.Payload)
+		}
+		if payload["account_id"] != "bob" {
+			t.Fatalf("presence account_id not server-stamped: got %v, want bob", payload["account_id"])
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("alice never received bob's presence frame")
+	}
+}
+
+// Presence for docB must not reach a subscriber of docA.
+func TestDocSyncPresence_NoCrossDocLeakage(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "docA", "alice")
+	seedDoc(t, st, acl, "docB", "alice")
+
+	events, cleanup := startSSE(t, h, "alice", "docA")
+	defer cleanup()
+	deadline := time.Now().Add(2 * time.Second)
+	for h.hub.SubscriberCount("docA") == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	alice := docSyncRouter(h, "alice", false)
+	if w := postPresence(alice, "docB", presenceRequest{Origin: "a", DisplayName: "A"}); w.Code != http.StatusOK {
+		t.Fatalf("presence docB: %d", w.Code)
+	}
+	select {
+	case ev := <-events:
+		if ev.Type == "presence" && ev.DocID == "docB" {
+			t.Fatal("docB presence leaked to a docA subscriber (cross-doc leakage)")
+		}
+	case <-time.After(400 * time.Millisecond):
+		// Good — nothing leaked.
+	}
+}
+
+// A long display name is truncated so a peer cannot inject an unbounded label
+// into every other collaborator's roster.
+func TestDocSyncPresence_LabelBounded(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	events, cleanup := startSSE(t, h, "alice", "doc1")
+	defer cleanup()
+	deadline := time.Now().Add(2 * time.Second)
+	for h.hub.SubscriberCount("doc1") == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	huge := strings.Repeat("x", 5000)
+	// Alice broadcasts from a SECOND tab (different origin) so the frame isn't
+	// self-echo-filtered on the client — the server itself does no self-filter,
+	// so the subscriber receives it regardless; we just assert the bound.
+	alice2 := docSyncRouter(h, "alice", false)
+	if w := postPresence(alice2, "doc1", presenceRequest{Origin: "other-tab", DisplayName: huge}); w.Code != http.StatusOK {
+		t.Fatalf("presence: %d", w.Code)
+	}
+	select {
+	case ev := <-events:
+		if ev.Type == "ping" {
+			ev = <-events
+		}
+		payload, _ := ev.Payload.(map[string]any)
+		name, _ := payload["display_name"].(string)
+		if len(name) > maxPresenceLabelLen {
+			t.Fatalf("display name not bounded: len=%d > %d", len(name), maxPresenceLabelLen)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("never received the presence frame")
+	}
+}
+
+// A hostile colour value (CSS-injection shape) is dropped server-side before it
+// reaches the peer's inline-style caret sink; safe shapes pass through.
+func TestDocSyncPresence_ColorSanitized(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"#f00", "#f00"},
+		{"#aabbcc", "#aabbcc"},
+		{"hsl(120,65%,50%)", "hsl(120,65%,50%)"},
+		{"rebeccapurple", "rebeccapurple"},
+		{"red;position:fixed", ""},              // injection dropped
+		{"url(http://evil/x)", ""},              // url() dropped
+		{"#f00) ; background:url(x)", ""},       // parenthetical injection dropped
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := safeCSSColor(tc.in); got != tc.want {
+			t.Fatalf("safeCSSColor(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

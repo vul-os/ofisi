@@ -17,9 +17,14 @@ Vulos Office is a collaborative document editing + e-signing service. It exposes
 > **Collaboration transport note:** Live co-editing is CRDT-based and runs over
 > **three complementary transports**, all wired today:
 > 1. **Server-mediated (SSE)** — `ServerCollabSession` streams ops over
->    `GET /api/…/collab/stream` (down) + `POST …/collab/ops` (up), ACL-gated and
->    persisted authoritatively. This is the always-on account path; it keeps a
->    doc converging and saved even with zero peers.
+>    `GET /v1/documents/:id/collab/stream` (down) + `POST …/collab/ops` (up),
+>    ACL-gated and persisted authoritatively. This is the always-on account path;
+>    it keeps a doc converging and saved even with zero peers. **Live presence**
+>    (cursors + roster) rides the same path via `POST …/collab/presence`
+>    (`VIEWER+`, identity-stamped server-side, **ephemeral / never persisted**),
+>    so "who is here" + live carets work on the cloud path with **no p2p peer**.
+>    Presence is fanned out strictly per-doc (no cross-doc leakage) and is merged
+>    with the p2p roster so a peer is never double-counted.
 > 2. **Cloud P2P fabric (plaintext)** — `DocsCollabSession`/`GridSession`/
 >    `TreeSession` fan ops over the Vulos peer fabric (WebRTC + relay fallback)
 >    for low-latency co-editing when peers can connect.

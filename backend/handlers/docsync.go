@@ -5,6 +5,7 @@ package handlers
 //	GET  /v1/documents/:id/collab/stream   → text/event-stream (subscribe, VIEWER+)
 //	GET  /v1/documents/:id/collab/state    → JSON late-joiner bootstrap (VIEWER+)
 //	POST /v1/documents/:id/collab/ops       → publish CRDT ops (EDITOR+), persist + fan out
+//	POST /v1/documents/:id/collab/presence  → publish live presence/cursor (VIEWER+), fan out (ephemeral)
 //
 // This is the CLOUD / account collaboration path. It complements the existing
 // peer-to-peer fabric (E2E-encrypted, room-gated — wave-25) rather than
@@ -29,14 +30,22 @@ package handlers
 //   - PUBLISH (op ingest) requires EDITOR — reuses FileAuthz.requireEditor, the
 //     SAME gate that guards PATCH /v1/documents/:id. A viewer/commenter POSTing
 //     an op is rejected 403, exactly as the wave-14 requireEditor gate demands.
+//   - PRESENCE (cursor/roster) requires READ — a read-only viewer legitimately
+//     shows a caret and appears in the roster, so presence is VIEWER+ (unlike op
+//     ingest). The producer's identity is STAMPED SERVER-SIDE from the verified
+//     session (requesterID) and is NOT trusted from the request body, so one
+//     collaborator cannot spoof another account's name/avatar in the roster.
+//     Presence is EPHEMERAL: it is fanned out through the hub but never persisted
+//     (a stale cursor is meaningless after the tab closes).
 //   - There is no cross-doc leakage: the hub fans out strictly per doc id, and
-//     every id is ACL-checked in the handler before Subscribe/Publish.
+//     every id is ACL-checked in the handler before Subscribe/Publish/Presence.
 
 import (
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 
 	"vulos-office/backend/docsync"
 	"vulos-office/backend/realtime"
@@ -239,3 +248,106 @@ func (h *DocSyncHandler) Publish(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"ok": true, "accepted": accepted, "seq": lastSeq})
 }
+
+// presenceRequest is the body for POST /v1/documents/:id/collab/presence.
+//
+// It carries the sender's live cursor/selection and a display label so other
+// collaborators can render "who is here" (avatars) and "where they are"
+// (carets/selection). The identity is display-only and is re-derived from the
+// verified session on the server; the client-supplied accountId is ignored for
+// authority (it is only echoed for the sender's OWN tab colour stability).
+type presenceRequest struct {
+	Origin      string          `json:"origin"`                // sending tab/replica id (self-echo filter)
+	DisplayName string          `json:"display_name,omitempty"`// human label shown in the roster
+	Color       string          `json:"color,omitempty"`       // caret/avatar colour (cosmetic)
+	Cursor      json.RawMessage `json:"cursor,omitempty"`      // opaque {type,from,to,slideId?} — client-shaped
+	Gone        bool            `json:"gone,omitempty"`        // true when the sender is leaving (roster removal)
+}
+
+// maxPresenceLabelLen bounds the display name so a peer cannot inject a huge
+// label into every other collaborator's roster (a light abuse/DoS bound; the
+// label is also sanitized/escaped client-side before render).
+const maxPresenceLabelLen = 80
+
+// Presence relays a collaborator's live cursor/selection + roster identity to
+// the other authorized viewers of a document. It requires READ access only —
+// a read-only viewer legitimately shows a caret and appears in the roster (this
+// is the deliberate difference from Publish, which is EDITOR-gated). Presence is
+// EPHEMERAL: it is fanned out through the hub but never written to the op log,
+// so nothing about a transient cursor position is persisted.
+//
+// The producing account id is STAMPED from the verified session — the request
+// body cannot set it — so a collaborator cannot impersonate another account in
+// the roster. Only the cosmetic label/colour/cursor come from the body.
+func (h *DocSyncHandler) Presence(c *gin.Context) {
+	id := c.Param("id")
+	// READ gate: 404 on no access (no existence leak), same as the SSE stream.
+	// A viewer is allowed — read-only collaborators still show presence.
+	if !h.authz.require(c, id) {
+		return
+	}
+	if _, err := h.store.GetFile(id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+
+	var req presenceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	label := req.DisplayName
+	if len(label) > maxPresenceLabelLen {
+		label = label[:maxPresenceLabelLen]
+	}
+
+	// Cursor payload is opaque but bounded — a peer must not be able to push an
+	// unbounded blob into every other collaborator's memory via the roster.
+	cursor := req.Cursor
+	if len(cursor) > maxPresenceCursorLen {
+		cursor = nil
+	}
+
+	// Server-authoritative identity: the roster key is the VERIFIED account id,
+	// never a client-supplied one, so a peer cannot claim another account's
+	// presence slot. The label/colour are cosmetic and come from the body — the
+	// colour is validated to a safe CSS-colour shape (defense in depth: it is
+	// rendered into an inline `background` style on the peer's caret, and a raw
+	// value like `url(...)` must never reach that sink).
+	h.hub.Publish(realtime.Event{
+		Type:   "presence",
+		DocID:  id,
+		Origin: req.Origin,
+		Payload: gin.H{
+			"account_id":   requesterID(c),
+			"display_name": label,
+			"color":        safeCSSColor(req.Color),
+			"cursor":       cursor,
+			"gone":         req.Gone,
+		},
+	})
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// maxPresenceCursorLen bounds the opaque cursor payload (a small {type,from,to}
+// object in practice) so a peer cannot broadcast a huge blob to every viewer.
+const maxPresenceCursorLen = 512
+
+// safeCSSColor returns c only if it matches a conservative CSS-colour shape:
+// #rgb / #rrggbb / #rrggbbaa hex, or an hsl()/hsla()/rgb()/rgba() functional
+// form, or a short bare name (letters only). Anything else — notably a value
+// containing url(), parentheses in the wrong place, semicolons, or other CSS
+// injection vectors — is dropped to "" so the client falls back to its default
+// colour. Cosmetic field; failing closed costs nothing.
+func safeCSSColor(c string) string {
+	if c == "" || len(c) > 40 {
+		return ""
+	}
+	if presenceColorRe.MatchString(c) {
+		return c
+	}
+	return ""
+}
+
+var presenceColorRe = regexp.MustCompile(`^(#[0-9a-fA-F]{3,8}|(?:hsl|hsla|rgb|rgba)\([0-9,.%\s]+\)|[a-zA-Z]{1,20})$`)

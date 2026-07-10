@@ -8,6 +8,38 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Server-mediated live presence (cloud collab path)
+
+- **Live presence over the account/cloud path.** Presence (avatar roster + remote
+  cursors/selections) previously rode the p2p fabric only, so "who is here" and
+  live carets went dark whenever no relay/WebRTC peer was reachable. Presence now
+  also streams over the server SSE path: new `POST /v1/documents/:id/collab/presence`
+  fans a cursor/roster frame out through the realtime hub to the other authorized
+  viewers. `ServerCollabSession` gained `setPresence()` / `getRoster()` + a
+  `'presence'` event (debounced send, TTL-swept roster, heartbeat re-announce,
+  `keepalive` "gone" beacon on leave). DocsEditor merges the server roster with
+  the p2p one — a peer is never double-counted.
+- **Security (collab presence).** Presence is `VIEWER+` (a read-only viewer
+  legitimately shows a caret) — unlike op ingest, which stays `EDITOR`-gated. The
+  producing **account id is stamped server-side** (`requesterID`), never trusted
+  from the body, so a peer cannot occupy another account's roster slot. Presence
+  is **ephemeral** (fanned out, never persisted to the op log), fanned out
+  strictly per-doc (no cross-doc leakage), rate-limited on its own token bucket,
+  and the display label / cursor payload are length-bounded with the colour
+  validated to a safe CSS-colour shape (no `url()`/injection into the inline-style
+  caret sink). New backend tests: viewer-may-broadcast, stranger-404,
+  identity-stamped, no-cross-doc-leak, label-bounded, colour-sanitized; new
+  client + E2E tests for the roster + cursor broadcast.
+
+### Added — PDF interactive form fields (AcroForm fill)
+
+- **Fill interactive PDF forms** (DocuSign/Adobe parity). The PDF editor now
+  detects AcroForm fields on load (`page.getAnnotations()` → `extractFields`) and
+  surfaces a one-click **“Fill N fields”** affordance that seeds editable, exactly
+  positioned text/checkbox annotations at each field box, reusing the existing
+  annotate → export pipeline. The risky geometry (PDF↔screen coordinate mapping,
+  Y-flip, scale) lives in a pure, unit-tested `formFields.js` module.
+
 ### Added — Office interop (import + export fidelity)
 
 - **Unified Open flow**: drag-and-drop + file-picker on every app home detects the

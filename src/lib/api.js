@@ -344,4 +344,30 @@ export const api = {
     }
     return res.json()
   },
+
+  /**
+   * POST live presence (cursor/selection + roster label) to the server relay so
+   * the OTHER authorized viewers can render "who is here" + "where they are".
+   * VIEWER+ (a read-only viewer legitimately shows a caret). Ephemeral: the
+   * server fans it out but never persists it. The producing account id is
+   * stamped server-side — the body's label/colour/cursor are cosmetic only.
+   * Best-effort: presence loss is never fatal, so callers may ignore rejections.
+   */
+  docCollabPresence: async (docId, { origin, displayName, color, cursor, gone } = {}) => {
+    const res = await fetch(
+      `${currentEndpoint()}/v1/documents/${encodeURIComponent(docId)}/collab/presence`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        keepalive: !!gone, // let a final "gone" beacon survive tab close
+        body: JSON.stringify({ origin, display_name: displayName, color, cursor, gone: !!gone }),
+      },
+    )
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw Object.assign(new Error(err.error || 'collab presence failed'), { status: res.status, ...err })
+    }
+    return res.json()
+  },
 }

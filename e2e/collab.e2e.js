@@ -17,8 +17,18 @@ import { installBackend } from './fixtures.js'
  * Returns a live op log the test can assert against.
  */
 async function installCollabRelay(page, { role = 'owner' } = {}) {
-  const relay = { ops: [], seq: 0, posts: 0 }
+  const relay = { ops: [], seq: 0, posts: 0, presence: [] }
   const CAN_EDIT = new Set(['owner', 'editor'])
+
+  // Presence relay (VIEWER+): ephemeral, never persisted. Record posts so a test
+  // can assert the cursor was broadcast over the server path. Identity would be
+  // stamped server-side; the mock just records what the client sent.
+  await page.route('**/v1/documents/*/collab/presence', async (route) => {
+    let body = {}
+    try { body = route.request().postDataJSON() || {} } catch { /* none */ }
+    relay.presence.push(body)
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) })
+  })
 
   await page.route('**/v1/documents/*/collab/state', (route) =>
     route.fulfill({
@@ -101,7 +111,10 @@ test.describe('Comments (E2E)', () => {
 
     // Resolve the comment (the Resolve action lives on the comment card).
     await page.getByRole('button', { name: /Resolve/i }).first().click()
-    await expect(page.getByText('Resolved')).toBeVisible()
+    // The resolved comment shows a "Resolved" status pill. Scope to the badge
+    // (exact text) so we don't collide with the "Resolved" filter TAB that also
+    // appears once a resolved comment exists (strict-mode ambiguity otherwise).
+    await expect(page.getByText('Resolved', { exact: true }).first()).toBeVisible()
   })
 })
 
@@ -121,6 +134,25 @@ test.describe('WAVE37 server-authoritative collab (E2E smoke)', () => {
     // The authoritative op log received the edit through the real session path.
     await expect.poll(() => relay.ops.length, { timeout: 10_000 }).toBeGreaterThan(0)
     expect(relay.posts).toBeGreaterThan(0)
+  })
+
+  test('live presence: the local caret is broadcast to the server presence relay', async ({ page }) => {
+    await installBackend(page, { role: 'owner' })
+    const relay = await installCollabRelay(page, { role: 'owner' })
+
+    await page.goto('/docs/doc1')
+    await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
+
+    // Click + type moves the selection, which onSelectionUpdate broadcasts as a
+    // 'doc' cursor over the server presence path (the cloud fallback for "who is
+    // here / where they are" when no p2p peer is reachable).
+    await page.locator('.ProseMirror').click()
+    await page.keyboard.type('hello')
+
+    await expect.poll(() => relay.presence.length, { timeout: 10_000 }).toBeGreaterThan(0)
+    // The broadcast carries a doc cursor with numeric positions.
+    const withCursor = relay.presence.find((p) => p.cursor && p.cursor.type === 'doc' && typeof p.cursor.from === 'number')
+    expect(withCursor).toBeTruthy()
   })
 
   test('WAVE-14 gate: a viewer\'s ops are refused (403) and the doc stays editable locally', async ({ page }) => {

@@ -55,6 +55,10 @@ export function useServerCollab({ fileId, onRemoteText, enabled = true, e2eActiv
   const [active, setActive] = useState(false)
   const [live, setLive] = useState(false)
   const [readOnly, setReadOnly] = useState(false)
+  // Server-mediated presence roster (accountId → identity + cursor). This makes
+  // "who is here" + live cursors work on the CLOUD path — i.e. even when the p2p
+  // fabric can't reach a relay/peer, so presence is no longer p2p-only.
+  const [roster, setRoster] = useState([])
   const sessionRef = useRef(null)
   const onRemoteTextRef = useRef(onRemoteText)
   onRemoteTextRef.current = onRemoteText
@@ -77,6 +81,9 @@ export function useServerCollab({ fileId, onRemoteText, enabled = true, e2eActiv
       if (ev.detail?.remote) onRemoteTextRef.current?.(ev.detail.text)
     })
     session.addEventListener('readonly', () => { if (!cancelled) setReadOnly(true) })
+    session.addEventListener('presence', (ev) => {
+      if (!cancelled) setRoster(ev.detail?.roster || [])
+    })
 
     sessionRef.current = session
     setActive(true)
@@ -99,6 +106,7 @@ export function useServerCollab({ fileId, onRemoteText, enabled = true, e2eActiv
       setActive(false)
       setLive(false)
       setReadOnly(false)
+      setRoster([])
     }
   }, [fileId, enabled, e2eActive])
 
@@ -109,5 +117,11 @@ export function useServerCollab({ fileId, onRemoteText, enabled = true, e2eActiv
     return s.applyLocal(prevText, nextText)
   }, [])
 
-  return { active, live, readOnly, onLocalText, session: sessionRef }
+  // Announce the local cursor/selection + identity to the other viewers over the
+  // server path. Debounced inside the session. No-op when the session is absent.
+  const broadcastPresence = useCallback((presence) => {
+    sessionRef.current?.setPresence?.(presence)
+  }, [])
+
+  return { active, live, readOnly, roster, onLocalText, broadcastPresence, session: sessionRef }
 }

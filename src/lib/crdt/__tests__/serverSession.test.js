@@ -41,10 +41,25 @@ class FakeRelay {
     this.seq[docId] = last
     return { ok: true, accepted: ops.length, seq: last }
   }
+  // Presence relay: the server STAMPS the account id (never trusts the body),
+  // truncates the label, and fans out ephemerally (never persisted to ops).
+  presence(docId, { origin, displayName, color, cursor, gone }, accountId) {
+    const label = (displayName || '').slice(0, 80)
+    this._emit(docId, {
+      type: 'presence', doc_id: docId, origin,
+      payload: { account_id: accountId, display_name: label, color, cursor, gone: !!gone },
+    })
+    return { ok: true }
+  }
 }
 
 let relay
 const streamHandles = new Map() // url -> { onmessage, close }
+
+// Maps a sending tab origin → the account the server would stamp for it, so the
+// mock reproduces the server's "identity is authoritative, not from the body"
+// behaviour. Defaults to the origin itself when unmapped.
+const originAccounts = {}
 
 // Mock the api module the session imports.
 vi.mock('../../api.js', () => ({
@@ -52,6 +67,8 @@ vi.mock('../../api.js', () => ({
     docCollabStreamUrl: (docId) => `stream://${docId}`,
     docCollabState: async (docId) => relay.state(docId),
     docCollabPublish: async (docId, body) => relay.publish(docId, body),
+    docCollabPresence: async (docId, body) =>
+      relay.presence(docId, body, originAccounts[body.origin] || body.origin),
   },
 }))
 
@@ -77,6 +94,7 @@ import { ServerCollabSession } from '../serverSession.js'
 beforeEach(() => {
   relay = new FakeRelay()
   streamHandles.clear()
+  for (const k of Object.keys(originAccounts)) delete originAccounts[k]
   globalThis.EventSource = FakeEventSource
   globalThis.localStorage = {
     _s: {},
@@ -242,6 +260,68 @@ describe('ServerCollabSession — graceful degrade (no server)', () => {
     expect(a.getText()).toBe('local') // local CRDT still works
 
     mod.api.docCollabState = orig
+    a.leave()
+  })
+})
+
+describe('ServerCollabSession — live presence (cloud path)', () => {
+  it('peer B sees peer A in the roster with A\'s server-stamped identity + cursor', async () => {
+    originAccounts['A'] = 'alice'   // server would stamp A's frames as "alice"
+    const a = new ServerCollabSession({ fileId: 'doc1', peerId: 'A' })
+    const b = new ServerCollabSession({ fileId: 'doc1', peerId: 'B' })
+    const rosters = []
+    b.addEventListener('presence', (ev) => rosters.push(ev.detail.roster))
+
+    await a.join()
+    await b.join()
+
+    a.setPresence({ displayName: 'Alice', color: '#f00', cursor: { type: 'doc', from: 3, to: 5 } })
+    await tick()
+
+    const roster = b.getRoster()
+    expect(roster.length).toBe(1)
+    expect(roster[0].accountId).toBe('alice')     // server-stamped, not "A"
+    expect(roster[0].displayName).toBe('Alice')
+    expect(roster[0].cursor).toEqual({ type: 'doc', from: 3, to: 5 })
+
+    a.leave(); b.leave()
+  })
+
+  it('a peer does not see its OWN presence echo in its roster', async () => {
+    originAccounts['A'] = 'alice'
+    const a = new ServerCollabSession({ fileId: 'doc1', peerId: 'A' })
+    await a.join()
+    a.setPresence({ displayName: 'Alice', color: '#f00', cursor: { type: 'doc', from: 1, to: 1 } })
+    await tick()
+    // Own frame (origin === peerId) is echo-filtered — roster stays empty.
+    expect(a.getRoster().length).toBe(0)
+    a.leave()
+  })
+
+  it('a "gone" beacon removes the peer from the roster', async () => {
+    originAccounts['A'] = 'alice'
+    const a = new ServerCollabSession({ fileId: 'doc1', peerId: 'A' })
+    const b = new ServerCollabSession({ fileId: 'doc1', peerId: 'B' })
+    await a.join(); await b.join()
+
+    a.setPresence({ displayName: 'Alice', color: '#f00', cursor: { type: 'doc', from: 0, to: 0 } })
+    await tick()
+    expect(b.getRoster().length).toBe(1)
+
+    a.leave()          // fires a gone beacon
+    await tick()
+    expect(b.getRoster().length).toBe(0)
+    b.leave()
+  })
+
+  it('presence never reaches the authoritative op log (ephemeral)', async () => {
+    originAccounts['A'] = 'alice'
+    const a = new ServerCollabSession({ fileId: 'doc1', peerId: 'A' })
+    await a.join()
+    a.setPresence({ displayName: 'Alice', color: '#f00', cursor: { type: 'doc', from: 2, to: 2 } })
+    await tick()
+    // No ops were persisted by presence.
+    expect((relay.ops['doc1'] || []).length).toBe(0)
     a.leave()
   })
 })

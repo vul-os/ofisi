@@ -374,6 +374,20 @@ func main() {
 	// Talk's /spaces/stream, which is a long-lived read).
 	v1.GET("/documents/:id/collab/stream", docSyncHandler.Stream)
 	v1.GET("/documents/:id/collab/state", docSyncHandler.State)
+	// Live presence (cursor/selection + roster): VIEWER+, ephemeral fan-out, NOT
+	// persisted. It is registered on its OWN token bucket (BEFORE the content
+	// write bucket below) because cursor moves are high-frequency and must not
+	// starve real content writes out of the shared content bucket — yet it still
+	// needs a bound so one tab cannot flood the hub. The client debounces to a
+	// few POSTs/sec; this bucket (60 burst / 30-per-sec refill) is generous for
+	// that while capping abuse. Identity is stamped server-side (no spoofing).
+	if !*noRateLimitWrites {
+		presenceGroup := v1.Group("")
+		presenceGroup.Use(middleware.NewTokenBucket(60, 30).Middleware())
+		presenceGroup.POST("/documents/:id/collab/presence", docSyncHandler.Presence)
+	} else {
+		v1.POST("/documents/:id/collab/presence", docSyncHandler.Presence)
+	}
 	// Writes (rate-limited alongside the rest of the write surface).
 	if !*noRateLimitWrites {
 		v1.Use(middleware.NewTokenBucket(30, 10).Middleware())
