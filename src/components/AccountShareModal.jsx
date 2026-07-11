@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 import { Modal, Button, Input, Avatar, hueFor, useToast } from './ui'
 import { api } from '../lib/api'
+import { resolveReachableBase, reachableBaseSync } from '../lib/collab/reachableBase.js'
 
 // Expiry presets offered when minting a link (seconds). 0 = never.
 const EXPIRY_OPTIONS = [
@@ -44,11 +45,14 @@ const EXPIRY_OPTIONS = [
   { label: '30 days',  seconds: 30 * 24 * 60 * 60 },
 ]
 
-// Build the absolute anonymous view URL for a link token. Uses the current
-// origin so it works for both the standalone office deployment and self-host.
+// Build the absolute anonymous view URL for a link token. Prefers Office's
+// externally-reachable base (VULOS_OFFICE_PUBLIC_URL via /api/reachability) so a
+// link handed to an external viewer targets a reachable URL even when the box is
+// behind NAT and the owner loaded Office over a LAN address; falls back to the
+// current origin (standalone/cloud where the origin is already public).
 function shareLinkUrl(token) {
   if (typeof window === 'undefined') return `/view/${token}`
-  return `${window.location.origin}/view/${token}`
+  return `${reachableBaseSync()}/view/${token}`
 }
 
 // The three grantable roles, in ascending privilege. Owner is intentionally not
@@ -105,6 +109,9 @@ export default function AccountShareModal({ open, onClose, file, me = '', onSwit
   }, [fileId])
 
   useEffect(() => { if (open) refresh() }, [open, refresh])
+  // Warm the reachable-base cache so shareLinkUrl() (a sync render path) can
+  // prefer Office's public origin over a LAN-only window.location.origin.
+  useEffect(() => { if (open) resolveReachableBase() }, [open])
 
   // Ownership drives whether the mutating controls are shown. When the roster
   // records no owner (legacy/local single-user file), treat the caller as the

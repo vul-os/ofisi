@@ -35,6 +35,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { P2PCollabSession } from '../../lib/crdt/p2pSession.js'
 import { probePeeringAvailable } from '../../lib/collab/peeringAvailability.js'
+import { resolveReachableBase } from '../../lib/collab/reachableBase.js'
 
 /** True when the current location carries a P2P invite fragment. */
 export function hasInviteInLocation() {
@@ -158,9 +159,17 @@ export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true }) 
       sessionRef.current = null
     }
     const peerId = getOrCreatePeerId()
-    const baseUrl = typeof window !== 'undefined'
-      ? `${window.location.origin}${window.location.pathname}`
-      : undefined
+    // NAT reachability: build the invite base from Office's externally-reachable
+    // origin (VULOS_OFFICE_PUBLIC_URL via /api/reachability) so a link handed to
+    // an EXTERNAL peer targets a URL they can actually reach — not a LAN-only
+    // address the owner happened to load Office over. Falls back to
+    // window.location.origin when no public URL is configured (unchanged).
+    const reachable = await resolveReachableBase()
+    const pathname = typeof window !== 'undefined' && window.location
+      ? window.location.pathname
+      : '/'
+    const originBase = reachable || (typeof window !== 'undefined' ? window.location.origin : '')
+    const baseUrl = originBase ? `${originBase}${pathname}` : undefined
     const { session, rwLink, roLink, roomId: rid } = await P2PCollabSession.create({
       peerId, fileId, baseUrl,
     })
