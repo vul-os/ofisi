@@ -11,13 +11,21 @@
  *   • The relay never sees the doc: content is end-to-end encrypted under the key
  *     in the link. We say so.
  *   • To revoke, mint a new link (rotate the room key). We offer a "New room" btn.
+ *
+ * Availability posture (also honest): a standalone Office binary never mounts
+ * `/api/peering/*` — links minted here would look real but never connect
+ * anyone. useP2PCollab's startShare() probes for this BEFORE minting a room
+ * and, when unreachable, rejects instead of resolving with links — so callers
+ * pass `unavailable` here rather than leaving this modal stuck on "Preparing
+ * room…" forever (the previous behaviour when startShare's error was simply
+ * swallowed by the caller).
  */
 
 import { useState } from 'react'
-import { Link2, Copy, Check, Eye, Pencil, Shield, RefreshCw } from 'lucide-react'
+import { Link2, Copy, Check, Eye, Pencil, Shield, RefreshCw, AlertTriangle } from 'lucide-react'
 import { Modal, Button } from '../../../components/ui'
 
-export default function P2PShareModal({ open, onClose, links, onRotate, roomId }) {
+export default function P2PShareModal({ open, onClose, links, onRotate, roomId, unavailable = false }) {
   const [copied, setCopied] = useState(null) // 'rw' | 'ro' | null
 
   const copy = async (which, value) => {
@@ -41,7 +49,20 @@ export default function P2PShareModal({ open, onClose, links, onRotate, roomId }
           only ever routes ciphertext and can never read the document.
         </p>
 
-        {!links ? (
+        {unavailable ? (
+          <div className="flex items-start gap-2 rounded-md border border-danger/40 bg-danger/5 px-3 py-2.5">
+            <AlertTriangle size={13} className="text-danger mt-0.5 flex-shrink-0" />
+            <div className="text-2xs text-ink leading-relaxed space-y-1">
+              <p className="font-medium">P2P collaboration isn't available on this server.</p>
+              <p className="text-ink-faint">
+                This is a standalone Office deployment — it doesn't serve the peering
+                fabric (<code>/api/peering/*</code>) that invite links need to connect
+                peers. Use account-based sharing instead, or run Office behind a Vulos
+                OS / Vulos Relay host to enable P2P links.
+              </p>
+            </div>
+          </div>
+        ) : !links ? (
           <div className="flex items-center gap-2 text-xs text-ink-faint py-6 justify-center">
             <RefreshCw size={14} className="animate-spin" />
             Preparing room…

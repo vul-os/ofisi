@@ -14,15 +14,27 @@
  * active share, this hook is inert and the cloud path is unaffected.
  *
  * The hook returns:
- *   { active, cap, readOnly, roomId, peers, links, startShare, rotate, leave,
- *     onLocalText }
+ *   { active, cap, readOnly, roomId, peers, links, peeringUnavailable,
+ *     startShare, rotate, leave, onLocalText }
  * where onLocalText(prev, next) must be called from the editor's onUpdate (it is
  * a no-op for ro peers) and remote text changes are pushed via the onRemoteText
  * callback the caller supplies.
+ *
+ * HONESTY GUARD: a standalone Office binary never mounts `/api/peering/*`
+ * (see main.go). Both entry points probe that BEFORE touching the fabric:
+ *   • JOIN: if unreachable, we never attempt the session — instead of a silent
+ *     no-op (the previous behaviour: a console.warn nobody sees, the visitor
+ *     left wondering why nothing happened), `peeringUnavailable` flips true so
+ *     the caller can show a clear message.
+ *   • SHARE: if unreachable, startShare() rejects BEFORE minting a session, so
+ *     the share modal never sits in an infinite "Preparing room…" spinner —
+ *     callers should render `peeringUnavailable` as an explicit unavailable
+ *     state instead (see P2PShareModal's `unavailable` prop).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { P2PCollabSession } from '../../lib/crdt/p2pSession.js'
+import { probePeeringAvailable } from '../../lib/collab/peeringAvailability.js'
 
 /** True when the current location carries a P2P invite fragment. */
 export function hasInviteInLocation() {
@@ -52,6 +64,10 @@ export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true }) 
   const [roomId, setRoomId] = useState(null)
   const [peers, setPeers] = useState({})        // peerId → state
   const [links, setLinks] = useState(null)      // { rwLink, roLink } when sharing
+  // true once we've established the peering fabric (/api/peering/*) is NOT
+  // reachable on this origin — i.e. a standalone Office binary. Callers should
+  // surface this explicitly (toast / modal banner) rather than fail silently.
+  const [peeringUnavailable, setPeeringUnavailable] = useState(false)
   const sessionRef = useRef(null)
   const onRemoteTextRef = useRef(onRemoteText)
   onRemoteTextRef.current = onRemoteText
@@ -87,6 +103,19 @@ export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true }) 
     const inviteLink = window.location.href
 
     ;(async () => {
+      // Probe BEFORE touching the fabric: a standalone server never mounts
+      // /api/peering/*, so a session here would silently never connect anyone
+      // (see the HONESTY GUARD note above). Surface that explicitly instead of
+      // just a console.warn nobody sees.
+      const available = await probePeeringAvailable()
+      if (cancelled) return
+      if (!available) {
+        console.warn('[p2p] invite link opened, but this server does not serve the ' +
+          'peering fabric (/api/peering/*) — a standalone Office binary cannot make a ' +
+          'P2P connection. Staying in local/cloud mode.')
+        setPeeringUnavailable(true)
+        return
+      }
       try {
         const session = await P2PCollabSession.fromInvite({ inviteLink, peerId, fileId })
         if (cancelled) { session.leave(); return }
@@ -109,6 +138,18 @@ export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true }) 
 
   // ── SHARE: mint a fresh room and expose rw/ro links ────────────────────────
   const startShare = useCallback(async () => {
+    // Probe BEFORE minting a room: on a standalone server the room's invite
+    // links would look real but never connect anyone (no peering fabric to
+    // rendezvous over). Reject up front so the caller's share modal can render
+    // an explicit "unavailable" state instead of an infinite spinner waiting
+    // for `links` that will never arrive.
+    const available = await probePeeringAvailable()
+    if (!available) {
+      setPeeringUnavailable(true)
+      throw new Error('peering-unavailable')
+    }
+    setPeeringUnavailable(false)
+
     // If we're already in a room (joined via link as rw), reuse it — but the
     // simple, predictable behaviour is: sharing always (re)creates a room the
     // local user OWNS as rw. If a session already exists, tear it down first.
@@ -152,7 +193,7 @@ export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true }) 
   const peerCount = Object.values(peers).filter((s) => s === 'connected' || s === 'relay').length
 
   return {
-    active, cap, readOnly, roomId, peers, peerCount, links,
+    active, cap, readOnly, roomId, peers, peerCount, links, peeringUnavailable,
     startShare, rotate, leave: teardown, onLocalText,
     session: sessionRef,
   }

@@ -69,7 +69,7 @@ import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { usePresence } from '@vulos/relay-client/presence'
 import { DocsCursorLayer } from '../../components/RemoteCursors.jsx'
 import PresenceBar from '../../components/PresenceBar.jsx'
-import { Button, IconButton, Tooltip, Topbar, LoadingState, SaveStatus, AvatarStack } from '../../components/ui'
+import { Button, IconButton, Tooltip, Topbar, LoadingState, SaveStatus, AvatarStack, useToast } from '../../components/ui'
 import { Skeleton } from '../../components/ui/LoadingState'
 import { getCommentStore } from '../../lib/crdt/comments'
 import {
@@ -301,6 +301,7 @@ const FindHighlightExtension = Extension.create({
 export default function DocsEditor() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { showToast, toast } = useToast()
   const { files, saveFileWithDraft, markDirty } = useFilesStore()
   const [file, setFile] = useState(files.find((f) => f.id === id))
   const [title, setTitle] = useState(file?.name || 'Untitled')
@@ -385,6 +386,20 @@ export default function DocsEditor() {
   // Stable ref so the once-created onUpdate closure always calls the latest
   // p2p.onLocalText (assigned on every render below).
   const p2pOnLocalTextRef = useRef(null)
+
+  // Honesty guard: a `#vp2p=` invite link was opened, but this server doesn't
+  // serve the peering fabric (standalone Office binary — see main.go). Rather
+  // than silently doing nothing (the visitor would have no idea their invite
+  // link failed to connect them), tell them plainly.
+  useEffect(() => {
+    if (!p2p.peeringUnavailable) return
+    showToast(
+      "This invite link needs P2P collaboration support this server doesn't provide " +
+      '(standalone deployment). Ask the document owner to share your account instead, ' +
+      'or host Office behind a Vulos OS/Relay server.',
+      'error',
+    )
+  }, [p2p.peeringUnavailable, showToast])
 
   // WAVE37: server-mediated collab (the CLOUD / account path). Complements the
   // p2p fabric — keeps two editors in sync + persisted even when no p2p peer is
@@ -1593,7 +1608,12 @@ export default function DocsEditor() {
         me={myAccountId}
         onSwitchToLink={async () => {
           setShowP2PShare(true)
-          try { if (!p2p.links) await p2p.startShare() } catch { /* surfaced in modal */ }
+          // startShare() rejects (peeringUnavailable=true) when this server
+          // doesn't serve the fabric — surfaced in the modal itself (its
+          // `unavailable` prop below), not by this catch.
+          try { if (!p2p.links) await p2p.startShare() } catch (err) {
+            console.warn('[p2p] share unavailable:', err?.message)
+          }
         }}
       />
 
@@ -1604,6 +1624,7 @@ export default function DocsEditor() {
         links={p2p.links}
         roomId={p2p.roomId}
         onRotate={() => p2p.rotate()}
+        unavailable={p2p.peeringUnavailable}
       />
 
       {/* P4: equation editor (LaTeX input + live KaTeX preview) */}
@@ -1632,6 +1653,8 @@ export default function DocsEditor() {
         onApply={applyHeaderFooter}
         onClose={() => setShowHeaderFooter(false)}
       />
+
+      {toast}
     </div>
   )
 }

@@ -26,10 +26,21 @@
  * It only provisions the transport the existing CRDT session was already
  * designed to consume. When the peering backend is absent, behaviour is
  * identical to the previous `fabricClient: null` path (local-only).
+ *
+ * HONESTY GUARD: a standalone Office binary never mounts `/api/peering/*`
+ * (see main.go), but FabricClient.join() resolves anyway — it fire-and-forgets
+ * the signaling WebSocket connect and its ICE fetch silently falls back on a
+ * 404. Without a check, `configured`/`joined` would flip true regardless, and
+ * the Sheets/Slides status pill (deriveStatusPill in presenceCommon.js) would
+ * settle on a false-positive "Live" for a session nobody can ever join. So we
+ * probe the fabric's reachability BEFORE constructing a FabricClient at all;
+ * when it is unreachable we never construct one, and `configured` stays
+ * `false` — an honest, calm "Offline" — for the life of the mount.
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { FabricClient } from '@vulos/relay-client/fabric'
+import { probePeeringAvailable } from './peeringAvailability.js'
 
 /**
  * @param {object} opts
@@ -55,51 +66,69 @@ export function useCollabFabric({ sessionId, peerId, enabled = true }) {
     if (typeof window === 'undefined') return
 
     let cancelled = false
+    let client = null
+    let onState = null
 
     const wsBase = window.location.origin.replace(/^http/, 'ws') + '/api/peering/stream'
 
-    let client
-    try {
-      client = new FabricClient({
-        sessionId,
-        peerId,
-        signalingUrl: wsBase,
-        iceUrl: '/api/peering/ice',
-        relayBaseUrl: '',
-        authToken: null,
-      })
-    } catch (err) {
-      // FabricClient construction should not throw, but never let it break the
-      // editor — degrade to local-only.
-      console.warn('[collab] fabric init failed (local-only mode):', err?.message)
-      return
-    }
-
-    fabricRef.current = client
-    setFabric(client)
-    setConfigured(true)
-
-    const onState = (ev) => {
+    ;(async () => {
+      // Probe reachability BEFORE constructing a transport — see the HONESTY
+      // GUARD note above. On a standalone server this resolves false and we
+      // never touch FabricClient at all: configured/joined stay false, giving
+      // an honest, calm "Offline" pill instead of a false "Live".
+      const available = await probePeeringAvailable()
       if (cancelled) return
-      const { peerId: pid, state } = ev.detail || {}
-      if (!pid) return
-      setPeers((prev) => ({ ...prev, [pid]: state }))
-    }
-    client.addEventListener('state', onState)
+      if (!available) {
+        console.info('[collab] peering fabric not reachable on this origin ' +
+          '(standalone server, or offline) — presence/live-sync unavailable; editor stays local-only')
+        return
+      }
 
-    client.join()
-      .then(() => { if (!cancelled) setJoined(true) })
-      .catch((err) => {
-        // No peering backend / offline / single-user — this is expected and
-        // non-fatal. Presence stays empty; the editor is unaffected.
-        console.warn('[collab] fabric join failed (single-user mode):', err?.message)
-        if (!cancelled) { setJoined(false); setConfigured(false) }
-      })
+      try {
+        client = new FabricClient({
+          sessionId,
+          peerId,
+          signalingUrl: wsBase,
+          iceUrl: '/api/peering/ice',
+          relayBaseUrl: '',
+          authToken: null,
+        })
+      } catch (err) {
+        // FabricClient construction should not throw, but never let it break the
+        // editor — degrade to local-only.
+        console.warn('[collab] fabric init failed (local-only mode):', err?.message)
+        return
+      }
+      if (cancelled) { try { client.leave() } catch { /* ignore */ }; return }
+
+      fabricRef.current = client
+      setFabric(client)
+      setConfigured(true)
+
+      onState = (ev) => {
+        if (cancelled) return
+        const { peerId: pid, state } = ev.detail || {}
+        if (!pid) return
+        setPeers((prev) => ({ ...prev, [pid]: state }))
+      }
+      client.addEventListener('state', onState)
+
+      client.join()
+        .then(() => { if (!cancelled) setJoined(true) })
+        .catch((err) => {
+          // No peering backend / offline / single-user — this is expected and
+          // non-fatal. Presence stays empty; the editor is unaffected.
+          console.warn('[collab] fabric join failed (single-user mode):', err?.message)
+          if (!cancelled) { setJoined(false); setConfigured(false) }
+        })
+    })()
 
     return () => {
       cancelled = true
-      client.removeEventListener('state', onState)
-      try { client.leave() } catch { /* ignore */ }
+      if (client) {
+        if (onState) client.removeEventListener('state', onState)
+        try { client.leave() } catch { /* ignore */ }
+      }
       fabricRef.current = null
       setFabric(null)
       setPeers({})

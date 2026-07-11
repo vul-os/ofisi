@@ -7,10 +7,16 @@
  *
  * The real FabricClient opens WebSockets/WebRTC; we mock the module with a tiny
  * in-process EventTarget so the hook logic is exercised without the network.
+ *
+ * The hook also probes `/api/peering/ice` (peeringAvailability.js) BEFORE
+ * constructing a FabricClient at all, so every test here stubs global fetch to
+ * resolve `ok: true` (peering reachable) unless it is specifically exercising
+ * the unavailable path.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
+import { _resetPeeringProbeCache } from '../peeringAvailability.js'
 
 // ── Mock the relay-client fabric with a controllable fake ─────────────────────
 let lastFabric = null
@@ -47,6 +53,14 @@ const { useCollabFabric } = await import('../useCollabFabric.js')
 beforeEach(() => {
   lastFabric = null
   joinBehaviour = 'resolve'
+  _resetPeeringProbeCache()
+  // Default: the peering fabric IS reachable (hosted mode) — individual tests
+  // override this to exercise the standalone/unreachable path.
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('useCollabFabric', () => {
@@ -92,6 +106,22 @@ describe('useCollabFabric', () => {
     await waitFor(() => expect(result.current.configured).toBe(false))
     expect(result.current.joined).toBe(false)
     // No throw escaped — the hook still returned a value; editor keeps working.
+  })
+
+  it('never constructs a fabric when the peering endpoint is unreachable (standalone server)', async () => {
+    _resetPeeringProbeCache()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404 }))
+    const { result } = renderHook(() =>
+      useCollabFabric({ sessionId: 'f', peerId: 'me' }),
+    )
+    // Give the probe's microtask a tick to resolve.
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(result.current.fabric).toBeNull()
+    expect(result.current.configured).toBe(false)
+    expect(result.current.joined).toBe(false)
+    // The whole point: FabricClient is never even constructed, so there is no
+    // false-positive "Live" pill possible for a session nobody can reach.
+    expect(lastFabric).toBeNull()
   })
 
   it('does not create a fabric when disabled', async () => {
