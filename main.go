@@ -15,6 +15,7 @@ import (
 	"vulos-office/backend/apps"
 	"vulos-office/backend/billing"
 	"vulos-office/backend/config"
+	"vulos-office/backend/deploymode"
 	"vulos-office/backend/docsync"
 	"vulos-office/backend/handlers"
 	"vulos-office/backend/integration/cloud"
@@ -67,6 +68,17 @@ func main() {
 
 	log.Printf("vulos-office %s starting", Version)
 	obs.Init()
+
+	// Typed DEPLOY_MODE (standalone|os|cloud): read once, validate coherent
+	// config, self-report at boot. Formalizes what Office previously inferred from
+	// scattered env (VULOS_CP_BASE_URL / VULOS_STORAGE_BROKER_SECRET / TIGRIS_*).
+	// Never fails the boot — an invalid value degrades to the safe Standalone
+	// default with a logged warning.
+	mode := deploymode.Load()
+	// The cloud blob path (per-object presign; NEVER raw bucket creds) is engaged
+	// only in cloud mode. Install it into the shared blob store before any file
+	// handler runs; a no-op in standalone/os (header-seam / process-wide client).
+	handlers.ConfigureStorageMode(mode)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -224,8 +236,13 @@ func main() {
 
 	// Standalone system surface: honest runtime facts for the self-hosted
 	// Settings/Admin UI, plus authenticated self-service password change.
-	systemHandler := handlers.NewSystemHandler(cfg, Version, integrationMode)
+	systemHandler := handlers.NewSystemHandler(cfg, Version, integrationMode, mode.String())
 	protected.GET("/system/info", systemHandler.Info)
+	// Reachability: Office's own externally-reachable base URL (public origin, or
+	// a relay-tunnel URL when the box is behind NAT). UNAUTHENTICATED — it returns
+	// no secrets, only the public base + deploy mode — so the collab layer can
+	// resolve a reachable base for P2P invite links before/around auth.
+	api.GET("/reachability", systemHandler.Reachability)
 	// Rate-limit the self-service password change: it re-verifies the CURRENT
 	// password, so without a limit it is an online brute-force oracle. 5
 	// attempts/minute per client IP is ample for a human while blunting

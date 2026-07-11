@@ -16,6 +16,8 @@ package handlers
 
 import (
 	"net/http"
+	"os"
+	"strings"
 
 	"vulos-office/backend/config"
 	"vulos-office/backend/middleware"
@@ -25,16 +27,46 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// EnvPublicURL is Office's OWN externally-reachable origin (e.g.
+// https://office.vulos.org, or a vulos-relay tunnel URL when the box has no
+// public IP). It is what P2P collab invite links and same-origin signaling must
+// use INSTEAD of window.location.origin when a visitor loads Office over a
+// LAN-only / private address. Unset ⇒ the client keeps using its own origin
+// (correct for a directly-reachable standalone box).
+const EnvPublicURL = "VULOS_OFFICE_PUBLIC_URL"
+
 type SystemHandler struct {
 	cfg     *config.Config
 	version string
 	// mode is the integration mode resolved at startup ("standalone" | "cloud").
-	mode  string
-	creds userauth.Store
+	mode string
+	// deployMode is the typed DEPLOY_MODE (standalone|os|cloud) resolved at boot.
+	deployMode string
+	creds      userauth.Store
 }
 
-func NewSystemHandler(cfg *config.Config, version, mode string) *SystemHandler {
-	return &SystemHandler{cfg: cfg, version: version, mode: mode, creds: SharedCredsStore()}
+func NewSystemHandler(cfg *config.Config, version, mode, deployMode string) *SystemHandler {
+	return &SystemHandler{cfg: cfg, version: version, mode: mode, deployMode: deployMode, creds: SharedCredsStore()}
+}
+
+// PublicBaseURL returns Office's configured externally-reachable origin
+// (VULOS_OFFICE_PUBLIC_URL), trimmed of a trailing slash, or "" when unset.
+func PublicBaseURL() string {
+	return strings.TrimRight(strings.TrimSpace(os.Getenv(EnvPublicURL)), "/")
+}
+
+// Reachability GET /api/reachability (unauthenticated — returns no secrets).
+//
+// The client's collab layer consumes this to learn Office's externally-reachable
+// base URL so P2P invite links / signaling target a URL an external peer can
+// actually reach, rather than blindly trusting window.location.origin (which may
+// be a LAN-only address). When VULOS_OFFICE_PUBLIC_URL is unset the response's
+// public_base_url is empty and the client falls back to its own origin.
+func (h *SystemHandler) Reachability(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"public_base_url": PublicBaseURL(),
+		"deploy_mode":     h.deployMode,
+	})
 }
 
 // authMode classifies how login is enforced for this instance.
@@ -62,7 +94,9 @@ func (h *SystemHandler) Info(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"version":          h.version,
-		"integration_mode": h.mode, // "standalone" | "cloud"
+		"integration_mode": h.mode,       // "standalone" | "cloud" (seam adapter)
+		"deploy_mode":      h.deployMode,  // "standalone" | "os" | "cloud" (typed)
+		"served_from":      PublicBaseURL(), // this app's own externally-reachable origin (may be "")
 		"account_id":       requesterID(c),
 		"is_admin":         c.GetBool(middleware.CtxIsAdmin),
 		"auth": gin.H{
