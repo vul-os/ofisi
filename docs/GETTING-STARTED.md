@@ -59,11 +59,12 @@ Open [http://localhost:8080](http://localhost:8080).
 docker run -d \
   --name vulos-office \
   -p 8080:8080 \
-  -v office-data:/data \
+  -v office-data:/srv/data \
+  -v office-uploads:/srv/uploads \
   ghcr.io/vul-os/vulos-office:latest
 ```
 
-Mount `/data` for persistent storage. Pass `-e VULOS_OFFICE_JWT_SECRET=<secret>` when enabling auth.
+The image runs the server from `/srv` (see the Dockerfile), so mount `/srv/data` (SQLite stores + the JSON file/document store) and `/srv/uploads` (uploaded file staging) for persistence — both are declared `VOLUME`s in the image. Pass `-e VULOS_OFFICE_JWT_SECRET=<secret>` when enabling auth.
 
 ---
 

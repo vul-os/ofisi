@@ -24,7 +24,8 @@
 # constraint documented in vulos-cloud/backend/cp/Dockerfile.cloudlet.
 #
 # Run:
-#   docker run -d --name vulos-office -p 8080:8080 -v office-data:/srv/data \
+#   docker run -d --name vulos-office -p 8080:8080 \
+#     -v office-data:/srv/data -v office-uploads:/srv/uploads \
 #     ghcr.io/vul-os/vulos-office:latest
 #   # open http://localhost:8080
 
@@ -82,11 +83,14 @@ RUN apk add --no-cache ca-certificates wget \
 COPY --from=build /out/vulos-office /usr/local/bin/vulos-office
 # The server's data_dir/uploads_dir default to ./data and ./uploads relative to
 # CWD. Run from /srv and pre-create both subdirs (owned by vulos) so local
-# storage + uploads have a writable home. Mount a volume at /srv/data to persist.
+# storage + uploads have a writable home. Declare BOTH as volumes: /srv/data
+# holds SQLite stores + the JSON file store (documents), and /srv/uploads holds
+# uploaded file staging — without a volume there too, uploads are lost on
+# container recreation even though /srv/data is persisted.
 WORKDIR /srv
 RUN mkdir -p /srv/data /srv/uploads && chown -R vulos:vulos /srv
 USER vulos
-VOLUME ["/srv/data"]
+VOLUME ["/srv/data", "/srv/uploads"]
 EXPOSE 8080
 # Liveness: main.go serves GET /healthz on :8080.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
