@@ -36,7 +36,7 @@ primary_region = "PLACEHOLDER"   # Fly region code (e.g. "iad", "lhr", "fra")
 # Office holds NO session-signing power. In cloud it validates the browser's
 # `vc_session` cookie against the control plane by introspection. Set as secrets:
 #   fly secrets set -c vulos-office/fly.toml \
-#     IDENTITY_URL=https://cp.vulos.to \
+#     IDENTITY_URL=https://cp.vulos.org \
 #     VULOS_CP_TOKEN=<the CP shared secret (== CP_SHARED_SECRET)>
 # With IDENTITY_URL UNSET the SSO path is disabled and Office keeps its local
 # single-identity behavior (self-host appliance). VULOS_CP_TOKEN is the same

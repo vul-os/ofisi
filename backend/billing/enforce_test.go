@@ -63,7 +63,7 @@ func gate(ctx context.Context, accountID string, n int64) Decision {
 	return d
 }
 
-const acct = "alice@vulos.to"
+const acct = "alice@vulos.org"
 
 // --- Standalone (unlimited): allow everything, meter only on real writes -----
 

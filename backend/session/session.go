@@ -57,7 +57,7 @@ const (
 	CookieName = "vc_session"
 
 	// EnvIdentityURL points at the identity provider's base URL (the sovereign
-	// box in self-host, the CP in cloud, e.g. https://cp.vulos.to). When UNSET
+	// box in self-host, the CP in cloud, e.g. https://cp.vulos.org). When UNSET
 	// the session-introspection path is DISABLED and Office keeps its existing
 	// local single-identity behavior (self-host appliance — unchanged). When SET
 	// Office is in multi-user mode and MUST fail closed on any doubt.

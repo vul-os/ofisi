@@ -70,7 +70,7 @@ type Resolver interface {
 
 // CPResolver resolves emails against the control plane's verify-lookup endpoint.
 type CPResolver struct {
-	// BaseURL is the control-plane base (e.g. https://cp.vulos.to), no trailing
+	// BaseURL is the control-plane base (e.g. https://cp.vulos.org), no trailing
 	// slash.
 	BaseURL string
 	// Token is presented as X-Relay-Auth (shared cp auth header used across the

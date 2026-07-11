@@ -114,7 +114,7 @@ For an unknown / revoked / expired key the CP still returns `200` with:
 
 | Env var              | Purpose                                                             |
 | -------------------- | ------------------------------------------------------------------ |
-| `VULOS_CP_BASE_URL`  | Control-plane base URL (e.g. `https://cp.vulos.to`). Enables the `vk_` path. Unset → session-only. |
+| `VULOS_CP_BASE_URL`  | Control-plane base URL (e.g. `https://cp.vulos.org`). Enables the `vk_` path. Unset → session-only. |
 | `VULOS_CP_TOKEN`     | Service token sent as `X-Relay-Auth` on the introspection call. Optional. |
 
 These are the **same** env vars the optional cloud billing seam uses, so a

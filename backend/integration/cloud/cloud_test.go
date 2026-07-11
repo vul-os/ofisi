@@ -65,14 +65,14 @@ func TestEntitlements_CPContract(t *testing.T) {
 	defer srv.Close()
 
 	e := &cpEntitlements{cfg: Config{BaseURL: srv.URL, Token: "secret123"}, http: srv.Client()}
-	ent, err := e.For(context.Background(), "alice@vulos.to")
+	ent, err := e.For(context.Background(), "alice@vulos.org")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if gotPath != "/api/entitlements" {
 		t.Fatalf("unexpected path %q", gotPath)
 	}
-	if gotQuery != "account_id=alice%40vulos.to&product=office" {
+	if gotQuery != "account_id=alice%40vulos.org&product=office" {
 		t.Fatalf("unexpected query %q", gotQuery)
 	}
 	if gotAuth != "secret123" {
@@ -145,8 +145,8 @@ func TestUsage_CPContract(t *testing.T) {
 	defer srv.Close()
 
 	u := &cpUsage{cfg: Config{BaseURL: srv.URL, Token: "sek"}, http: srv.Client()}
-	u.Report(context.Background(), seam.UsageEvent{AccountID: "alice@vulos.to", Kind: seam.KindStorage, Value: 2048})
-	u.Report(context.Background(), seam.UsageEvent{AccountID: "alice@vulos.to", Kind: seam.KindSeats, Value: 1})
+	u.Report(context.Background(), seam.UsageEvent{AccountID: "alice@vulos.org", Kind: seam.KindStorage, Value: 2048})
+	u.Report(context.Background(), seam.UsageEvent{AccountID: "alice@vulos.org", Kind: seam.KindSeats, Value: 1})
 
 	got1 := <-recv
 	got2 := <-recv
@@ -154,7 +154,7 @@ func TestUsage_CPContract(t *testing.T) {
 		t.Fatalf("expected X-Relay-Auth header, got %q", auth)
 	}
 	byKind := map[string]body{got1.Kind: got1, got2.Kind: got2}
-	if s := byKind[seam.KindStorage]; s.Product != "office" || s.AccountID != "alice@vulos.to" || s.Bytes != 2048 || s.Count != 0 {
+	if s := byKind[seam.KindStorage]; s.Product != "office" || s.AccountID != "alice@vulos.org" || s.Bytes != 2048 || s.Count != 0 {
 		t.Fatalf("storage usage body wrong: %+v", s)
 	}
 	if s := byKind[seam.KindSeats]; s.Count != 1 || s.Bytes != 0 {

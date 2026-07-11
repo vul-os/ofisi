@@ -31,7 +31,7 @@ import (
 // Environment contract for the optional cloud adapter.
 const (
 	// EnvCPBaseURL, when set, enables the cloud adapter and points it at the
-	// control-plane base URL (e.g. https://cp.vulos.to). Absent → standalone.
+	// control-plane base URL (e.g. https://cp.vulos.org). Absent → standalone.
 	EnvCPBaseURL = "VULOS_CP_BASE_URL"
 
 	// EnvCPToken is the service token office presents to the control plane on

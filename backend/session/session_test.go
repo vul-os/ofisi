@@ -181,10 +181,10 @@ func TestIntrospect_ValidWithoutUserIDIsInvalid(t *testing.T) {
 }
 
 func TestFromEnv_And_Enabled(t *testing.T) {
-	t.Setenv(EnvIdentityURL, "https://cp.vulos.to/")
+	t.Setenv(EnvIdentityURL, "https://cp.vulos.org/")
 	t.Setenv(EnvSharedSecret, "sekret")
 	cfg := FromEnv()
-	if cfg.IdentityURL != "https://cp.vulos.to" { // trailing slash trimmed
+	if cfg.IdentityURL != "https://cp.vulos.org" { // trailing slash trimmed
 		t.Fatalf("IdentityURL = %q", cfg.IdentityURL)
 	}
 	if cfg.Token != "sekret" {

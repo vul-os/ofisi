@@ -121,8 +121,8 @@ func (s *cpStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 const (
 	cpToken   = "relay-secret-xyz"
-	testAcct  = "alice@vulos.to"
-	testAdmin = "admin@vulos.to"
+	testAcct  = "alice@vulos.org"
+	testAdmin = "admin@vulos.org"
 )
 
 // wireCloudProvider builds a real cloud.Provider pointed at stub and installs
@@ -347,7 +347,7 @@ func TestBillingE2E_SuspendedBlocked(t *testing.T) {
 		userauth.NewNullStore(),
 	)
 	admin := adminRouter(adminH, testAdmin)
-	wInvite := doJSON(admin, "/admin/invites", map[string]any{"note": "bob@vulos.to"})
+	wInvite := doJSON(admin, "/admin/invites", map[string]any{"note": "bob@vulos.org"})
 	if wInvite.Code != http.StatusPaymentRequired {
 		t.Fatalf("suspended invite mint should be 402, got %d (%s)", wInvite.Code, wInvite.Body.String())
 	}
@@ -377,8 +377,8 @@ func TestBillingE2E_SeatOverLimit_402(t *testing.T) {
 	wireCloudProvider(t, srv)
 
 	creds := userauth.NewNullStore()
-	_ = creds.Register("seat1@vulos.to", "Long-Enough-1")
-	_ = creds.Register("seat2@vulos.to", "Long-Enough-2")
+	_ = creds.Register("seat1@vulos.org", "Long-Enough-1")
+	_ = creds.Register("seat2@vulos.org", "Long-Enough-2")
 
 	adminH := handlers.NewAdminHandlerWithCreds(
 		invites.NewNullStore(),
@@ -386,7 +386,7 @@ func TestBillingE2E_SeatOverLimit_402(t *testing.T) {
 		creds,
 	)
 	admin := adminRouter(adminH, testAdmin)
-	w := doJSON(admin, "/admin/invites", map[string]any{"note": "seat3@vulos.to"})
+	w := doJSON(admin, "/admin/invites", map[string]any{"note": "seat3@vulos.org"})
 	if w.Code != http.StatusPaymentRequired {
 		t.Fatalf("seat-capped invite mint should be 402, got %d (%s)", w.Code, w.Body.String())
 	}
@@ -409,7 +409,7 @@ func TestBillingE2E_SeatAllowed_MeterReachesStub(t *testing.T) {
 		userauth.NewNullStore(), // 0 registered members
 	)
 	admin := adminRouter(adminH, testAdmin)
-	w := doJSON(admin, "/admin/invites", map[string]any{"note": "newbie@vulos.to"})
+	w := doJSON(admin, "/admin/invites", map[string]any{"note": "newbie@vulos.org"})
 	if w.Code != http.StatusCreated {
 		t.Fatalf("under-cap invite mint should be 201, got %d (%s)", w.Code, w.Body.String())
 	}

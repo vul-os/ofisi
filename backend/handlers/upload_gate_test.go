@@ -31,7 +31,7 @@ func uploadRouter(t *testing.T) *gin.Engine {
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		c.Set(middleware.CtxAuthenticated, true)
-		c.Set(middleware.CtxUserID, "alice@vulos.to")
+		c.Set(middleware.CtxUserID, "alice@vulos.org")
 		c.Next()
 	})
 	r.POST("/upload", h.Upload)

@@ -22,27 +22,27 @@ func TestFromEnv(t *testing.T) {
 	}
 
 	// Base URL set, cell server unset → LocalServer defaults to the base host.
-	t.Setenv(envCPBaseURL, "https://cp.vulos.to/")
+	t.Setenv(envCPBaseURL, "https://cp.vulos.org/")
 	t.Setenv(envCPToken, "secret-token")
 	t.Setenv(envCellServer, "")
 	r := FromEnv()
 	if r == nil {
 		t.Fatal("FromEnv with base URL should return a resolver")
 	}
-	if r.BaseURL != "https://cp.vulos.to" { // trailing slash trimmed
+	if r.BaseURL != "https://cp.vulos.org" { // trailing slash trimmed
 		t.Errorf("BaseURL = %q; want trailing slash trimmed", r.BaseURL)
 	}
 	if r.Token != "secret-token" {
 		t.Errorf("Token = %q; want secret-token", r.Token)
 	}
-	if r.LocalServer != "cp.vulos.to" {
+	if r.LocalServer != "cp.vulos.org" {
 		t.Errorf("LocalServer = %q; want defaulted to base host", r.LocalServer)
 	}
 
 	// Explicit cell server overrides the default.
-	t.Setenv(envCellServer, "cell-eu-1.vulos.to")
-	if r := FromEnv(); r.LocalServer != "cell-eu-1.vulos.to" {
-		t.Errorf("explicit LocalServer = %q; want cell-eu-1.vulos.to", r.LocalServer)
+	t.Setenv(envCellServer, "cell-eu-1.vulos.org")
+	if r := FromEnv(); r.LocalServer != "cell-eu-1.vulos.org" {
+		t.Errorf("explicit LocalServer = %q; want cell-eu-1.vulos.org", r.LocalServer)
 	}
 }
 
