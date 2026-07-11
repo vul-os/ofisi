@@ -94,8 +94,8 @@ func (h *SystemHandler) Info(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"version":          h.version,
-		"integration_mode": h.mode,       // "standalone" | "cloud" (seam adapter)
-		"deploy_mode":      h.deployMode,  // "standalone" | "os" | "cloud" (typed)
+		"integration_mode": h.mode,          // "standalone" | "cloud" (seam adapter)
+		"deploy_mode":      h.deployMode,    // "standalone" | "os" | "cloud" (typed)
 		"served_from":      PublicBaseURL(), // this app's own externally-reachable origin (may be "")
 		"account_id":       requesterID(c),
 		"is_admin":         c.GetBool(middleware.CtxIsAdmin),

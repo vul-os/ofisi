@@ -126,14 +126,14 @@ func (m Mode) checkCoherence() {
 		}
 	case OS:
 		if brokerSecret == "" {
-			log.Printf("[deploymode] WARNING: DEPLOY_MODE=os but VULOS_STORAGE_BROKER_SECRET is unset — "+
-				"gateway-injected X-Vulos-Storage-* headers will NOT be trusted, so per-user "+
+			log.Printf("[deploymode] WARNING: DEPLOY_MODE=os but VULOS_STORAGE_BROKER_SECRET is unset — " +
+				"gateway-injected X-Vulos-Storage-* headers will NOT be trusted, so per-user " +
 				"scoped storage is inactive (Office falls back to its process-wide object client).")
 		}
 	case Standalone:
 		if cp != "" {
-			log.Printf("[deploymode] NOTE: DEPLOY_MODE=standalone (or unset) with VULOS_CP_BASE_URL set — "+
-				"vk_ API-key auth is active, but entitlement gating stays OPEN because this box is standalone "+
+			log.Printf("[deploymode] NOTE: DEPLOY_MODE=standalone (or unset) with VULOS_CP_BASE_URL set — " +
+				"vk_ API-key auth is active, but entitlement gating stays OPEN because this box is standalone " +
 				"(set DEPLOY_MODE=os or DEPLOY_MODE=cloud to enforce it).")
 		}
 	}
