@@ -1,6 +1,19 @@
 # Vulos Office — Configuration Reference
 
-All runtime configuration for Vulos Office is driven by `config.yaml` (file path configurable via `--config`) and environment variables. Environment variables take precedence over the config file.
+All runtime configuration for Vulos Office is driven by `config.yaml` and environment variables. Environment variables take precedence over the config file.
+
+By default the server looks for `config.yaml` in the process's current working directory. Override the path with `-config` (also accepted as `--config`; Go's flag parser treats both the same), e.g.:
+
+```sh
+vulos-office -config /etc/vulos-office/config.yaml
+```
+
+Office never refuses to start over a config problem — this is deliberate for a zero-config first run, but means a typo'd `-config` path fails silently:
+
+- **Missing file** (wrong path, typo): silently falls back to built-in defaults — no error, no log line. If a setting doesn't seem to be taking effect, double-check the path first (e.g. `ls -la <path>`).
+- **File present but invalid YAML**: falls back to defaults AND logs `Config error: … — using defaults` on boot.
+
+The `migrate` subcommand (`vulos-office migrate up|status`) takes its own `-config` flag, defaulting the same way; it is a separate flag set from the server command, so pass it after `migrate`: `vulos-office migrate -config /etc/vulos-office/config.yaml up`.
 
 ---
 

@@ -62,12 +62,13 @@ func main() {
 	// CLI flags for the server process.
 	noRateLimitWrites := flag.Bool("no-rate-limit-writes", false,
 		"disable token-bucket rate limiting on write/collab endpoints (for testing or trusted environments)")
+	configPath := flag.String("config", "config.yaml", "path to config file")
 	flag.Parse()
 
 	log.Printf("vulos-office %s starting", Version)
 	obs.Init()
 
-	cfg, err := config.Load("config.yaml")
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Printf("Config error: %v — using defaults", err)
 		cfg = config.Default()
