@@ -189,11 +189,16 @@ func (b *BucketStore) GetObject(c *gin.Context, accountID, name string) ([]byte,
 func (b *BucketStore) DeleteObject(c *gin.Context, accountID, name string) error {
 	// CLOUD: the OS gateway presign contract mints only GET/PUT grants (S3
 	// presigned URLs sign a single method; there is no DELETE presign surface),
-	// so a cloud blob delete is a best-effort no-op — the authoritative document
-	// record is removed from the SQLite/Postgres store by the caller, and the
-	// orphaned per-object blob is bounded (one per deleted file) and overwritten
-	// on any same-key rewrite. This is the honest, no-raw-creds behaviour.
+	// so deletes go through the gateway's separate server-mediated delete
+	// endpoint instead of a minted grant — the gateway performs the delete
+	// itself after composing "<userID>/office/<relKey>" from the forwarded
+	// session, so Office never touches the object store directly here either.
 	if storagePresign != nil {
+		relKey := storage.SanitizePresignRelKey(name)
+		if err := storagePresign.Delete(c.Request.Context(), sessionCookieFrom(c), relKey); err != nil {
+			log.Printf("[bucket_store] presign DeleteObject key=%q: %v", relKey, err)
+			return err
+		}
 		return nil
 	}
 	client, err := b.clientFor(c)

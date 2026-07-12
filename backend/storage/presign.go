@@ -22,6 +22,19 @@
 // store WITH STS, a per-OBJECT-scoped short-lived cred — still never a
 // full-bucket cred), matching the "never hold raw bucket creds in cloud" rule.
 //
+// DELETE has no presign surface (an S3 presigned URL signs a single method, and
+// Office must never hold a bucket-wide DELETE credential), so it uses a
+// separate, server-MEDIATED endpoint instead of a minted grant:
+//
+//	POST {VULOS_STORAGE_PRESIGN_URL}/api/storage/delete
+//	  Cookie: vc_session=<the end-user's session>   (forwarded, same as above)
+//	  Body:   {"app_id":"office","key":"file/<id>"}
+//	  204:    deleted (or already absent — idempotent)
+//
+// The gateway itself performs the delete server-side after composing
+// "<userID>/office/<key>" and validating the session, so Office never touches
+// the object store directly for this call either.
+//
 // A gateway that answers type="local" (standalone gateway, no object store) is
 // treated as "no cloud blob store": Office falls back to its own local/SQLite
 // document store, so the presign path degrades safely.
@@ -197,6 +210,44 @@ func (p *PresignClient) Get(ctx context.Context, sessionCookie, relKey string) (
 	default:
 		return nil, false, fmt.Errorf("storage: presign get: unknown grant type %q", g.Type)
 	}
+}
+
+// Delete removes relKey via the gateway's server-mediated delete endpoint.
+// Unlike Put/Get there is no presigned-URL grant to mint (S3 presigned URLs
+// sign a single method, and Office must never hold a bucket-wide DELETE
+// credential): the gateway itself performs the delete after composing
+// "<userID>/office/<relKey>" from the forwarded session and validating that
+// Office may only reach its own app prefix. A 404 from the gateway is treated
+// as success (idempotent — "already gone"), matching OfficeS3Client.Delete.
+func (p *PresignClient) Delete(ctx context.Context, sessionCookie, relKey string) error {
+	body, _ := json.Marshal(map[string]string{
+		"app_id": PresignAppID,
+		"key":    relKey,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/api/storage/delete", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if sessionCookie != "" {
+		// Forward ONLY the vc_session cookie, exactly as mintGrant does — the
+		// gateway authenticates the delete as the end-user and scopes it to
+		// "<userID>/office/…", so Office can never delete another user's (or
+		// another app's) object.
+		req.AddCookie(&http.Cookie{Name: "vc_session", Value: sessionCookie})
+	}
+	resp, err := p.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("storage: presign delete %q: %w", relKey, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // idempotent — already absent
+	}
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("storage: presign delete %q: gateway status %d", relKey, resp.StatusCode)
+	}
+	return nil
 }
 
 // putURL performs a raw HTTP PUT against a presigned URL (the URL carries its own

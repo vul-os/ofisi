@@ -22,6 +22,7 @@ import (
 func TestBucketStore_CloudPresignPath(t *testing.T) {
 	var mu sync.Mutex
 	var gotAppID, gotKey, gotCookie, gotMethod string
+	var gotDeleteAppID, gotDeleteKey string
 	objects := map[string][]byte{}
 
 	// Fake S3 target for the presigned URLs.
@@ -42,12 +43,24 @@ func TestBucketStore_CloudPresignPath(t *testing.T) {
 	}))
 	defer s3.Close()
 
-	// Fake OS gateway presign endpoint.
+	// Fake OS gateway: presign endpoint mints GET/PUT grants; the delete
+	// endpoint is server-mediated (the gateway performs the delete itself,
+	// there is no presigned-URL grant for DELETE — see presign.go).
 	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req struct{ AppID, Method, Key string }
 		var raw map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&raw)
-		req.AppID, req.Method, req.Key = raw["app_id"], raw["method"], raw["key"]
+
+		if r.URL.Path == "/api/storage/delete" {
+			mu.Lock()
+			gotDeleteAppID, gotDeleteKey = raw["app_id"], raw["key"]
+			full := "user-alice/office/" + raw["key"]
+			delete(objects, "/bucket/"+full)
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		req := struct{ AppID, Method, Key string }{raw["app_id"], raw["method"], raw["key"]}
 		mu.Lock()
 		gotAppID, gotKey, gotMethod = req.AppID, req.Key, req.Method
 		if ck, err := r.Cookie("vc_session"); err == nil {
@@ -111,9 +124,27 @@ func TestBucketStore_CloudPresignPath(t *testing.T) {
 		t.Fatalf("GetObject = %q, want cloudbytes", data)
 	}
 
-	// Delete is an honest no-op in cloud mode (no DELETE presign surface).
+	// Delete goes through the gateway's server-mediated delete endpoint (no
+	// presign grant — see presign.go) and actually removes the object.
 	if err := SharedBucketStore().DeleteObject(c, "alice", "file/doc9"); err != nil {
-		t.Fatalf("DeleteObject (cloud presign) should be a no-op nil, got %v", err)
+		t.Fatalf("DeleteObject (cloud presign): %v", err)
+	}
+	mu.Lock()
+	if gotDeleteAppID != "office" {
+		t.Errorf("delete app_id = %q, want office", gotDeleteAppID)
+	}
+	if gotDeleteKey != "file/doc9" {
+		t.Errorf("delete key = %q, want file/doc9 (relative)", gotDeleteKey)
+	}
+	mu.Unlock()
+
+	// The object is actually gone: a subsequent GetObject returns (nil, nil).
+	data2, err := SharedBucketStore().GetObject(c, "alice", "file/doc9")
+	if err != nil {
+		t.Fatalf("GetObject after delete: %v", err)
+	}
+	if data2 != nil {
+		t.Fatalf("GetObject after delete = %q, want nil (object removed)", data2)
 	}
 }
 
