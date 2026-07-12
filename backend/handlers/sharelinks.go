@@ -19,6 +19,7 @@ package handlers
 //     path reachable through a share-link token — no privilege escalation.
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -279,8 +280,11 @@ func (h *FileHandler) TransferOwner(c *gin.Context) {
 	// Demote the previous owner to editor so they retain access.
 	if prevOwner != "" {
 		if err := h.authz.Store().ShareWithRole(id, prevOwner, fileacl.RoleEditor); err != nil {
-			// Non-fatal: ownership already transferred; log-worthy but do not fail.
-			_ = err
+			// Non-fatal: ownership already transferred, so we don't fail the
+			// request — but a swallowed error here would silently leave the
+			// previous owner locked out (no collaborator record at all), so log
+			// it for operator visibility instead of discarding it.
+			log.Printf("[sharelinks] TransferOwner(%s): demote previous owner %q to editor failed: %v", id, prevOwner, err)
 		}
 	}
 	recordAudit(h.audit, requesterID(c), audit.ActionACLSetOwner, id, "new_owner="+newOwner)
