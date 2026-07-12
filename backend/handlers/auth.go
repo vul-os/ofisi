@@ -99,6 +99,24 @@ func NewAuthHandlerWithStores(cfg *config.Config, creds userauth.Store, inv invi
 	}
 }
 
+// requestIsHTTPS reports whether the session cookie should be marked Secure:
+// either this process terminated TLS directly, or a reverse proxy in front of
+// it forwarded X-Forwarded-Proto: https (the standard signal when TLS is
+// terminated upstream, e.g. Fly/nginx — Office already trusts this proxy
+// boundary elsewhere, see the CORS setup in main.go). Without this, the
+// session cookie was never marked Secure even when served over HTTPS, so it
+// could be sent over a downgraded plain-HTTP connection (e.g. via active
+// network MITM) and captured.
+func requestIsHTTPS(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+}
+
 func (h *AuthHandler) Status(c *gin.Context) {
 	authenticated := false
 	if h.cfg.Auth.Enabled {
@@ -300,7 +318,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		// Secure should be true in production (HTTPS). Set via env/config if needed.
+		Secure:   requestIsHTTPS(c.Request),
 	})
 	// Return only a success message — never expose the token in the response body
 	// so JavaScript cannot read it.
@@ -589,6 +607,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   requestIsHTTPS(c.Request),
 	})
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }
