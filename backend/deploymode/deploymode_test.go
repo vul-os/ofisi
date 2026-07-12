@@ -81,8 +81,40 @@ func TestMode_UsesPresignStorage(t *testing.T) {
 
 func TestLoad_NeverPanics(t *testing.T) {
 	t.Setenv(EnvVar, "garbage")
+	t.Setenv(EnvPresignURL, "https://app.vulos.org") // keep Load() out of the cloud fatal gate
 	// Load must degrade to Standalone and never panic on a bad value.
 	if m := Load(); m != Standalone {
 		t.Fatalf("Load() with garbage = %q, want %q", m, Standalone)
+	}
+}
+
+// TestValidateCloud_NoPresign_Errors is the CRITICAL fail-closed regression
+// guard: DEPLOY_MODE=cloud with no presign seam configured must be refused
+// (Load turns this into log.Fatalf), never silently degraded to a fallback
+// that would hand Office raw, suite-wide bucket credentials in a multi-tenant
+// cloud process.
+func TestValidateCloud_NoPresign_Errors(t *testing.T) {
+	t.Setenv(EnvPresignURL, "")
+	if err := Cloud.validateCloud(); err == nil {
+		t.Fatalf("VULN: Cloud.validateCloud() with no %s configured returned nil — cloud boot must be refused", EnvPresignURL)
+	}
+}
+
+func TestValidateCloud_WithPresign_OK(t *testing.T) {
+	t.Setenv(EnvPresignURL, "https://app.vulos.org")
+	if err := Cloud.validateCloud(); err != nil {
+		t.Fatalf("Cloud.validateCloud() with %s set: unexpected error %v", EnvPresignURL, err)
+	}
+}
+
+func TestValidateCloud_StandaloneAndOS_Unaffected(t *testing.T) {
+	// Standalone and OS never require the presign seam — validateCloud must be
+	// a no-op for them regardless of whether the env var is set.
+	t.Setenv(EnvPresignURL, "")
+	if err := Standalone.validateCloud(); err != nil {
+		t.Fatalf("Standalone.validateCloud() must never error, got %v", err)
+	}
+	if err := OS.validateCloud(); err != nil {
+		t.Fatalf("OS.validateCloud() must never error, got %v", err)
 	}
 }

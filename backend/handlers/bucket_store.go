@@ -56,17 +56,25 @@ var storagePresign *storage.PresignClient
 // raw bucket credentials — see backend/storage/presign.go). In standalone/os
 // mode it is a no-op: the existing gateway-header seam / process-wide client
 // path is used unchanged. Called once from main() at boot.
+//
+// FAIL CLOSED: main() already refuses to boot before reaching this call when
+// DEPLOY_MODE=cloud has no presign seam configured (deploymode.Load ->
+// validateCloud). This is a second, defense-in-depth gate at the call site
+// itself: if UsesPresignStorage() is ever true with no presign client resolved
+// (e.g. a future caller invokes this directly, bypassing Load's boot gate), we
+// refuse to silently fall back to clientFor()'s process-wide OrgBucketClient(),
+// which would hand a multi-tenant cloud process raw, suite-wide bucket creds.
 func ConfigureStorageMode(mode deploymode.Mode) {
-	if mode.UsesPresignStorage() {
-		storagePresign = storage.PresignClientFromEnv()
-		if storagePresign == nil {
-			log.Printf("[bucket_store] DEPLOY_MODE=cloud but %s is unset — "+
-				"presign storage disabled; blob writes fall back to the local object client",
-				storage.EnvPresignURL)
-		} else {
-			log.Printf("[bucket_store] cloud storage: per-object presign path enabled (no raw bucket creds held)")
-		}
+	if !mode.UsesPresignStorage() {
+		return
 	}
+	storagePresign = storage.PresignClientFromEnv()
+	if storagePresign == nil {
+		log.Fatalf("[bucket_store] DEPLOY_MODE=cloud but %s is unset — refusing to boot: "+
+			"falling back to the process-wide object client would hand this multi-tenant "+
+			"cloud process raw, suite-wide bucket credentials", storage.EnvPresignURL)
+	}
+	log.Printf("[bucket_store] cloud storage: per-object presign path enabled (no raw bucket creds held)")
 }
 
 // sessionCookieFrom extracts the end-user's vc_session cookie value from the

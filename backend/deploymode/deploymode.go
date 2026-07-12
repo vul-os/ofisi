@@ -95,35 +95,54 @@ func FromEnv() (Mode, error) {
 
 // Load resolves DEPLOY_MODE via FromEnv, logs any validation problem, runs a
 // light coherence check appropriate to the resolved mode, and self-reports at
-// boot. It never fails the boot — DEPLOY_MODE is advisory config, not a hard
-// gate; callers that need hard gating (e.g. storage isolation) enforce that
-// separately and explicitly.
+// boot. An unrecognised DEPLOY_MODE value never fails the boot — it degrades to
+// the safe Standalone default. However a resolved CLOUD mode with no presign
+// storage seam configured (validateCloud) IS a hard boot gate: Tigris has no
+// STS, so a cloud process with no presign path would otherwise silently fall
+// back to holding raw, suite-wide bucket credentials in a multi-tenant process
+// (see validateCloud). We fail closed (log.Fatalf) rather than boot into that
+// posture.
 func Load() Mode {
 	m, err := FromEnv()
 	if err != nil {
 		log.Printf("[deploymode] %v", err)
+	}
+	if verr := m.validateCloud(); verr != nil {
+		log.Fatalf("[deploymode] %v", verr)
 	}
 	m.checkCoherence()
 	log.Printf("[deploymode] running as %q (%s=%q)", m, EnvVar, os.Getenv(EnvVar))
 	return m
 }
 
+// validateCloud is the hard (fatal) gate for cloud mode: it returns a non-nil
+// error when DEPLOY_MODE=cloud but no presign storage seam is configured.
+// Standalone and OS are never affected — this is a pure function so the check
+// itself is unit-testable without exercising the log.Fatalf call site in Load.
+func (m Mode) validateCloud() error {
+	if m != Cloud {
+		return nil
+	}
+	presignURL := strings.TrimSpace(os.Getenv(EnvPresignURL))
+	if presignURL == "" {
+		return fmt.Errorf("DEPLOY_MODE=cloud requires %s (cloud has no per-tenant bucket "+
+			"credentials to fall back to; without the presign seam Office would otherwise hold "+
+			"raw, suite-wide bucket credentials in a multi-tenant process). Set it to the OS "+
+			"gateway base URL (e.g. https://app.vulos.org), or use DEPLOY_MODE=os/standalone",
+			EnvPresignURL)
+	}
+	return nil
+}
+
 // checkCoherence logs (non-fatal) warnings when the resolved mode's config looks
-// incomplete, so an operator notices a half-configured cloud/os box early rather
-// than discovering a silent fail-open/fail-closed surprise later.
+// incomplete, so an operator notices a half-configured os box early rather than
+// discovering a silent fail-open/fail-closed surprise later. The cloud+no-presign
+// case is NOT handled here — it is a hard boot gate, see validateCloud.
 func (m Mode) checkCoherence() {
 	cp := strings.TrimSpace(os.Getenv("VULOS_CP_BASE_URL"))
 	brokerSecret := strings.TrimSpace(os.Getenv("VULOS_STORAGE_BROKER_SECRET"))
-	presignURL := strings.TrimSpace(os.Getenv(EnvPresignURL))
 
 	switch m {
-	case Cloud:
-		if presignURL == "" {
-			log.Printf("[deploymode] WARNING: DEPLOY_MODE=cloud but %s is unset — "+
-				"Office cannot mint per-object presigned URLs and blob writes will "+
-				"fall back to the local object client (or no-op). Set it to the OS "+
-				"gateway base URL (e.g. https://app.vulos.org).", EnvPresignURL)
-		}
 	case OS:
 		if brokerSecret == "" {
 			log.Printf("[deploymode] WARNING: DEPLOY_MODE=os but VULOS_STORAGE_BROKER_SECRET is unset — " +
