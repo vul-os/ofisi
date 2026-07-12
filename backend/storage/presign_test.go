@@ -14,6 +14,9 @@ import (
 
 // fakeGateway captures the presign request and returns a grant pointing at a
 // fake S3 server, so we can assert the full presign→object-IO path end to end.
+// It also serves /api/storage/delete, simulating the gateway's server-mediated
+// delete (no presign grant for DELETE — see presign.go): it composes the same
+// "<userID>/office/<relKey>" key and deletes directly from the fake S3 store.
 type fakeGateway struct {
 	mu         sync.Mutex
 	appID      string
@@ -22,15 +25,32 @@ type fakeGateway struct {
 	cookie     string
 	objectSrv  *httptest.Server
 	forceLocal bool
+
+	deleteAppID string
+	deleteKey   string
+	deleteStore map[string][]byte // shared with the fake S3 server's object map
+	deleteHits  int
 }
 
 func (g *fakeGateway) handler(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		AppID  string `json:"app_id"`
-		Method string `json:"method"`
-		Key    string `json:"key"`
+	var raw map[string]string
+	_ = json.NewDecoder(r.Body).Decode(&raw)
+
+	if r.URL.Path == "/api/storage/delete" {
+		g.mu.Lock()
+		g.deleteAppID = raw["app_id"]
+		g.deleteKey = raw["key"]
+		g.deleteHits++
+		if g.deleteStore != nil {
+			fullKey := "/bucket/user-alice/office/" + raw["key"]
+			delete(g.deleteStore, fullKey)
+		}
+		g.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	req := struct{ AppID, Method, Key string }{raw["app_id"], raw["method"], raw["key"]}
 
 	g.mu.Lock()
 	g.appID = req.AppID
@@ -85,7 +105,7 @@ func TestPresignClient_PutGetRoundTrip(t *testing.T) {
 	}))
 	defer s3.Close()
 
-	gw := &fakeGateway{objectSrv: s3}
+	gw := &fakeGateway{objectSrv: s3, deleteStore: objects}
 	gws := httptest.NewServer(http.HandlerFunc(gw.handler))
 	defer gws.Close()
 
@@ -128,6 +148,90 @@ func TestPresignClient_PutGetRoundTrip(t *testing.T) {
 	}
 	if !stored || string(data) != "hello" {
 		t.Fatalf("Get = (%q, stored=%v), want (hello, true)", data, stored)
+	}
+
+	// Delete round-trip: put → delete → get must now report "not stored".
+	if err := pc.Delete(context.Background(), "sess-token-123", "file/doc1"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	gw.mu.Lock()
+	if gw.deleteAppID != "office" {
+		t.Errorf("gateway delete app_id = %q, want office", gw.deleteAppID)
+	}
+	if gw.deleteKey != "file/doc1" {
+		t.Errorf("gateway delete key = %q, want file/doc1 (relative, no user/app prefix)", gw.deleteKey)
+	}
+	gw.mu.Unlock()
+
+	// After delete the presigned GET 404s: data is nil (matching the presigned
+	// grant contract — see Get's doc comment: "stored" reflects only whether a
+	// local-grant fallback applies, not object presence; callers key off data).
+	data, _, err = pc.Get(context.Background(), "sess-token-123", "file/doc1")
+	if err != nil {
+		t.Fatalf("Get after delete: %v", err)
+	}
+	if data != nil {
+		t.Fatalf("Get after delete = %q, want nil (object removed)", data)
+	}
+}
+
+// TestPresignClient_Delete_IdempotentOnAlreadyGone asserts a second delete of
+// an object the gateway no longer has (404) is treated as success, matching
+// OfficeS3Client.Delete's idempotent-on-404 behaviour.
+func TestPresignClient_Delete_IdempotentOnAlreadyGone(t *testing.T) {
+	gws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer gws.Close()
+
+	pc := NewPresignClient(gws.URL)
+	if err := pc.Delete(context.Background(), "s", "file/gone"); err != nil {
+		t.Fatalf("Delete on already-absent object should be nil (idempotent), got %v", err)
+	}
+}
+
+// TestPresignClient_Delete_GatewayError_Propagates mirrors
+// TestPresignClient_GatewayError_Propagates for the delete path.
+func TestPresignClient_Delete_GatewayError_Propagates(t *testing.T) {
+	gws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden) // e.g. key outside app's own prefix
+	}))
+	defer gws.Close()
+	pc := NewPresignClient(gws.URL)
+	if err := pc.Delete(context.Background(), "s", "file/x"); err == nil {
+		t.Fatalf("expected an error when the gateway returns 403")
+	}
+}
+
+// TestPresignClient_Delete_SendsAppRelativeKey asserts Delete always presents
+// app_id="office" plus the RAW relative key (never a pre-composed
+// "<userID>/office/…" path) — the gateway is the only party allowed to compose
+// the full key, which is what keeps Office from ever deleting outside its own
+// per-user/per-app prefix (cross-app/cross-user isolation).
+func TestPresignClient_Delete_SendsAppRelativeKey(t *testing.T) {
+	var mu sync.Mutex
+	var gotAppID, gotKey string
+	gws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var raw map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		mu.Lock()
+		gotAppID, gotKey = raw["app_id"], raw["key"]
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer gws.Close()
+
+	pc := NewPresignClient(gws.URL)
+	if err := pc.Delete(context.Background(), "s", "file/doc1"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if gotAppID != PresignAppID {
+		t.Errorf("delete app_id = %q, want %q", gotAppID, PresignAppID)
+	}
+	if gotKey != "file/doc1" {
+		t.Errorf("delete key = %q, want file/doc1 (relative — gateway composes the user/app prefix, never Office)", gotKey)
 	}
 }
 
