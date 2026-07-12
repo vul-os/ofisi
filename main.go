@@ -234,6 +234,11 @@ func main() {
 		log.Printf("[rate-limit] write/collab rate limiting disabled (--no-rate-limit-writes)")
 	}
 
+	// The shells' auth boundary (RequireAuth.jsx) — behind the SAME gate the rest
+	// of the protected surface uses, so its 401 means exactly what the server
+	// means by "not authenticated" (product JWT OR CP session/app token).
+	protected.GET("/auth/me", authHandler.Me)
+
 	// Standalone system surface: honest runtime facts for the self-hosted
 	// Settings/Admin UI, plus authenticated self-service password change.
 	systemHandler := handlers.NewSystemHandler(cfg, Version, integrationMode, mode.String())

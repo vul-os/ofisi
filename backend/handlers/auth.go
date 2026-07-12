@@ -117,6 +117,25 @@ func requestIsHTTPS(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }
 
+// Me is the shells' auth boundary (src/shells/RequireAuth.jsx): it answers "is
+// the caller authenticated, and as whom", 401 when not.
+//
+// It MUST sit behind the same AuthWithSSO gate the protected routes use, so its
+// verdict matches what the server actually enforces. That is why this is not
+// simply /auth/status: Status reports only on Office's OWN product JWT, and in
+// cloud the user is authenticated by the CP session/app token instead — so a
+// shell keyed off Status would bounce every SSO user into a login redirect loop.
+// Reaching this handler at all means the middleware already authenticated the
+// request; an unauthenticated caller is rejected upstream with 401.
+func (h *AuthHandler) Me(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"authenticated": true,
+		"user_id":       c.GetString(middleware.CtxUserID),
+		"tenant_id":     c.GetString(middleware.CtxTenantID),
+		"is_admin":      c.GetBool(middleware.CtxIsAdmin),
+	})
+}
+
 func (h *AuthHandler) Status(c *gin.Context) {
 	authenticated := false
 	if h.cfg.Auth.Enabled {
