@@ -238,6 +238,42 @@ func (a *FileAuthz) requireEditor(c *gin.Context, fileID string) bool {
 	return true
 }
 
+// requireCommenter enforces that the requester has at least commenter rights
+// (commenter, editor, or owner, or admin). Plain viewers may read a file's
+// comments/suggestions but must NOT be able to create, edit, or delete them —
+// fileacl.RoleCommenter is exactly the role designed for this, but until this
+// method existed every comment/suggestion mutation only called require() (plain
+// read access), so a viewer-shared user could comment/suggest despite being
+// read-only (ACL bypass). Returns false with 404 if the caller has no access,
+// or 403 if they are a read-only viewer.
+func (a *FileAuthz) requireCommenter(c *gin.Context, fileID string) bool {
+	// Basic access check — returns 404 on full denial.
+	if !a.require(c, fileID) {
+		return false
+	}
+	if a == nil || !a.authEnabled {
+		return true
+	}
+	if c.GetBool(middleware.CtxIsAdmin) {
+		return true
+	}
+	role, ok, err := a.acl.GetRole(fileID, requesterID(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "ACL check failed"})
+		return false
+	}
+	if !ok {
+		// No ACL record (unowned/legacy): require() already passed, allow.
+		return true
+	}
+	// Fail closed: viewers may read but not comment/suggest.
+	if role == fileacl.RoleViewer {
+		c.JSON(http.StatusForbidden, gin.H{"error": "your role does not permit commenting on this file"})
+		return false
+	}
+	return true
+}
+
 // CanAccessAs reports whether accountID may access fileID, WITHOUT a gin
 // context. It mirrors canAccess for non-HTTP callers that act on behalf of a
 // specific account and are never admins — notably the Apps & Bots platform

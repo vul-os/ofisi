@@ -27,6 +27,12 @@ func NewSuggestionHandler(store storage.Storage) *SuggestionHandler {
 	return &SuggestionHandler{store: store, authz: SharedFileAuthz()}
 }
 
+// NewSuggestionHandlerWith builds a handler over a caller-supplied authz store
+// (tests that exercise role enforcement without the process-wide singleton).
+func NewSuggestionHandlerWith(store storage.Storage, authz *FileAuthz) *SuggestionHandler {
+	return &SuggestionHandler{store: store, authz: authz}
+}
+
 // List returns all suggestions for a file.
 func (h *SuggestionHandler) List(c *gin.Context) {
 	fileID := c.Param("id")
@@ -47,7 +53,7 @@ func (h *SuggestionHandler) List(c *gin.Context) {
 // Create records a new suggestion (insert or delete proposal).
 func (h *SuggestionHandler) Create(c *gin.Context) {
 	fileID := c.Param("id")
-	if !h.authz.require(c, fileID) {
+	if !h.authz.requireCommenter(c, fileID) {
 		return
 	}
 	var req models.CreateSuggestionRequest
@@ -81,7 +87,7 @@ func (h *SuggestionHandler) Update(c *gin.Context) {
 	fileID := c.Param("id")
 	suggestionID := c.Param("sid")
 
-	if !h.authz.require(c, fileID) {
+	if !h.authz.requireCommenter(c, fileID) {
 		return
 	}
 
@@ -119,7 +125,7 @@ func (h *SuggestionHandler) Update(c *gin.Context) {
 func (h *SuggestionHandler) Delete(c *gin.Context) {
 	fileID := c.Param("id")
 	suggestionID := c.Param("sid")
-	if !h.authz.require(c, fileID) {
+	if !h.authz.requireCommenter(c, fileID) {
 		return
 	}
 	if err := h.store.DeleteSuggestion(fileID, suggestionID); err != nil {

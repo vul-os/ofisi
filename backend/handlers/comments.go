@@ -79,7 +79,7 @@ func (h *CommentHandler) List(c *gin.Context) {
 // Create adds a new comment anchored to a file location.
 func (h *CommentHandler) Create(c *gin.Context) {
 	fileID := c.Param("id")
-	if !h.authz.require(c, fileID) {
+	if !h.authz.requireCommenter(c, fileID) {
 		return
 	}
 	// OFFICE ACCESS GATE: a suspended / office-disabled account may not comment.
@@ -189,7 +189,7 @@ func (h *CommentHandler) Update(c *gin.Context) {
 	fileID := c.Param("id")
 	commentID := c.Param("cid")
 
-	if !h.authz.require(c, fileID) {
+	if !h.authz.requireCommenter(c, fileID) {
 		return
 	}
 
@@ -233,7 +233,7 @@ func (h *CommentHandler) Update(c *gin.Context) {
 func (h *CommentHandler) Delete(c *gin.Context) {
 	fileID := c.Param("id")
 	commentID := c.Param("cid")
-	if !h.authz.require(c, fileID) {
+	if !h.authz.requireCommenter(c, fileID) {
 		return
 	}
 	// AUTHORSHIP: only the comment's author (or an admin) may delete it; file
@@ -259,7 +259,7 @@ func (h *CommentHandler) CreateReply(c *gin.Context) {
 	fileID := c.Param("id")
 	commentID := c.Param("cid")
 
-	if !h.authz.require(c, fileID) {
+	if !h.authz.requireCommenter(c, fileID) {
 		return
 	}
 
@@ -300,7 +300,7 @@ func (h *CommentHandler) UpdateReply(c *gin.Context) {
 	commentID := c.Param("cid")
 	replyID := c.Param("rid")
 
-	if !h.authz.require(c, c.Param("id")) {
+	if !h.authz.requireCommenter(c, c.Param("id")) {
 		return
 	}
 
@@ -338,7 +338,7 @@ func (h *CommentHandler) DeleteReply(c *gin.Context) {
 	commentID := c.Param("cid")
 	replyID := c.Param("rid")
 
-	if !h.authz.require(c, c.Param("id")) {
+	if !h.authz.requireCommenter(c, c.Param("id")) {
 		return
 	}
 

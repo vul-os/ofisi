@@ -179,6 +179,48 @@ func TestRequireEditor_StorageErrorFailsClosed(t *testing.T) {
 	}
 }
 
+func TestRequireCommenter_DeniesViewerOnly(t *testing.T) {
+	acl := fileacl.NewNullStore()
+	az := NewFileAuthzWithAuth(acl, true)
+	_ = acl.SetOwner("doc", "alice")
+	_ = acl.ShareWithRole("doc", "vic", fileacl.RoleViewer)
+	_ = acl.ShareWithRole("doc", "com", fileacl.RoleCommenter)
+	_ = acl.ShareWithRole("doc", "ed", fileacl.RoleEditor)
+
+	c := ctxFor("vic", false)
+	if az.requireCommenter(c, "doc") {
+		t.Error("VULN: viewer must NOT pass requireCommenter")
+	}
+	if got := c.Writer.Status(); got != 403 {
+		t.Errorf("viewer requireCommenter denial status = %d; want 403", got)
+	}
+
+	for _, u := range []string{"com", "ed", "alice"} {
+		if !az.requireCommenter(ctxFor(u, false), "doc") {
+			t.Errorf("%s must pass requireCommenter", u)
+		}
+	}
+	// Admin bypasses role checks entirely.
+	if !az.requireCommenter(ctxFor("root", true), "doc") {
+		t.Error("admin must pass requireCommenter")
+	}
+}
+
+func TestRequireCommenter_StorageErrorFailsClosed(t *testing.T) {
+	az := NewFileAuthzWithAuth(errStore{}, true)
+	c := ctxFor("x", false)
+	if az.requireCommenter(c, "doc") {
+		t.Error("requireCommenter must fail closed on storage error")
+	}
+}
+
+func TestRequireCommenter_DisabledAuthIsPermissive(t *testing.T) {
+	az := NewFileAuthz(fileacl.NewNullStore()) // authEnabled=false
+	if !az.requireCommenter(ctxFor("self", false), "anydoc") {
+		t.Error("single-user mode requireCommenter should pass")
+	}
+}
+
 func TestRequireEditor_DisabledAuthIsPermissive(t *testing.T) {
 	// Single-user mode: role enforcement is a no-op beyond base access.
 	az := NewFileAuthz(fileacl.NewNullStore()) // authEnabled=false
