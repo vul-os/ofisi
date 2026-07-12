@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,14 +22,35 @@ import (
 )
 
 type attemptRecord struct {
-	count      int
+	count       int
 	lockedUntil time.Time
+	// lastSeen is updated on every request touching this record. It drives the
+	// TTL sweep in sweepAttemptsLocked so stale per-IP entries (the client never
+	// came back, or the IP was spoofed/rotated) don't accumulate forever.
+	lastSeen time.Time
 }
+
+// attemptTTL bounds how long a per-IP login-attempt record is kept after its
+// last activity. Without this, AuthHandler.attempts (keyed by client IP, which
+// an attacker fully controls via spoofed/rotating source addresses or the
+// X-Forwarded-For chain) grows without bound — an unbounded-memory DoS.
+const attemptTTL = 30 * time.Minute
+
+// maxAttemptRecords hard-caps the map size as a second line of defense: even
+// under a burst faster than the TTL sweep interval, the map is never allowed
+// to grow past this many tracked IPs — the oldest entries are evicted first.
+const maxAttemptRecords = 10000
+
+// attemptSweepInterval is the minimum spacing between sweeps so a busy login
+// endpoint doesn't pay the O(n) sweep cost on every single request.
+const attemptSweepInterval = time.Minute
 
 type AuthHandler struct {
 	cfg      *config.Config
 	mu       sync.Mutex
 	attempts map[string]*attemptRecord
+	// lastSweep records when sweepAttemptsLocked last ran (mu-protected).
+	lastSweep time.Time
 	// creds is the per-user credential store. When it holds registered users,
 	// login verifies against it and the JWT subject is bound to the
 	// authenticated account (no longer self-asserted by the client).
@@ -111,6 +133,40 @@ func (h *AuthHandler) Status(c *gin.Context) {
 	})
 }
 
+// sweepAttemptsLocked evicts login-attempt records that have gone quiet for
+// longer than attemptTTL, then — if the map is still oversized (e.g. a burst
+// of distinct IPs within the TTL window) — evicts the oldest remaining
+// entries by lastSeen until the map is back at or under maxAttemptRecords.
+// Caller MUST hold h.mu. Rate-limited by lastSweep/attemptSweepInterval so a
+// busy login endpoint doesn't pay the O(n) scan on every call.
+func (h *AuthHandler) sweepAttemptsLocked(now time.Time) {
+	if now.Sub(h.lastSweep) < attemptSweepInterval && len(h.attempts) <= maxAttemptRecords {
+		return
+	}
+	h.lastSweep = now
+	for ip, rec := range h.attempts {
+		if now.Sub(rec.lastSeen) > attemptTTL {
+			delete(h.attempts, ip)
+		}
+	}
+	if len(h.attempts) <= maxAttemptRecords {
+		return
+	}
+	// Still oversized: evict the oldest entries (by lastSeen) down to the cap.
+	type ipSeen struct {
+		ip   string
+		seen time.Time
+	}
+	entries := make([]ipSeen, 0, len(h.attempts))
+	for ip, rec := range h.attempts {
+		entries = append(entries, ipSeen{ip, rec.lastSeen})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].seen.Before(entries[j].seen) })
+	for _, e := range entries[:len(entries)-maxAttemptRecords] {
+		delete(h.attempts, e.ip)
+	}
+}
+
 func (h *AuthHandler) Login(c *gin.Context) {
 	if !h.cfg.Auth.Enabled {
 		c.JSON(http.StatusOK, models.LoginResponse{Message: "auth not required"})
@@ -118,16 +174,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	ip := c.ClientIP()
+	now := time.Now()
 
 	h.mu.Lock()
+	h.sweepAttemptsLocked(now)
 	rec, ok := h.attempts[ip]
 	if !ok {
 		rec = &attemptRecord{}
 		h.attempts[ip] = rec
 	}
+	rec.lastSeen = now
 
 	// Check lockout
-	if time.Now().Before(rec.lockedUntil) {
+	if now.Before(rec.lockedUntil) {
 		h.mu.Unlock()
 		c.JSON(http.StatusTooManyRequests, models.ErrorResponse{
 			Error:       "account locked",
