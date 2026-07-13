@@ -46,6 +46,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"time"
 
 	"vulos-office/backend/docsync"
 	"vulos-office/backend/realtime"
@@ -62,7 +63,23 @@ type DocSyncHandler struct {
 	authz *FileAuthz
 	ops   docsync.Store
 	hub   *realtime.Hub
+
+	// recheckInterval is how often an OPEN SSE stream re-authorizes the reader
+	// against the live per-document ACL (see Stream). 0 means the default
+	// (defaultStreamRecheckInterval). It is a field (not a const) only so tests
+	// can drive the re-check cadence deterministically without real waits.
+	recheckInterval time.Duration
 }
+
+// defaultStreamRecheckInterval bounds how often an open collab SSE stream
+// re-checks the per-document READ ACL. The connect-time check (Stream) is not
+// enough on its own: a share can be REVOKED while a stream is held open, and
+// heartbeats would otherwise keep the now-unauthorized reader receiving every
+// op/snapshot/presence frame forever. We re-authorize on this cadence (aligned
+// with the heartbeat interval so it is a natural, non-hot tick) and drop the
+// stream the moment access is no longer granted. Kept coarse so the ACL store
+// is not hammered — the confidentiality window is bounded to one interval.
+const defaultStreamRecheckInterval = realtime.HeartbeatInterval
 
 // NewDocSyncHandler builds the handler over the shared storage + authorizer, a
 // durable op-log store, and a fresh realtime hub. When ops is nil an in-memory
@@ -131,10 +148,23 @@ func (h *DocSyncHandler) Stream(c *gin.Context) {
 	c.Writer.Flush()
 
 	ctx := c.Request.Context()
+	// Periodically RE-AUTHORIZE the open stream: the connect-time ACL check
+	// above is a point-in-time grant, but a share can be REVOKED mid-stream.
+	// Without this a reader whose access is removed keeps receiving every frame
+	// for the life of the connection (heartbeats keep it alive). We re-check on
+	// a coarse cadence and drop the stream (unsubscribe via the deferred Cancel
+	// + close the SSE) the moment access is no longer granted. Fail CLOSED.
+	recheck := time.NewTicker(h.streamRecheckInterval())
+	defer recheck.Stop()
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case <-ctx.Done():
 			return false
+		case <-recheck.C:
+			if !h.streamStillAuthorized(c, id) {
+				return false // access revoked/errored → terminate the stream
+			}
+			return true
 		case frame, open := <-sub.Frames:
 			if !open {
 				return false // dropped (slow consumer) or hub closed
@@ -145,6 +175,28 @@ func (h *DocSyncHandler) Stream(c *gin.Context) {
 			return true
 		}
 	})
+}
+
+// streamRecheckInterval is the effective cadence for the open-stream ACL
+// re-check (see Stream). Tests may set h.recheckInterval to a small value to
+// drive the re-check deterministically; production uses the coarse default.
+func (h *DocSyncHandler) streamRecheckInterval() time.Duration {
+	if h.recheckInterval > 0 {
+		return h.recheckInterval
+	}
+	return defaultStreamRecheckInterval
+}
+
+// streamStillAuthorized re-evaluates the per-document READ ACL for an already
+// open SSE stream. It returns true only while the requester still has read
+// access to the document. It uses canAccess directly (NOT require) because the
+// SSE response is already committed with a 200 + event-stream body, so it must
+// NOT write a 404 — the caller simply ends the stream when this returns false.
+// Fails CLOSED: canAccess already returns false on an ACL-store error, so a
+// transient store failure drops the stream rather than leaving a revoked reader
+// subscribed. This is the exact same predicate that gated the connect.
+func (h *DocSyncHandler) streamStillAuthorized(c *gin.Context, id string) bool {
+	return h.authz.canAccess(c, id)
 }
 
 // State returns the current authoritative CRDT state (latest snapshot + trailing
@@ -257,11 +309,11 @@ func (h *DocSyncHandler) Publish(c *gin.Context) {
 // verified session on the server; the client-supplied accountId is ignored for
 // authority (it is only echoed for the sender's OWN tab colour stability).
 type presenceRequest struct {
-	Origin      string          `json:"origin"`                // sending tab/replica id (self-echo filter)
-	DisplayName string          `json:"display_name,omitempty"`// human label shown in the roster
-	Color       string          `json:"color,omitempty"`       // caret/avatar colour (cosmetic)
-	Cursor      json.RawMessage `json:"cursor,omitempty"`      // opaque {type,from,to,slideId?} — client-shaped
-	Gone        bool            `json:"gone,omitempty"`        // true when the sender is leaving (roster removal)
+	Origin      string          `json:"origin"`                 // sending tab/replica id (self-echo filter)
+	DisplayName string          `json:"display_name,omitempty"` // human label shown in the roster
+	Color       string          `json:"color,omitempty"`        // caret/avatar colour (cosmetic)
+	Cursor      json.RawMessage `json:"cursor,omitempty"`       // opaque {type,from,to,slideId?} — client-shaped
+	Gone        bool            `json:"gone,omitempty"`         // true when the sender is leaving (roster removal)
 }
 
 // maxPresenceLabelLen bounds the display name so a peer cannot inject a huge

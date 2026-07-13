@@ -431,6 +431,122 @@ func TestDocSync_NullStoreDegradesGracefully(t *testing.T) {
 	}
 }
 
+// ─── Stream re-authorization: revoked access terminates an OPEN stream ───────
+//
+// The connect-time ACL check is point-in-time; a share can be REVOKED while the
+// SSE stream is held open. Without a periodic re-check the reader keeps every
+// op/snapshot/presence frame for the life of the connection (heartbeats keep it
+// alive). These tests cover the re-check decision (deterministic, no time) and
+// the loop wiring (short injected interval).
+
+// The core decision helper: while access is granted it returns true; once the
+// share is un-shared it returns false; and it fails CLOSED on a store error.
+// Fully deterministic — no timers, no goroutines.
+func TestDocSync_StreamStillAuthorized_Decision(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	if err := acl.ShareWithRole("doc1", "vic", fileacl.RoleViewer); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a gin context carrying vic's verified identity (no real request).
+	ctxFor := func(user string) *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Set(middleware.CtxAuthenticated, true)
+		c.Set(middleware.CtxUserID, user)
+		return c
+	}
+
+	// While shared as a viewer, the stream stays authorized.
+	if !h.streamStillAuthorized(ctxFor("vic"), "doc1") {
+		t.Fatal("viewer with an active share must remain authorized")
+	}
+	// Revoke vic's share — the next re-check must deny.
+	if err := acl.Unshare("doc1", "vic"); err != nil {
+		t.Fatal(err)
+	}
+	if h.streamStillAuthorized(ctxFor("vic"), "doc1") {
+		t.Fatal("revoked viewer must NOT remain authorized (confidentiality leak)")
+	}
+	// A stranger who never had access is likewise denied.
+	if h.streamStillAuthorized(ctxFor("mallory"), "doc1") {
+		t.Fatal("stranger must not be authorized")
+	}
+	// The still-authorized owner is unaffected.
+	if !h.streamStillAuthorized(ctxFor("alice"), "doc1") {
+		t.Fatal("owner must remain authorized")
+	}
+}
+
+// End-to-end over the real SSE write pump: a subscriber whose access is REVOKED
+// mid-stream has its stream terminated on the next re-check tick, while a
+// still-authorized subscriber is unaffected. Driven by a short injected
+// re-check interval so no real ACL cadence is waited on.
+func TestDocSync_RevokedSubscriberStreamTerminated(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	// Drive the re-check fast + deterministically (no real 25s wait).
+	h.recheckInterval = 15 * time.Millisecond
+	seedDoc(t, st, acl, "doc1", "alice")
+	if err := acl.ShareWithRole("doc1", "vic", fileacl.RoleViewer); err != nil {
+		t.Fatal(err)
+	}
+
+	// vic (viewer) and alice (owner) both hold an open stream on doc1.
+	vicEvents, vicCleanup := startSSE(t, h, "vic", "doc1")
+	defer vicCleanup()
+	aliceEvents, aliceCleanup := startSSE(t, h, "alice", "doc1")
+	defer aliceCleanup()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for h.hub.SubscriberCount("doc1") < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if h.hub.SubscriberCount("doc1") < 2 {
+		t.Fatalf("both streams should be registered, got %d", h.hub.SubscriberCount("doc1"))
+	}
+
+	// Revoke vic's share while the stream is open.
+	if err := acl.Unshare("doc1", "vic"); err != nil {
+		t.Fatal(err)
+	}
+
+	// vic's event channel must CLOSE (stream terminated by the re-check) — and
+	// alice's must survive. Drain vic until closed (skip any in-flight pings).
+	vicClosed := false
+	drainDeadline := time.After(3 * time.Second)
+	for !vicClosed {
+		select {
+		case _, open := <-vicEvents:
+			if !open {
+				vicClosed = true
+			}
+		case <-drainDeadline:
+			t.Fatal("revoked subscriber's stream was NOT terminated on the re-check tick")
+		}
+	}
+
+	// The still-authorized owner keeps her stream: an op published now reaches her.
+	alice := docSyncRouter(h, "alice", false)
+	if w := postOps(alice, "doc1", docSyncOpsRequest{Origin: "alice-tab", Ops: []json.RawMessage{insertOp("alice", 1, "A")}}); w.Code != http.StatusOK {
+		t.Fatalf("alice publish: %d (%s)", w.Code, w.Body.String())
+	}
+	got := false
+	waitOp := time.After(3 * time.Second)
+	for !got {
+		select {
+		case ev, open := <-aliceEvents:
+			if !open {
+				t.Fatal("still-authorized owner's stream was wrongly terminated")
+			}
+			if ev.Type == "op" && ev.DocID == "doc1" {
+				got = true
+			}
+		case <-waitOp:
+			t.Fatal("owner never received the op — her stream was disrupted")
+		}
+	}
+}
+
 // ─── Presence (live cursors + roster) — WAVE-COLLAB-PRESENCE ─────────────────
 //
 // Presence is the CLOUD-path live-cursor/roster relay. Its security contract:
@@ -589,9 +705,9 @@ func TestDocSyncPresence_ColorSanitized(t *testing.T) {
 		{"#aabbcc", "#aabbcc"},
 		{"hsl(120,65%,50%)", "hsl(120,65%,50%)"},
 		{"rebeccapurple", "rebeccapurple"},
-		{"red;position:fixed", ""},              // injection dropped
-		{"url(http://evil/x)", ""},              // url() dropped
-		{"#f00) ; background:url(x)", ""},       // parenthetical injection dropped
+		{"red;position:fixed", ""},        // injection dropped
+		{"url(http://evil/x)", ""},        // url() dropped
+		{"#f00) ; background:url(x)", ""}, // parenthetical injection dropped
 		{"", ""},
 	}
 	for _, tc := range cases {
