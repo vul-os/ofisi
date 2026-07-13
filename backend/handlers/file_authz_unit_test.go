@@ -229,6 +229,98 @@ func TestRequireEditor_DisabledAuthIsPermissive(t *testing.T) {
 	}
 }
 
+// --- SSO-only multi-tenant posture (regression) ---------------------------
+//
+// Regression for the fail-OPEN bug where the per-file ACL ran in single-user
+// posture in an "SSO-only" deployment: native product-JWT auth is DISABLED
+// (cfg.Auth.Enabled == false) but a session introspector is wired, making the
+// deployment first-class multi-user. The composition root now passes
+//
+//	cfg.Auth.Enabled || sessionIntrospector != nil
+//
+// as the FileAuthz posture flag, so FileAuthz.authEnabled == true even though
+// native auth is off. These tests assert that with the flag true the
+// isolation/role enforcement holds exactly as in native-auth multi-tenant mode
+// (the value of the flag, not its source, is what matters to FileAuthz).
+
+// TestSSOOnly_UnrecordedDocDeniedToNonOwner proves (a): under the SSO-only
+// posture an UNRECORDED/legacy doc is NOT globally readable — a non-owner tenant
+// is denied. Under the old single-user posture this fell OPEN and leaked the doc.
+func TestSSOOnly_UnrecordedDocDeniedToNonOwner(t *testing.T) {
+	acl := fileacl.NewNullStore()
+	// authEnabled=true is the multi-tenant posture the SSO-only composition root
+	// now produces via `cfg.Auth.Enabled || sessionIntrospector != nil`, even with
+	// cfg.Auth.Enabled == false.
+	az := NewFileAuthzWithAuth(acl, true)
+
+	// No SetOwner: "unowned-legacy" has no ACL record at all.
+	c := ctxFor("mallory", false)
+	c.Params = gin.Params{{Key: "id", Value: "unowned-legacy"}}
+	if az.canAccess(c, "unowned-legacy") {
+		t.Error("VULN: unrecorded doc must be DENIED to a non-owner tenant in SSO-only posture")
+	}
+	// require() must translate that to a 404 (no existence leak) and return false.
+	if az.require(c, "unowned-legacy") {
+		t.Error("require() must deny an unrecorded doc in SSO-only posture")
+	}
+	if got := c.Writer.Status(); got != 404 {
+		t.Errorf("require() denial status = %d; want 404", got)
+	}
+	// Non-HTTP adapter path must agree.
+	if az.CanAccessAs("unowned-legacy", "mallory") {
+		t.Error("VULN: CanAccessAs must deny an unrecorded doc in SSO-only posture")
+	}
+}
+
+// TestSSOOnly_ViewerRefusedOwnerAndEditorOps proves (b): under the SSO-only
+// posture a viewer-only collaborator is refused owner/editor/commenter
+// operations (no viewer→editor/owner escalation). Under the old single-user
+// posture every require* short-circuited to true.
+func TestSSOOnly_ViewerRefusedOwnerAndEditorOps(t *testing.T) {
+	acl := fileacl.NewNullStore()
+	az := NewFileAuthzWithAuth(acl, true) // SSO-only multi-tenant posture
+	_ = acl.SetOwner("doc", "alice")
+	_ = acl.ShareWithRole("doc", "victor", fileacl.RoleViewer) // read-only
+
+	// Owner op (transfer-owner / delete): viewer must be refused with 403.
+	cOwner := ctxFor("victor", false)
+	cOwner.Params = gin.Params{{Key: "id", Value: "doc"}}
+	if az.requireOwner(cOwner, "doc") {
+		t.Error("VULN: viewer must NOT pass requireOwner in SSO-only posture")
+	}
+	if got := cOwner.Writer.Status(); got != 403 {
+		t.Errorf("requireOwner denial status = %d; want 403", got)
+	}
+
+	// Editor op (PATCH content): viewer must be refused with 403.
+	cEdit := ctxFor("victor", false)
+	cEdit.Params = gin.Params{{Key: "id", Value: "doc"}}
+	if az.requireEditor(cEdit, "doc") {
+		t.Error("VULN: viewer must NOT pass requireEditor in SSO-only posture")
+	}
+	if got := cEdit.Writer.Status(); got != 403 {
+		t.Errorf("requireEditor denial status = %d; want 403", got)
+	}
+
+	// Commenter op: viewer must be refused with 403.
+	cComment := ctxFor("victor", false)
+	cComment.Params = gin.Params{{Key: "id", Value: "doc"}}
+	if az.requireCommenter(cComment, "doc") {
+		t.Error("VULN: viewer must NOT pass requireCommenter in SSO-only posture")
+	}
+	if got := cComment.Writer.Status(); got != 403 {
+		t.Errorf("requireCommenter denial status = %d; want 403", got)
+	}
+
+	// Sanity: the owner still passes all three (enforcement is not over-broad).
+	if !az.requireOwner(ctxFor("alice", false), "doc") {
+		t.Error("owner must still pass requireOwner in SSO-only posture")
+	}
+	if !az.requireEditor(ctxFor("alice", false), "doc") {
+		t.Error("owner must still pass requireEditor in SSO-only posture")
+	}
+}
+
 // --- canAccessEnvelopeACL fallback ----------------------------------------
 
 func TestCanAccessEnvelopeACL_FallsBackToEnvelopeID(t *testing.T) {

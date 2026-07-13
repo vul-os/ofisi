@@ -24,14 +24,20 @@ import (
 
 // FileAuthz wraps a fileacl.Store and provides gin-aware access enforcement.
 //
-// authEnabled mirrors cfg.Auth.Enabled. It changes the fail-safe posture:
+// authEnabled is the MULTI-TENANT posture flag. It is true whenever ANY identity
+// source is active — native product-JWT auth (cfg.Auth.Enabled) OR SSO session
+// introspection (IDENTITY_URL wired). It is NOT native auth alone: an SSO-only
+// deployment has cfg.Auth.Enabled == false yet is a first-class multi-user
+// deployment, so the caller passes cfg.Auth.Enabled || sessionIntrospector != nil.
+// It changes the fail-safe posture:
 //
-//   - auth DISABLED (OSS single-user / local mode): a degraded/nil store or an
-//     unowned/legacy file fails OPEN so the operator is never locked out of
+//   - single-user (OSS local mode, NO identity source): a degraded/nil store or
+//     an unowned/legacy file fails OPEN so the operator is never locked out of
 //     pre-existing documents.
-//   - auth ENABLED (multi-tenant): NO fail-open. A nil/degraded store denies,
-//     and an unowned file is NOT globally readable (it is denied for non-owners)
-//     so a missing owner record can never leak another tenant's document.
+//   - multi-tenant (native auth OR SSO): NO fail-open. A nil/degraded store
+//     denies, and an unowned file is NOT globally readable (it is denied for
+//     non-owners) so a missing owner record can never leak another tenant's
+//     document.
 type FileAuthz struct {
 	acl         fileacl.Store
 	authEnabled bool
@@ -73,10 +79,13 @@ func SharedFileAuthz() *FileAuthz {
 // main() before constructing the file handlers; it pins the sync.Once so later
 // SharedFileAuthz() calls return the same authorizer.
 //
-// authEnabled MUST reflect cfg.Auth.Enabled. When auth is enabled the ACL store
-// is load-bearing for multi-tenant isolation, so a failure to open it is FATAL
-// (we refuse to boot in a degraded, fail-open posture). When auth is disabled
-// (OSS single-user) a degraded in-memory NullStore is acceptable.
+// authEnabled MUST be the MULTI-TENANT posture: cfg.Auth.Enabled OR an SSO
+// session introspector is wired (IDENTITY_URL set). In that posture the ACL
+// store is load-bearing for cross-tenant isolation, so a failure to open it is
+// FATAL (we refuse to boot in a degraded, fail-open posture) — this covers the
+// SSO-only deployment where native auth is off but the box still brokers many
+// users. Only in true single-user mode (no identity source at all) is a degraded
+// in-memory NullStore acceptable.
 func InitFileAuthz(store storage.Storage, authEnabled bool) *FileAuthz {
 	fileAuthzOnce.Do(func() {
 		if p, ok := store.(storage.ACLProvider); ok {

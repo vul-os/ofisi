@@ -259,7 +259,17 @@ func main() {
 	// handler is constructed. Under Postgres this co-locates ACL ownership in the
 	// same DB as the files (transactional + replicated); under sqlite/local it
 	// uses the separate sqlite ACL store.
-	fileAuthz := handlers.InitFileAuthz(store, cfg.Auth.Enabled)
+	//
+	// The second argument is the MULTI-TENANT posture, NOT native-auth alone. It
+	// must track WHICHEVER identity source is active — the exact condition that
+	// gates the AuthWithSSO/V1Auth middleware above (cfg.Auth.Enabled ||
+	// sessionIntrospector != nil). In SSO-only mode native product-JWT auth is
+	// OFF (cfg.Auth.Enabled == false) but the session introspector IS wired, so
+	// the deployment is fully multi-tenant. Passing cfg.Auth.Enabled alone here
+	// would leave FileAuthz in a single-user fail-OPEN posture (unrecorded/legacy
+	// docs readable cross-tenant, viewer→editor/owner role checks skipped, and a
+	// degraded ACL store silently fail-open) — a cross-tenant isolation collapse.
+	fileAuthz := handlers.InitFileAuthz(store, cfg.Auth.Enabled || sessionIntrospector != nil)
 
 	fileHandler := handlers.NewFileHandler(store)
 	protected.GET("/files", fileHandler.List)
