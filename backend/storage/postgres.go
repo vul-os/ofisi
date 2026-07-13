@@ -80,16 +80,13 @@ func (s *PostgresStorage) migrate() error {
 			type        TEXT NOT NULL,
 			content     JSONB,
 			rev         BIGINT NOT NULL DEFAULT 1,
+			parent_id   TEXT NOT NULL DEFAULT '',
+			starred     BOOLEAN NOT NULL DEFAULT FALSE,
+			trashed     BOOLEAN NOT NULL DEFAULT FALSE,
+			trashed_at  TIMESTAMPTZ,
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);
-		-- Idempotent migration for pre-existing deployments (P2 optimistic concurrency).
-		ALTER TABLE files ADD COLUMN IF NOT EXISTS rev BIGINT NOT NULL DEFAULT 1;
-		-- Parity: file organization (folders / star / trash). Idempotent migrations.
-		ALTER TABLE files ADD COLUMN IF NOT EXISTS parent_id  TEXT NOT NULL DEFAULT '';
-		ALTER TABLE files ADD COLUMN IF NOT EXISTS starred    BOOLEAN NOT NULL DEFAULT FALSE;
-		ALTER TABLE files ADD COLUMN IF NOT EXISTS trashed    BOOLEAN NOT NULL DEFAULT FALSE;
-		ALTER TABLE files ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMPTZ;
 		CREATE TABLE IF NOT EXISTS folders (
 			id          TEXT PRIMARY KEY,
 			name        TEXT NOT NULL,
@@ -105,14 +102,12 @@ func (s *PostgresStorage) migrate() error {
 			file_id     TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
 			name        TEXT NOT NULL,
 			content     JSONB,
+			author      TEXT NOT NULL DEFAULT '',
+			label       TEXT NOT NULL DEFAULT '',
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			PRIMARY KEY (file_id, id)
 		);
 		CREATE INDEX IF NOT EXISTS file_versions_file_id_created ON file_versions (file_id, created_at DESC);
-		-- Per-version author (who made the edit that superseded this snapshot).
-		-- Idempotent migration for pre-existing deployments.
-		ALTER TABLE file_versions ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
-		ALTER TABLE file_versions ADD COLUMN IF NOT EXISTS label  TEXT NOT NULL DEFAULT '';
 		CREATE TABLE IF NOT EXISTS share_links (
 			id            TEXT NOT NULL,
 			file_id       TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -427,11 +422,8 @@ func (s *PostgresStorage) PruneVersions(fileID string, cap int) error {
 }
 
 // LabelVersion updates the label column on an existing version (OFFICE-28).
-// The postgres schema stores label in the versions table (added via ALTER TABLE IF NOT EXISTS).
+// The label column is part of the file_versions schema created in migrate().
 func (s *PostgresStorage) LabelVersion(fileID, versionID, label string) error {
-	// Ensure the label column exists (idempotent migration).
-	_, _ = s.pool.Exec(context.Background(),
-		`ALTER TABLE file_versions ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT ''`)
 	cmd, err := s.pool.Exec(context.Background(),
 		`UPDATE file_versions SET label=$3 WHERE file_id=$1 AND id=$2`,
 		fileID, versionID, label)

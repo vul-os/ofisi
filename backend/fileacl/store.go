@@ -15,10 +15,10 @@
 // collaborator (any role). Write/delete/share operations additionally require a
 // minimum role (see FileAuthz.requireEditor / requireOwner).
 //
-// Migration
-// ---------
-// Existing share rows (created before the role column was introduced) are
-// treated as editors — the same access they had before roles were added.
+// Roles
+// -----
+// A share row carries an explicit role; Share (the role-less helper) grants
+// RoleEditor, and the role column defaults to 'editor' at the storage layer.
 //
 // Persistence is pure-Go modernc SQLite (no CGO). A NullStore (in-memory) is
 // provided for tests and for the degraded path when the DB cannot be opened.
@@ -177,15 +177,6 @@ func (s *SQLiteStore) init() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("fileacl: init schema: %w", err)
-	}
-	// Migration: add role column to existing databases (pre-role schema).
-	// Existing rows default to 'editor', preserving the access they had before
-	// roles were introduced.
-	if _, merr := s.db.Exec(`ALTER TABLE file_shares ADD COLUMN role TEXT NOT NULL DEFAULT 'editor'`); merr != nil {
-		if !strings.Contains(merr.Error(), "duplicate column name") {
-			return fmt.Errorf("fileacl: migrate role column: %w", merr)
-		}
-		// Column already exists — safe to ignore.
 	}
 	return nil
 }

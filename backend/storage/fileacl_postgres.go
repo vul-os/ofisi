@@ -47,9 +47,8 @@ func (s *PostgresStorage) ACLStore() fileacl.Store {
 
 func (a *PostgresACLStore) migrate() {
 	// ON DELETE CASCADE ties the ACL lifecycle to the file: ownership/shares are
-	// removed in the same transaction as the file delete.
-	// The role column (editor/viewer) was added in the role-based ACL audit fix;
-	// existing rows default to 'editor' to preserve pre-role behaviour.
+	// removed in the same transaction as the file delete. The role column
+	// (owner/editor/commenter/viewer) defaults to 'editor'.
 	_, _ = a.pool.Exec(context.Background(), `
 		CREATE TABLE IF NOT EXISTS file_acl_owners (
 			file_id TEXT PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
@@ -64,9 +63,6 @@ func (a *PostgresACLStore) migrate() {
 		CREATE INDEX IF NOT EXISTS idx_file_acl_owners_owner ON file_acl_owners(owner);
 		CREATE INDEX IF NOT EXISTS idx_file_acl_shares_account ON file_acl_shares(account_id);
 	`)
-	// Migration: add role column to existing deployments (idempotent).
-	_, _ = a.pool.Exec(context.Background(),
-		`ALTER TABLE file_acl_shares ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'editor'`)
 }
 
 func (a *PostgresACLStore) SetOwner(fileID, owner string) error {
