@@ -52,6 +52,13 @@ type State struct {
 	Seq  uint64          `json:"seq"`            // highest sequence assigned for this doc
 	Snap json.RawMessage `json:"snap,omitempty"` // latest CRDT snapshot (compaction base)
 	Ops  []OpRecord      `json:"ops"`            // ops recorded after the snapshot
+	// You is the requester's OWN server-verified account id. It is NOT persisted
+	// and is never set by the store (always empty here) — the handler populates it
+	// on the /collab/state response from the verified session so a joining client
+	// learns its own trustworthy identity and can recognize which relayed op frames
+	// are its own echoes (Origin same-tab AND Author == You), without trusting the
+	// client-supplied origin as an authority. See handlers/docsync.go State.
+	You string `json:"you,omitempty"`
 }
 
 // Store is the durable op-log persistence contract. A SQLite implementation is

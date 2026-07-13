@@ -65,6 +65,12 @@ export class ServerCollabSession extends EventTarget {
     this._fileId = fileId
     this._peerId = peerId
     this._crdt = new TextCRDT(peerId)
+    // Our OWN server-verified account id, learned from the /collab/state bootstrap
+    // (`you`). It is the TRUSTWORTHY half of self-echo detection: a relayed op is
+    // ours only when BOTH the same-tab origin AND this author match, so a peer who
+    // forges our origin cannot make us drop their op as a false echo. Null until
+    // bootstrap resolves (offline/local-only) — see the op handler in _openStream.
+    this._myAuthor = null
 
     this._joined = false
     this._live = false
@@ -241,6 +247,9 @@ export class ServerCollabSession extends EventTarget {
       console.warn('[server-collab] bootstrap failed (local-only):', err?.message)
       return
     }
+    // Learn our own server-verified identity so we can distinguish our OWN op
+    // echoes from a peer that merely spoofed our origin (see the op handler).
+    if (state?.you) this._myAuthor = state.you
     let changed = false
     // MERGE the compaction snapshot (union), never a count-gated restore(). If a
     // user edited OFFLINE, their local snapshot holds nodes the server's snapshot
@@ -294,8 +303,18 @@ export class ServerCollabSession extends EventTarget {
         return
       }
       if (ev.type === 'op' && ev.payload) {
-        // Drop our own echo — we already applied it locally in applyLocal.
-        if (ev.origin && ev.origin === this._peerId) return
+        // Drop our own echo — we already applied it locally in applyLocal. A frame
+        // is genuinely OURS only when the same-tab origin matches AND the
+        // SERVER-STAMPED author is our own account: origin alone is client-supplied
+        // and forgeable, so a malicious peer could otherwise set origin to our tab
+        // id and make us drop their real op as a false echo (targeted divergence).
+        // We require the trustworthy author too. When our author is not yet known
+        // (bootstrap offline/local-only — no remote peers to spoof us anyway) we
+        // fall back to the origin-only check, and idempotent apply backstops it.
+        if (
+          ev.origin && ev.origin === this._peerId &&
+          (this._myAuthor == null || ev.author === this._myAuthor)
+        ) return
         if (typeof ev.seq === 'number' && ev.seq > this._seq) this._seq = ev.seq
         // Idempotent apply → dedup by op id, safe even if a p2p peer also
         // delivered this same op.

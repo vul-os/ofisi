@@ -222,6 +222,11 @@ func (h *DocSyncHandler) State(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load collab state"})
 		return
 	}
+	// Hand the joiner its OWN server-verified identity (never persisted, never from
+	// the body) so it can identify its own relayed op echoes by matching BOTH the
+	// same-tab origin AND this trustworthy author — closing the origin-spoof echo
+	// drop even for a pure viewer that never publishes an op. See State docs.
+	st.You = requesterID(c)
 	c.JSON(http.StatusOK, st)
 }
 
@@ -231,6 +236,13 @@ func (h *DocSyncHandler) State(c *gin.Context) {
 // snapshot, both opaque to the server. origin is the producing replica/tab id,
 // echoed back in the fan-out so the producer can drop its own echo. When snap is
 // present it is recorded as the new compaction base (late-joiner bootstrap).
+//
+// origin is a SAME-TAB self-echo hint ONLY and is NEVER trusted as identity: the
+// authoritative producer identity is the SERVER-STAMPED author (= requesterID),
+// attached to the relayed op frame (see Publish + realtime.Event.Author). This is
+// what prevents an editor who spoofs a victim tab's origin from making the victim
+// drop the op as a false echo (targeted-divergence defense) — origin alone can no
+// longer be used as an authority claim.
 type docSyncOpsRequest struct {
 	Origin string            `json:"origin"`
 	Ops    []json.RawMessage `json:"ops"`
@@ -355,6 +367,14 @@ func (h *DocSyncHandler) Publish(c *gin.Context) {
 	}
 
 	origin := req.Origin
+	// author is the SERVER-derived identity of the producer, taken from the
+	// verified session and NEVER from the request body (mirrors how Presence
+	// stamps account_id). It is the trustworthy authorship carried on every
+	// relayed op: origin above is only a same-tab echo hint the client cannot be
+	// allowed to weaponize (an editor who spoofs a victim tab's origin still
+	// cannot forge who published the op, so the victim will not drop it as a false
+	// self-echo). See realtime.Event.Author.
+	author := requesterID(c)
 
 	// Persist + relay each op. Persistence is authoritative: an op is durable
 	// before it is relayed, so a late joiner GETting /collab/state always sees
@@ -377,6 +397,7 @@ func (h *DocSyncHandler) Publish(c *gin.Context) {
 			Type:    "op",
 			DocID:   id,
 			Origin:  origin,
+			Author:  author,
 			Seq:     seq,
 			Payload: op,
 		})

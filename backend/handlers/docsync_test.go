@@ -291,6 +291,138 @@ func TestDocSync_TwoEditorsConvergeViaServer(t *testing.T) {
 	}
 }
 
+// --- Op authorship is server-stamped (origin is not an authority claim) ---
+//
+// The op's PRODUCER IDENTITY must be server-derived (requesterID), never taken
+// from the client body — mirroring how presence stamps account_id. The relayed
+// op carries a trustworthy `author`; the client-supplied `origin` is only a
+// same-tab echo hint. This is the defense against a malicious editor who spoofs
+// a victim tab's origin to make the victim drop the op as a false self-echo
+// (targeted divergence): even under a spoofed origin, author reveals the true
+// producer, and the victim's client keys self-echo on origin AND author.
+
+func TestDocSync_OpAuthorStampedServerSide(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	if err := acl.ShareWithRole("doc1", "bob", fileacl.RoleEditor); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alice subscribes so she receives bob's relayed op frame.
+	events, cleanup := startSSE(t, h, "alice", "doc1")
+	defer cleanup()
+	deadline := time.Now().Add(2 * time.Second)
+	for h.hub.SubscriberCount("doc1") == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Bob publishes an op but SPOOFS alice's tab origin in the body. Authorship
+	// must still be stamped to bob's verified session regardless of the body.
+	bob := docSyncRouter(h, "bob", false)
+	if w := postOps(bob, "doc1", docSyncOpsRequest{
+		Origin: "alice-tab", // spoofed victim origin
+		Ops:    []json.RawMessage{insertOp("bob", 1, "x")},
+	}); w.Code != http.StatusOK {
+		t.Fatalf("bob publish: %d (%s)", w.Code, w.Body.String())
+	}
+
+	select {
+	case ev := <-events:
+		if ev.Type == "ping" {
+			ev = <-events
+		}
+		if ev.Type != "op" || ev.DocID != "doc1" {
+			t.Fatalf("unexpected relayed event: %+v", ev)
+		}
+		// Authorship is SERVER-stamped to the true producer, not the body.
+		if ev.Author != "bob" {
+			t.Fatalf("op author not server-stamped: got %q, want bob", ev.Author)
+		}
+		// The spoofed origin is echoed verbatim (a same-tab echo hint only) — it is
+		// NOT the authority. A victim keying self-echo on (origin AND author) will
+		// see author=bob != its own account and therefore NOT drop this op.
+		if ev.Origin != "alice-tab" {
+			t.Fatalf("origin should be echoed raw: got %q", ev.Origin)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("alice never received bob's relayed op")
+	}
+}
+
+// Two different accounts publishing with the SAME client origin still produce
+// DISTINCT server authors — a client cannot make its op's identity collide with
+// another user's by copying their origin.
+func TestDocSync_OpAuthorNoCrossUserCollision(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	if err := acl.ShareWithRole("doc1", "bob", fileacl.RoleEditor); err != nil {
+		t.Fatal(err)
+	}
+
+	// A neutral third editor subscribes to observe both relayed frames.
+	if err := acl.ShareWithRole("doc1", "carol", fileacl.RoleEditor); err != nil {
+		t.Fatal(err)
+	}
+	events, cleanup := startSSE(t, h, "carol", "doc1")
+	defer cleanup()
+	deadline := time.Now().Add(2 * time.Second)
+	for h.hub.SubscriberCount("doc1") == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	const sharedOrigin = "shared-tab"
+	alice := docSyncRouter(h, "alice", false)
+	bob := docSyncRouter(h, "bob", false)
+	if w := postOps(alice, "doc1", docSyncOpsRequest{Origin: sharedOrigin, Ops: []json.RawMessage{insertOp("alice", 1, "a")}}); w.Code != http.StatusOK {
+		t.Fatalf("alice publish: %d", w.Code)
+	}
+	if w := postOps(bob, "doc1", docSyncOpsRequest{Origin: sharedOrigin, Ops: []json.RawMessage{insertOp("bob", 1, "b")}}); w.Code != http.StatusOK {
+		t.Fatalf("bob publish: %d", w.Code)
+	}
+
+	authors := map[string]bool{}
+	waited := time.After(3 * time.Second)
+	for len(authors) < 2 {
+		select {
+		case ev := <-events:
+			if ev.Type != "op" {
+				continue
+			}
+			if ev.Origin != sharedOrigin {
+				t.Fatalf("origin should be echoed raw: got %q", ev.Origin)
+			}
+			authors[ev.Author] = true
+		case <-waited:
+			t.Fatalf("did not observe both authors; got %v", authors)
+		}
+	}
+	if !authors["alice"] || !authors["bob"] {
+		t.Fatalf("authors must be the distinct verified producers, got %v", authors)
+	}
+}
+
+// The /collab/state bootstrap hands the joiner its OWN server-verified identity
+// (`you`) so a client can recognize its own op echoes by author (not just the
+// forgeable origin). It is the verified session id, never the body.
+func TestDocSync_StateIncludesRequesterIdentity(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	alice := docSyncRouter(h, "alice", false)
+	sw := doReq(alice, http.MethodGet, "/v1/documents/doc1/collab/state", nil)
+	if sw.Code != http.StatusOK {
+		t.Fatalf("state: expected 200, got %d", sw.Code)
+	}
+	var resp struct {
+		You string `json:"you"`
+	}
+	if err := json.Unmarshal(sw.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if resp.You != "alice" {
+		t.Fatalf("state must carry the requester's verified identity: got %q, want alice", resp.You)
+	}
+}
+
 // --- No cross-doc leakage ------------------------------------------------
 
 func TestDocSync_NoCrossDocLeakage(t *testing.T) {

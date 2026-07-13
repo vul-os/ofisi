@@ -45,17 +45,28 @@ import (
 // Types:
 //
 //	"op"   — a CRDT TextOp (RGA insert/delete, wire shape {k,id,p,v,t}) wrapped
-//	         as {origin, seq, op}. The client applies it to the same crdt/text
-//	         TextCRDT store used by the p2p path; TextCRDT.apply is idempotent
-//	         (deduped by op id), so a pushed op it already has is a no-op and a
-//	         pushed op that also arrived over p2p never double-applies.
+//	         as {origin, author, seq, op}. The client applies it to the same
+//	         crdt/text TextCRDT store used by the p2p path; TextCRDT.apply is
+//	         idempotent (deduped by op id), so a pushed op it already has is a
+//	         no-op and a pushed op that also arrived over p2p never double-applies.
 //	"snap" — a full CRDT snapshot {origin, seq, snap} for late-joiner bootstrap.
 //	"ping" — heartbeat keep-alive (no payload).
 type Event struct {
-	Type    string      `json:"type"`
-	DocID   string      `json:"doc_id,omitempty"`
-	Origin  string      `json:"origin,omitempty"` // replica/tab id that produced it (self-echo filter)
-	Seq     uint64      `json:"seq,omitempty"`    // server-assigned monotonic sequence for this doc
+	Type  string `json:"type"`
+	DocID string `json:"doc_id,omitempty"`
+	// Origin is the CLIENT-supplied replica/tab id that produced the frame. It is
+	// a same-tab self-echo hint ONLY — it is NOT an identity/authority claim and
+	// must never be trusted as one: a client can set it to any value (including
+	// another tab's), so authorship is carried by the server-stamped Author below.
+	Origin string `json:"origin,omitempty"`
+	// Author is the SERVER-STAMPED account id of the op's producer, derived from
+	// the verified session (never the request body) — the trustworthy identity of
+	// who published the op, mirroring how presence stamps account_id. A receiver
+	// treats a frame as its own echo only when BOTH Origin (same tab) AND Author
+	// (same account) match, so a peer who forges another tab's Origin cannot make
+	// that peer drop the op as a false echo (targeted-divergence defense).
+	Author  string      `json:"author,omitempty"`
+	Seq     uint64      `json:"seq,omitempty"` // server-assigned monotonic sequence for this doc
 	Payload interface{} `json:"payload,omitempty"`
 }
 
