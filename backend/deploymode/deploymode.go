@@ -134,6 +134,44 @@ func (m Mode) validateCloud() error {
 	return nil
 }
 
+// RequireAuthPosture is the multi-tenant boot gate (fail-closed). A hosted /
+// cloud-adjacent deployment (DEPLOY_MODE=os or =cloud) MUST come up with an
+// authenticated posture: EITHER native product-JWT auth (authEnabled) OR a
+// wired session introspector (hasIntrospector — IDENTITY_URL set). This mirrors
+// the EXACT condition the protected/write route groups use to install their auth
+// middleware (cfg.Auth.Enabled || sessionIntrospector != nil): when neither is
+// present those groups install NO auth middleware, so every caller collapses to
+// the single shared "self" identity — a silent multi-tenant fail-OPEN where all
+// tenants' data lands under one identity and any create/upload is anonymous.
+//
+// It returns a non-nil error naming the missing config when a hosted mode would
+// otherwise boot with no auth wall; the caller (Load / main) turns that into a
+// fatal so the process REFUSES TO BOOT rather than come up fully open.
+// Standalone single-tenant self-host is unaffected — it may legitimately run
+// without the auth wall — so this is a pure no-op there. Kept a pure function so
+// the decision is unit-testable without exercising the fatal call site.
+func (m Mode) RequireAuthPosture(authEnabled, hasIntrospector bool) error {
+	if !m.IsCloudAdjacent() {
+		return nil
+	}
+	if authEnabled || hasIntrospector {
+		return nil
+	}
+	return fmt.Errorf("DEPLOY_MODE=%s is a hosted, multi-tenant deployment but NO auth wall is "+
+		"configured: native auth is disabled (auth.enabled=false) AND no session introspector is "+
+		"wired (%s is unset). Booting would install no auth middleware on the protected/write API, "+
+		"collapsing every caller to a single shared identity (all tenants' data under one identity, "+
+		"any create/upload anonymous). Refusing to boot. Set auth.enabled=true (with %s), or set %s "+
+		"to the identity provider base URL, or use DEPLOY_MODE=standalone for single-tenant self-host",
+		m, session_EnvIdentityURL, "VULOS_OFFICE_JWT_SECRET", session_EnvIdentityURL)
+}
+
+// session_EnvIdentityURL names the session-introspection provider env var in
+// this package's error text WITHOUT importing backend/session (deploymode
+// imports nothing from the rest of office, by design). Kept in sync with
+// session.EnvIdentityURL.
+const session_EnvIdentityURL = "IDENTITY_URL"
+
 // checkCoherence logs (non-fatal) warnings when the resolved mode's config looks
 // incomplete, so an operator notices a half-configured os box early rather than
 // discovering a silent fail-open/fail-closed surprise later. The cloud+no-presign

@@ -148,6 +148,18 @@ func main() {
 		log.Printf("[sso] session introspection disabled (no %s); local single-identity mode", session.EnvIdentityURL)
 	}
 
+	// ── Multi-tenant boot gate (fail-closed) ──────────────────────────────────
+	// A hosted deployment (DEPLOY_MODE=os|cloud) MUST come up with an authenticated
+	// posture. The protected/write route groups below install auth middleware ONLY
+	// when (cfg.Auth.Enabled || sessionIntrospector != nil); with neither, a hosted
+	// process would boot with NO auth wall and every caller would resolve to the
+	// single shared "self" identity — a silent multi-tenant fail-open. RequireAuthPosture
+	// refuses that here (fatal), naming the missing config. Standalone is unaffected.
+	// Passed the EXACT condition the route groups gate on.
+	if err := mode.RequireAuthPosture(cfg.Auth.Enabled, sessionIntrospector != nil); err != nil {
+		log.Fatalf("[deploymode] %v", err)
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 

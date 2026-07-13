@@ -118,3 +118,48 @@ func TestValidateCloud_StandaloneAndOS_Unaffected(t *testing.T) {
 		t.Fatalf("OS.validateCloud() must never error, got %v", err)
 	}
 }
+
+// TestRequireAuthPosture is the fail-closed multi-tenant boot-gate regression
+// guard. A hosted mode (os/cloud) with NEITHER native auth NOR a wired session
+// introspector must be REFUSED (Load/main turns the error into a fatal), because
+// the protected/write route groups would otherwise install no auth middleware
+// and every caller would collapse to the single shared "self" identity — a
+// silent multi-tenant fail-open. Standalone must always be allowed.
+func TestRequireAuthPosture(t *testing.T) {
+	cases := []struct {
+		name            string
+		mode            Mode
+		authEnabled     bool
+		hasIntrospector bool
+		wantErr         bool
+	}{
+		// VULN case: hosted mode, no auth wall at all → must refuse to boot.
+		{"cloud_no_auth_no_introspector_REFUSED", Cloud, false, false, true},
+		{"os_no_auth_no_introspector_REFUSED", OS, false, false, true},
+
+		// Hosted mode with EITHER identity source → boot proceeds.
+		{"cloud_auth_enabled_ok", Cloud, true, false, false},
+		{"cloud_introspector_ok", Cloud, false, true, false},
+		{"cloud_both_ok", Cloud, true, true, false},
+		{"os_auth_enabled_ok", OS, true, false, false},
+		{"os_introspector_ok", OS, false, true, false},
+
+		// Standalone single-tenant self-host: always allowed, even with no auth.
+		{"standalone_no_auth_ok", Standalone, false, false, false},
+		{"standalone_auth_ok", Standalone, true, false, false},
+		{"standalone_introspector_ok", Standalone, false, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.mode.RequireAuthPosture(tc.authEnabled, tc.hasIntrospector)
+			if tc.wantErr && err == nil {
+				t.Fatalf("VULN: %s.RequireAuthPosture(auth=%v, introspector=%v) = nil, want a boot-refusal error",
+					tc.mode, tc.authEnabled, tc.hasIntrospector)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("%s.RequireAuthPosture(auth=%v, introspector=%v) = %v, want nil (must boot)",
+					tc.mode, tc.authEnabled, tc.hasIntrospector, err)
+			}
+		})
+	}
+}
