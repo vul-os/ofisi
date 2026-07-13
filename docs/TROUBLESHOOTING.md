@@ -110,8 +110,8 @@ Prevention: watch the save-state indicator (dirty/saving/saved/error). An `error
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | PDF export "does nothing" (Docs/Slides) | PDF export is print-based (`Mod+P` → print dialog); a popup/print blocker or kiosk browser can suppress it | Allow the print dialog; use the system "Save as PDF" printer |
-| `/v1` slide export to `pptx` → `501` | By design: `pptx` for Slides is generated **client-side** (pptxgenjs); the server returns `501 pptx export is handled client-side` | Use the editor's PPTX export button, or export `pdf` via API |
-| `400 unsupported format` from export endpoints | Format/type mismatch — server supports `doc→pdf,docx`, `sheet→xlsx`, `slide→pdf` | Use a supported pair (Docs ODT/MD/HTML and Sheets CSV/ODS are client-side exports) |
+| `/v1` slide export to `pptx` is missing the editor's positioned objects | The server renders the stored deck model (background, title, body copy); the editor's own PPTX export (pptxgenjs) additionally carries objects it positions client-side | Expected; use the editor's PPTX export button when you need the positioned layout |
+| `400 unsupported format` from export endpoints | Format/type mismatch — server supports `doc→pdf,docx`, `sheet→xlsx`, `slide→pdf,pptx` | Use a supported pair (Docs ODT/MD/HTML and Sheets CSV/ODS are client-side exports) |
 | Exported CSV/XLSX cells show a leading `'` before `=`/`+`/`-`/`@` | Formula-injection neutralization — deliberate protection for downstream spreadsheet apps | Expected; remove manually if you truly want live formulas in the target |
 | `pdf generation failed` / `docx generation failed` (500) | Server-side renderer hit malformed content | Check server logs for the message; try the client-side export path; report with the doc structure |
 | Image upload fails with type error | Only sniffed **raster** images are accepted (SVG and MIME-lies rejected); 10 MB cap per upload | Convert SVG→PNG; compress >10 MB images |
@@ -219,7 +219,7 @@ All verified against the code; hitting one of these is expected behavior, not a 
 | SSE reconnect grace | ~8 s before the editor reports degraded | Blips shorter than this are invisible |
 | Local snapshots | Debounced ~3 s to `localStorage` | Instant-crash may lose ≤3 s of *local snapshot* (drafts still cover saves) |
 | Import bounds | File-size and archive-entry caps on imports | Zip-bomb-ish or oversized files |
-| Server export formats | doc→`pdf`,`docx`; sheet→`xlsx`; slide→`pdf` (`pptx` client-side, `501` on `/v1`) | Automation via API |
+| Server export formats | doc→`pdf`,`docx`; sheet→`xlsx`; slide→`pdf`,`pptx` | Automation via API |
 
 ---
 

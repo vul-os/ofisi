@@ -378,7 +378,7 @@ func (h *V1Handler) ExportDocument(c *gin.Context) {
 //
 //	doc   → pdf, docx
 //	sheet → xlsx
-//	slide → pdf  (pptx is client-side → 501)
+//	slide → pdf, pptx
 func (h *V1Handler) exportDocument(c *gin.Context, f *models.File, format string) {
 	safe := docsExportSanitizeFilename(f.Name)
 	switch f.Type {
@@ -424,31 +424,37 @@ func (h *V1Handler) exportDocument(c *gin.Context, f *models.File, format string
 		h.sendBinary(c, safe+".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
 
 	case models.FileTypeSlide:
-		switch format {
-		case "pdf":
-			raw, _ := json.Marshal(f.Content)
-			var deck struct {
-				Title  string                `json:"title"`
-				Slides []slides_export.Slide `json:"slides"`
-			}
-			if err := json.Unmarshal(raw, &deck); err != nil {
-				v1err(c, http.StatusBadRequest, "invalid slide deck format")
-				return
-			}
-			if deck.Title == "" {
-				deck.Title = f.Name
-			}
-			data, err := slides_export.RenderPDF(slides_export.Deck{Title: deck.Title, Slides: deck.Slides})
-			if err != nil {
-				v1err(c, http.StatusInternalServerError, "pdf generation failed: "+err.Error())
-				return
-			}
-			h.sendBinary(c, safe+".pdf", "application/pdf", data)
-		case "pptx":
-			v1err(c, http.StatusNotImplemented, "pptx export is handled client-side; not available over /v1")
-		default:
-			v1err(c, http.StatusBadRequest, "unsupported format for slide; use pdf")
+		if format != "pdf" && format != "pptx" {
+			v1err(c, http.StatusBadRequest, "unsupported format for slide; use pdf or pptx")
+			return
 		}
+		raw, _ := json.Marshal(f.Content)
+		var deck struct {
+			Title  string                `json:"title"`
+			Slides []slides_export.Slide `json:"slides"`
+		}
+		if err := json.Unmarshal(raw, &deck); err != nil {
+			v1err(c, http.StatusBadRequest, "invalid slide deck format")
+			return
+		}
+		if deck.Title == "" {
+			deck.Title = f.Name
+		}
+		if format == "pptx" {
+			data, err := slides_export.GeneratePPTX(slides_export.Deck{Title: deck.Title, Slides: deck.Slides})
+			if err != nil {
+				v1err(c, http.StatusInternalServerError, "pptx generation failed: "+err.Error())
+				return
+			}
+			h.sendBinary(c, safe+".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", data)
+			return
+		}
+		data, err := slides_export.RenderPDF(slides_export.Deck{Title: deck.Title, Slides: deck.Slides})
+		if err != nil {
+			v1err(c, http.StatusInternalServerError, "pdf generation failed: "+err.Error())
+			return
+		}
+		h.sendBinary(c, safe+".pdf", "application/pdf", data)
 
 	default:
 		v1err(c, http.StatusBadRequest, "document type "+string(f.Type)+" does not support export")

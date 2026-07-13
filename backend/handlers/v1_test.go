@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -204,6 +206,42 @@ func TestV1_ExportDocPDF(t *testing.T) {
 	w = doReq(alice, http.MethodPost, "/v1/documents/"+id+"/export", map[string]string{"format": "docx"})
 	if w.Code != http.StatusOK {
 		t.Fatalf("export docx: expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+// A slide deck exports to pptx over /v1: the endpoint used to answer 501 and
+// point at a client-side fallback that does not exist for an API caller.
+func TestV1_ExportSlidePPTX(t *testing.T) {
+	h, _ := newV1Handler()
+	id := createV1DocAs(t, h, "alice", "slide", map[string]interface{}{
+		"title": "Q3 Plan",
+		"slides": []map[string]interface{}{
+			{"title": "Intro", "content": "<p>hello</p>", "background": "#101020"},
+		},
+	})
+
+	alice := v1Router(h, "alice", false)
+	w := doReq(alice, http.MethodPost, "/v1/documents/"+id+"/export", map[string]string{"format": "pptx"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("export pptx: expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	const pptxCT = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	if ct := w.Header().Get("Content-Type"); ct != pptxCT {
+		t.Fatalf("expected %s, got %q", pptxCT, ct)
+	}
+	// A .pptx is a ZIP: the body must actually be one, not an error page.
+	body := w.Body.Bytes()
+	if len(body) < 4 || string(body[:2]) != "PK" {
+		t.Fatalf("body is not a ZIP package (len=%d)", len(body))
+	}
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("open pptx zip: %v", err)
+	}
+	for _, want := range []string{"[Content_Types].xml", "ppt/presentation.xml", "ppt/slides/slide1.xml"} {
+		if _, err := zr.Open(want); err != nil {
+			t.Errorf("pptx package is missing %s", want)
+		}
 	}
 }
 

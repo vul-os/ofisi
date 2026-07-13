@@ -150,11 +150,6 @@ func main() {
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
-	// Let the router surface a method mismatch instead of falling through to the
-	// SPA handler, which would answer POST /api/auth/status with 200 text/html.
-	// mountStatic installs the NoMethod handler that turns this into a JSON 405
-	// for the API surfaces and keeps the SPA fallback for everything else.
-	r.HandleMethodNotAllowed = true
 
 	// CORS: prefer an explicit origin allowlist (VULOS_OFFICE_CORS_ORIGINS, a
 	// comma-separated list) so credentialed cross-origin requests are restricted
@@ -563,6 +558,12 @@ func isJSONAPIPath(p string) bool {
 // SPA's index.html for client-router paths — but a JSON 404/405 for the API
 // surfaces, which own their own error shape.
 func mountStatic(r *gin.Engine, staticFS fs.FS) {
+	// Owned here, next to the NoMethod handler it exists to reach: without the
+	// flag the router answers a method mismatch out of NoRoute, which would send
+	// POST /api/auth/status to the SPA as 200 text/html. Gin reads it per request,
+	// so setting it after the routes are registered is fine.
+	r.HandleMethodNotAllowed = true
+
 	staticServer := http.FileServer(http.FS(staticFS))
 
 	serveSPA := func(c *gin.Context) {

@@ -12,10 +12,12 @@ import (
 
 // newTestRouter builds a router shaped like the real one: a couple of API routes
 // under /api and /v1, then the static/SPA mount on top of an in-memory dist.
+//
+// It deliberately does NOT set HandleMethodNotAllowed — mountStatic must turn it
+// on, or a 405 silently degrades back into the SPA fallback in the real server.
 func newTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.HandleMethodNotAllowed = true
 
 	api := r.Group("/api")
 	api.POST("/auth/login", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
@@ -133,7 +135,6 @@ func TestIsJSONAPIPath(t *testing.T) {
 func TestCORSPreflightSurvivesMethodNotAllowed(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.HandleMethodNotAllowed = true
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"https://app.vulos.org"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},

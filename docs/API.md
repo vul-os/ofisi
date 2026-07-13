@@ -231,7 +231,7 @@ Fetch the document body, or export it.
   | ------- | -------------- | --------------------------------------- |
   | `doc`   | `pdf`, `docx`  |                                         |
   | `sheet` | `xlsx`         |                                         |
-  | `slide` | `pdf`          | `pptx` is `501` (handled client-side).  |
+  | `slide` | `pdf`, `pptx`  | Rendered server-side from the deck model. |
 
 ### `POST /v1/documents/:id/export`
 
@@ -251,7 +251,11 @@ Content-Disposition: attachment; filename="Q3 Plan.docx"
 ```
 
 Unsupported format for the document type → `400 {"error":"unsupported format…"}`.
-`slide` + `pptx` → `501 {"error":"pptx export is handled client-side; not available over /v1"}`.
+
+A `slide` deck exports to `pptx` server-side, so the endpoint needs no browser in
+the loop. The editor's own PPTX download (pptxgenjs) additionally carries the
+positioned objects it holds client-side; the server renders what the stored deck
+model holds — per slide a background, a title and the body copy.
 
 ---
 
@@ -298,7 +302,6 @@ Set `"revoke": true` to remove access.
 | 404  | Document not found or not accessible                                |
 | 429  | Rate limited (write endpoints; token-bucket)                       |
 | 500  | Internal error                                                     |
-| 501  | Export format not available server-side (slide → pptx)             |
 | 503  | API key validation unavailable (control plane unreachable)         |
 
 Write endpoints (`POST`/`PATCH`/`DELETE`) are rate-limited by a per-IP
