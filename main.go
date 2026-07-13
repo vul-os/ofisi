@@ -150,6 +150,11 @@ func main() {
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+	// Let the router surface a method mismatch instead of falling through to the
+	// SPA handler, which would answer POST /api/auth/status with 200 text/html.
+	// mountStatic installs the NoMethod handler that turns this into a JSON 405
+	// for the API surfaces and keeps the SPA fallback for everything else.
+	r.HandleMethodNotAllowed = true
 
 	// CORS: prefer an explicit origin allowlist (VULOS_OFFICE_CORS_ORIGINS, a
 	// comma-separated list) so credentialed cross-origin requests are restricted
@@ -527,32 +532,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to create static FS:", err)
 	}
-	staticServer := http.FileServer(http.FS(staticFS))
-
-	// "/" serves the SPA for everyone (it shows the login screen when the
-	// visitor is unauthenticated). The marketing landing that used to gate the
-	// root moved to the centralized vulos-cloud site.
-	r.GET("/", func(c *gin.Context) {
-		c.Request.URL.Path = "/"
-		staticServer.ServeHTTP(c.Writer, c.Request)
-	})
-
-	r.NoRoute(func(c *gin.Context) {
-		urlPath := c.Request.URL.Path
-		// fs.FS requires paths without a leading slash.
-		// Strip it before probing, then let http.FileServer handle the request
-		// (which re-adds the slash internally).
-		fsPath := strings.TrimPrefix(urlPath, "/")
-		f, err := staticFS.Open(fsPath)
-		if err == nil {
-			f.Close()
-			staticServer.ServeHTTP(c.Writer, c.Request)
-			return
-		}
-		// SPA fallback: serve index.html for unknown routes (React Router)
-		c.Request.URL.Path = "/"
-		staticServer.ServeHTTP(c.Writer, c.Request)
-	})
+	mountStatic(r, staticFS)
 
 	addr := cfg.Server.Addr
 	if addr == "" {
@@ -563,6 +543,69 @@ func main() {
 	if err := r.Run(addr); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// isJSONAPIPath reports whether a request path belongs to a JSON API surface
+// (the SPA's /api, the public /v1 developer API) rather than to the front-end.
+// Those surfaces must never be answered with the SPA's index.html: a client
+// reading "200 text/html" as success turns a missing, mistyped or
+// method-mismatched route into a silent fail-OPEN.
+func isJSONAPIPath(p string) bool {
+	for _, prefix := range []string{"/api", "/v1"} {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// mountStatic serves the embedded front-end: real files when they exist, the
+// SPA's index.html for client-router paths — but a JSON 404/405 for the API
+// surfaces, which own their own error shape.
+func mountStatic(r *gin.Engine, staticFS fs.FS) {
+	staticServer := http.FileServer(http.FS(staticFS))
+
+	serveSPA := func(c *gin.Context) {
+		// fs.FS requires paths without a leading slash.
+		// Strip it before probing, then let http.FileServer handle the request
+		// (which re-adds the slash internally).
+		fsPath := strings.TrimPrefix(c.Request.URL.Path, "/")
+		f, err := staticFS.Open(fsPath)
+		if err == nil {
+			f.Close()
+			staticServer.ServeHTTP(c.Writer, c.Request)
+			return
+		}
+		// SPA fallback: serve index.html for unknown routes (React Router)
+		c.Request.URL.Path = "/"
+		staticServer.ServeHTTP(c.Writer, c.Request)
+	}
+
+	// "/" serves the SPA for everyone (it shows the login screen when the
+	// visitor is unauthenticated). The marketing landing that used to gate the
+	// root moved to the centralized vulos-cloud site.
+	r.GET("/", func(c *gin.Context) {
+		c.Request.URL.Path = "/"
+		staticServer.ServeHTTP(c.Writer, c.Request)
+	})
+
+	r.NoRoute(func(c *gin.Context) {
+		if isJSONAPIPath(c.Request.URL.Path) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no such endpoint"})
+			return
+		}
+		serveSPA(c)
+	})
+
+	// Reached only when the path matches a route registered under a DIFFERENT
+	// method (gin.Engine.HandleMethodNotAllowed).
+	r.NoMethod(func(c *gin.Context) {
+		if isJSONAPIPath(c.Request.URL.Path) {
+			c.JSON(http.StatusMethodNotAllowed, gin.H{"error": "method not allowed"})
+			return
+		}
+		serveSPA(c)
+	})
 }
 
 // appsDBPath resolves the SQLite DSN for the StandaloneRegistry from env,
