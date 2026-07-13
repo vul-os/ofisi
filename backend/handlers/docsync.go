@@ -42,6 +42,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -69,6 +70,11 @@ type DocSyncHandler struct {
 	// (defaultStreamRecheckInterval). It is a field (not a const) only so tests
 	// can drive the re-check cadence deterministically without real waits.
 	recheckInterval time.Duration
+
+	// maxOpsPerDoc is the per-document op-log growth ceiling (see Publish). 0
+	// means the default (defaultMaxOpsPerDoc). It is a field only so tests can
+	// exercise the ceiling with a small bound.
+	maxOpsPerDoc int
 }
 
 // defaultStreamRecheckInterval bounds how often an open collab SSE stream
@@ -236,6 +242,48 @@ type docSyncOpsRequest struct {
 // per-connection drop-slow-consumer).
 const maxOpsPerIngest = 512
 
+// Size/growth bounds on the op-ingest path. Before these existed the only bound
+// was maxOpsPerIngest (an op COUNT, not a size): each op is an opaque
+// json.RawMessage with no per-op byte limit, the snapshot had no limit, and
+// there was no request body limit anywhere — so one authenticated editor (every
+// user is editor of their own doc) could POST 512 multi-MB ops or a giant
+// snapshot (persisted to SQLite and AMPLIFIED to every subscriber) and could
+// AppendOp forever (unbounded disk). All three gaps are closed here, fail-closed
+// with a clear 413/409.
+const (
+	// maxCollabBodyBytes caps the whole request body on the op + snapshot
+	// endpoint (via http.MaxBytesReader, before JSON decode) so a single request
+	// cannot stream an unbounded body into memory. Comfortably fits a legit batch
+	// of ops plus a compaction snapshot.
+	maxCollabBodyBytes = 4 << 20 // 4 MiB
+
+	// maxOpBytes caps a SINGLE CRDT op's raw bytes. A real RGA TextOp
+	// ({k,id,p,v,t}) is tiny; this ceiling is generous while stopping a multi-MB
+	// blob from being persisted and fanned out to every subscriber.
+	maxOpBytes = 256 << 10 // 256 KiB
+
+	// maxSnapBytes caps a single CRDT snapshot's raw bytes. A snapshot is the
+	// compacted whole-document state, so it is larger than one op but must still
+	// fit within the request body cap.
+	maxSnapBytes = 2 << 20 // 2 MiB
+
+	// defaultMaxOpsPerDoc is the per-document ceiling on the number of ops
+	// CURRENTLY in the op log (i.e. after the latest compaction). When the log
+	// reaches it, further op ingest is refused with 409 until the client sends a
+	// snapshot (which compacts the log), so a doc cannot grow unbounded on disk.
+	// A snapshot-only request is always accepted — it is the remedy.
+	defaultMaxOpsPerDoc = 20000
+)
+
+// maxOpsForDoc is the effective per-document op-log ceiling (see Publish). Tests
+// may set h.maxOpsPerDoc to a small value to exercise the ceiling.
+func (h *DocSyncHandler) maxOpsForDoc() int {
+	if h.maxOpsPerDoc > 0 {
+		return h.maxOpsPerDoc
+	}
+	return defaultMaxOpsPerDoc
+}
+
 // Publish ingests CRDT ops from an editor: it persists each op authoritatively
 // (assigning a monotonic per-doc sequence), then relays it to every live
 // subscriber of the document via the hub. Requires EDITOR access — the SAME gate
@@ -251,14 +299,59 @@ func (h *DocSyncHandler) Publish(c *gin.Context) {
 		return
 	}
 
+	// Body cap (fail closed): bound the whole request body BEFORE decoding so a
+	// single request cannot stream an unbounded body into memory. MaxBytesReader
+	// makes the decode fail with *http.MaxBytesError once the cap is exceeded.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxCollabBodyBytes)
+
 	var req docSyncOpsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if len(req.Ops) > maxOpsPerIngest {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "too many ops in one request"})
 		return
+	}
+
+	// Size + growth validation, done in a PRE-PASS so nothing is persisted or
+	// fanned out if any bound is exceeded (no partial-persist on an oversize
+	// batch). Count only non-empty ops (empty ones are skipped on append).
+	nOps := 0
+	for _, op := range req.Ops {
+		if len(op) == 0 {
+			continue
+		}
+		if len(op) > maxOpBytes {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "op exceeds maximum size"})
+			return
+		}
+		nOps++
+	}
+	if len(req.Snap) > maxSnapBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "snapshot exceeds maximum size"})
+		return
+	}
+	// Per-document growth ceiling: refuse to append past the op-log bound so a
+	// doc cannot grow unbounded on disk. A snapshot-only request (nOps == 0) is
+	// always allowed — it is the compaction remedy the client must send. The
+	// client should react to this 409 by snapshotting + retrying.
+	if nOps > 0 {
+		cur, err := h.ops.OpCount(id)
+		if err != nil {
+			log.Printf("[docsync] op count doc=%s: %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check op log size"})
+			return
+		}
+		if cur+nOps > h.maxOpsForDoc() {
+			c.JSON(http.StatusConflict, gin.H{"error": "op log full — snapshot required"})
+			return
+		}
 	}
 
 	origin := req.Origin

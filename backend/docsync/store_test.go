@@ -100,6 +100,32 @@ func runStoreContract(t *testing.T, mk func() Store) {
 		}
 	})
 
+	t.Run("op count tracks live log and drops on compaction", func(t *testing.T) {
+		s := mk()
+		defer s.Close()
+		if n, err := s.OpCount("d"); err != nil || n != 0 {
+			t.Fatalf("empty doc OpCount: got %d err=%v", n, err)
+		}
+		s.AppendOp("d", "a", op("a", 1))
+		s.AppendOp("d", "a", op("a", 2))
+		if n, _ := s.OpCount("d"); n != 2 {
+			t.Fatalf("OpCount after 2 appends: got %d, want 2", n)
+		}
+		// A snapshot compacts the folded ops away — the live count drops.
+		s.SaveSnapshot("d", "a", json.RawMessage(`{"nodes":[]}`))
+		if n, _ := s.OpCount("d"); n != 0 {
+			t.Fatalf("OpCount after compaction: got %d, want 0", n)
+		}
+		// A trailing op after the snapshot is counted; MaxSeq keeps climbing.
+		s.AppendOp("d", "a", op("a", 3))
+		if n, _ := s.OpCount("d"); n != 1 {
+			t.Fatalf("OpCount after post-snapshot op: got %d, want 1", n)
+		}
+		if m, _ := s.MaxSeq("d"); m != 3 {
+			t.Fatalf("MaxSeq should stay monotonic at 3, got %d", m)
+		}
+	})
+
 	t.Run("empty doc id rejected", func(t *testing.T) {
 		s := mk()
 		defer s.Close()

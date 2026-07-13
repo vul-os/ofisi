@@ -101,6 +101,15 @@ func (n *NullStore) MaxSeq(docID string) (uint64, error) {
 	return n.seq[docID], nil
 }
 
+func (n *NullStore) OpCount(docID string) (int, error) {
+	if docID == "" {
+		return 0, ErrEmptyDocID
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.ops[docID]), nil
+}
+
 func (n *NullStore) Delete(docID string) error {
 	if docID == "" {
 		return ErrEmptyDocID

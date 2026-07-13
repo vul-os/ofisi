@@ -547,6 +547,130 @@ func TestDocSync_RevokedSubscriberStreamTerminated(t *testing.T) {
 	}
 }
 
+// ─── DoS bounds on the op-ingest path (byte caps + per-doc growth ceiling) ───
+//
+// Before these bounds the only limit was maxOpsPerIngest (an op COUNT). Each op
+// was an opaque json.RawMessage with no per-op byte limit, the snapshot had no
+// limit, and there was no request-body limit — so one authenticated editor could
+// POST multi-MB ops / a giant snapshot (persisted + amplified to every
+// subscriber) and could AppendOp forever (unbounded disk).
+
+// An oversized REQUEST BODY is rejected (413) before decode and nothing is
+// persisted. Driven with a giant Origin field so the body exceeds the cap.
+func TestDocSync_OversizedBodyRejected(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	alice := docSyncRouter(h, "alice", false)
+
+	huge := strings.Repeat("a", maxCollabBodyBytes+4096)
+	w := postOps(alice, "doc1", docSyncOpsRequest{Origin: huge, Ops: []json.RawMessage{insertOp("alice", 1, "x")}})
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body: expected 413, got %d (%s)", w.Code, w.Body.String())
+	}
+	if state, _ := h.ops.Load("doc1"); state.Seq != 0 || len(state.Ops) != 0 {
+		t.Fatalf("oversized body must persist nothing: seq=%d ops=%d", state.Seq, len(state.Ops))
+	}
+}
+
+// An oversized SINGLE OP is rejected (413) and nothing is persisted (validation
+// is a pre-pass, so an oversize op in a batch persists none of the batch).
+func TestDocSync_OversizedOpRejected(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	alice := docSyncRouter(h, "alice", false)
+
+	bigOp := json.RawMessage(`"` + strings.Repeat("x", maxOpBytes) + `"`) // > maxOpBytes, < body cap
+	w := postOps(alice, "doc1", docSyncOpsRequest{
+		Origin: "alice",
+		// a normal op alongside the oversized one — neither must persist.
+		Ops: []json.RawMessage{insertOp("alice", 1, "ok"), bigOp},
+	})
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized op: expected 413, got %d (%s)", w.Code, w.Body.String())
+	}
+	if state, _ := h.ops.Load("doc1"); state.Seq != 0 || len(state.Ops) != 0 {
+		t.Fatalf("oversized op must persist nothing (no partial batch): seq=%d ops=%d", state.Seq, len(state.Ops))
+	}
+}
+
+// An oversized SNAPSHOT is rejected (413) and nothing is persisted.
+func TestDocSync_OversizedSnapshotRejected(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	alice := docSyncRouter(h, "alice", false)
+
+	bigSnap := json.RawMessage(`"` + strings.Repeat("s", maxSnapBytes) + `"`) // > maxSnapBytes, < body cap
+	w := postOps(alice, "doc1", docSyncOpsRequest{Origin: "alice", Snap: bigSnap})
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized snapshot: expected 413, got %d (%s)", w.Code, w.Body.String())
+	}
+	state, _ := h.ops.Load("doc1")
+	if len(state.Snap) != 0 {
+		t.Fatalf("oversized snapshot must not persist: len(snap)=%d", len(state.Snap))
+	}
+}
+
+// The per-document op-log ceiling: appending past the bound is refused (409
+// "snapshot required"), a snapshot-only request compacts the log (the remedy),
+// and ingest resumes afterward. Normal-sized ops within the bound still succeed.
+func TestDocSync_PerDocOpCeilingForcesSnapshot(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	h.maxOpsPerDoc = 3 // small, deterministic ceiling
+	seedDoc(t, st, acl, "doc1", "alice")
+	alice := docSyncRouter(h, "alice", false)
+
+	// A single batch that exceeds the ceiling is refused whole — nothing persists.
+	over := []json.RawMessage{insertOp("alice", 1, "a"), insertOp("alice", 2, "b"), insertOp("alice", 3, "c"), insertOp("alice", 4, "d")}
+	if w := postOps(alice, "doc1", docSyncOpsRequest{Origin: "alice", Ops: over}); w.Code != http.StatusConflict {
+		t.Fatalf("over-ceiling batch: expected 409, got %d (%s)", w.Code, w.Body.String())
+	}
+	if state, _ := h.ops.Load("doc1"); len(state.Ops) != 0 {
+		t.Fatalf("over-ceiling batch must persist nothing: ops=%d", len(state.Ops))
+	}
+
+	// Fill exactly to the ceiling (3 ops) — succeeds.
+	for i := 1; i <= 3; i++ {
+		if w := postOps(alice, "doc1", docSyncOpsRequest{Origin: "alice", Ops: []json.RawMessage{insertOp("alice", i, "a")}}); w.Code != http.StatusOK {
+			t.Fatalf("op %d within ceiling: expected 200, got %d (%s)", i, w.Code, w.Body.String())
+		}
+	}
+	// The next op crosses the ceiling → refused with the actionable 409.
+	w := postOps(alice, "doc1", docSyncOpsRequest{Origin: "alice", Ops: []json.RawMessage{insertOp("alice", 4, "d")}})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("op past ceiling: expected 409, got %d (%s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "snapshot required") {
+		t.Fatalf("409 body should name the remedy, got %s", w.Body.String())
+	}
+
+	// The remedy: a snapshot-only request is always accepted and compacts the log.
+	snap, _ := json.Marshal(map[string]any{"nodes": []any{}})
+	if w := postOps(alice, "doc1", docSyncOpsRequest{Origin: "alice", Snap: snap}); w.Code != http.StatusOK {
+		t.Fatalf("snapshot remedy: expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	if n, _ := h.ops.OpCount("doc1"); n != 0 {
+		t.Fatalf("snapshot should compact the op log to 0, got %d", n)
+	}
+	// Ingest resumes now that the log is compacted.
+	if w := postOps(alice, "doc1", docSyncOpsRequest{Origin: "alice", Ops: []json.RawMessage{insertOp("alice", 5, "e")}}); w.Code != http.StatusOK {
+		t.Fatalf("post-compaction op: expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+// Normal-sized ops are unaffected by the new bounds (regression guard).
+func TestDocSync_NormalOpsUnaffectedByBounds(t *testing.T) {
+	h, st, acl, _ := docSyncFixture(t)
+	seedDoc(t, st, acl, "doc1", "alice")
+	alice := docSyncRouter(h, "alice", false)
+	w := postOps(alice, "doc1", docSyncOpsRequest{Origin: "alice", Ops: []json.RawMessage{insertOp("alice", 1, "h"), insertOp("alice", 2, "i")}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("normal ops: expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	if state, _ := h.ops.Load("doc1"); state.Seq != 2 || len(state.Ops) != 2 {
+		t.Fatalf("normal ops must persist: seq=%d ops=%d", state.Seq, len(state.Ops))
+	}
+}
+
 // ─── Presence (live cursors + roster) — WAVE-COLLAB-PRESENCE ─────────────────
 //
 // Presence is the CLOUD-path live-cursor/roster relay. Its security contract:

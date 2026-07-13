@@ -71,6 +71,12 @@ type Store interface {
 	Load(docID string) (State, error)
 	// MaxSeq returns the highest sequence assigned for docID (0 if none).
 	MaxSeq(docID string) (uint64, error)
+	// OpCount returns how many ops are CURRENTLY persisted in the op log for
+	// docID (i.e. ops recorded after the latest snapshot/compaction base). Unlike
+	// MaxSeq — which is monotonic and includes compacted-away ops — this reflects
+	// the live, un-compacted size of the log, so the ingest gate can force a
+	// client snapshot/compaction before the log grows without bound.
+	OpCount(docID string) (int, error)
 	// Delete removes all op-log + snapshot state for docID (called when the
 	// document itself is deleted).
 	Delete(docID string) error
@@ -257,6 +263,19 @@ func (s *SQLiteStore) MaxSeq(docID string) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.maxSeqLocked(docID)
+}
+
+func (s *SQLiteStore) OpCount(docID string) (int, error) {
+	if docID == "" {
+		return 0, ErrEmptyDocID
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int64
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM docsync_ops WHERE doc_id = ?`, docID).Scan(&n); err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }
 
 func (s *SQLiteStore) Delete(docID string) error {
