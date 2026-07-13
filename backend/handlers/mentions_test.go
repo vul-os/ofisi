@@ -46,8 +46,14 @@ func (m *memCommentStorage) ListComments(fileID string) ([]*models.Comment, erro
 	return out, nil
 }
 func (m *memCommentStorage) UpdateComment(c *models.Comment) error { m.comments[c.ID] = c; return nil }
-func (m *memCommentStorage) DeleteComment(fileID, id string) error { delete(m.comments, id); return nil }
-func (m *memCommentStorage) CreateReply(r *models.CommentReply) error { m.replies[r.ID] = r; return nil }
+func (m *memCommentStorage) DeleteComment(fileID, id string) error {
+	delete(m.comments, id)
+	return nil
+}
+func (m *memCommentStorage) CreateReply(r *models.CommentReply) error {
+	m.replies[r.ID] = r
+	return nil
+}
 func (m *memCommentStorage) GetReply(commentID, id string) (*models.CommentReply, error) {
 	if r, ok := m.replies[id]; ok {
 		return r, nil
@@ -63,7 +69,10 @@ func (m *memCommentStorage) ListReplies(commentID string) ([]*models.CommentRepl
 	}
 	return out, nil
 }
-func (m *memCommentStorage) UpdateReply(r *models.CommentReply) error { m.replies[r.ID] = r; return nil }
+func (m *memCommentStorage) UpdateReply(r *models.CommentReply) error {
+	m.replies[r.ID] = r
+	return nil
+}
 
 func mentionRouter(ch *CommentHandler, nh *NotificationHandler, user string) *gin.Engine {
 	r := gin.New()

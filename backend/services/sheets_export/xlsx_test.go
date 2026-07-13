@@ -66,7 +66,7 @@ func TestRoundTrip_Values(t *testing.T) {
 func TestRoundTrip_SheetNames(t *testing.T) {
 	input := mustMarshal([]map[string]any{
 		{"name": "Alpha", "celldata": []map[string]any{{"r": 0, "c": 0, "v": "a"}}, "config": map[string]any{}},
-		{"name": "Beta",  "celldata": []map[string]any{{"r": 0, "c": 0, "v": "b"}}, "config": map[string]any{}},
+		{"name": "Beta", "celldata": []map[string]any{{"r": 0, "c": 0, "v": "b"}}, "config": map[string]any{}},
 	})
 
 	var buf bytes.Buffer

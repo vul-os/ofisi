@@ -60,10 +60,10 @@ func ParseDocJSON(raw []byte) (*DocJSON, error) {
 
 // Paragraph is a logical paragraph/heading used by both PDF and DOCX renderers.
 type Paragraph struct {
-	Text        string
-	HeadingLevel int  // 0 = normal, 1–6 = heading
-	IsBullet    bool
-	IsCode      bool
+	Text         string
+	HeadingLevel int // 0 = normal, 1–6 = heading
+	IsBullet     bool
+	IsCode       bool
 	IsBlockquote bool
 }
 

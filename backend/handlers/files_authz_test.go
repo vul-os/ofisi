@@ -142,10 +142,10 @@ func (m *memStorage) GetSuggestion(string, string) (*models.Suggestion, error) {
 func (m *memStorage) ListSuggestions(string) ([]*models.Suggestion, error)     { panic("unused") }
 func (m *memStorage) UpdateSuggestion(*models.Suggestion) error                { panic("unused") }
 func (m *memStorage) DeleteSuggestion(string, string) error                    { panic("unused") }
-func (m *memStorage) CreateShareLink(*models.ShareLink) error                   { panic("unused") }
-func (m *memStorage) GetShareLinkByToken(string) (*models.ShareLink, error)     { panic("unused") }
-func (m *memStorage) ListShareLinks(string) ([]*models.ShareLink, error)        { panic("unused") }
-func (m *memStorage) RevokeShareLink(string, string) error                      { panic("unused") }
+func (m *memStorage) CreateShareLink(*models.ShareLink) error                  { panic("unused") }
+func (m *memStorage) GetShareLinkByToken(string) (*models.ShareLink, error)    { panic("unused") }
+func (m *memStorage) ListShareLinks(string) ([]*models.ShareLink, error)       { panic("unused") }
+func (m *memStorage) RevokeShareLink(string, string) error                     { panic("unused") }
 
 var _ storage.Storage = (*memStorage)(nil)
 

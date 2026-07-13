@@ -54,15 +54,15 @@ type Workbook []Sheet
 
 // cellObject is the rich-cell form Fortune Sheet uses most of the time.
 type cellObject struct {
-	V *json.RawMessage `json:"v"` // raw value
-	M *string          `json:"m"` // display string
-	F *string          `json:"f"` // formula
-	BgColor  string    `json:"bg"`
-	FontColor string   `json:"fc"`
-	Bold     int       `json:"bl"`
-	Italic   int       `json:"it"`
-	Underline int      `json:"un"`
-	FontSize int       `json:"fs"`
+	V         *json.RawMessage `json:"v"` // raw value
+	M         *string          `json:"m"` // display string
+	F         *string          `json:"f"` // formula
+	BgColor   string           `json:"bg"`
+	FontColor string           `json:"fc"`
+	Bold      int              `json:"bl"`
+	Italic    int              `json:"it"`
+	Underline int              `json:"un"`
+	FontSize  int              `json:"fs"`
 }
 
 type decodedCell struct {
@@ -200,8 +200,8 @@ func ExportXLSX(jsonData []byte, w io.Writer) error {
 			if styleKey != "0|0|0|0||" {
 				if _, exists := styleCache[styleKey]; !exists {
 					style := &excelize.Style{
-						Font:      &excelize.Font{},
-						Fill:      excelize.Fill{},
+						Font: &excelize.Font{},
+						Fill: excelize.Fill{},
 					}
 					if dc.style.Bold == 1 {
 						style.Font.Bold = true
@@ -324,16 +324,16 @@ func ImportXLSX(r io.Reader) ([]byte, error) {
 					// Try number.
 					if n, err2 := strconv.ParseFloat(val, 64); err2 == nil {
 						obj := map[string]interface{}{
-							"v": n,
-							"m": val,
+							"v":  n,
+							"m":  val,
 							"ct": map[string]string{"fa": "General", "t": "n"},
 						}
 						b, _ := json.Marshal(obj)
 						rawVal = b
 					} else {
 						obj := map[string]interface{}{
-							"v": val,
-							"m": val,
+							"v":  val,
+							"m":  val,
 							"ct": map[string]string{"fa": "General", "t": "s"},
 						}
 						b, _ := json.Marshal(obj)

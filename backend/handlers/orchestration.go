@@ -53,23 +53,23 @@ func NewOrchestrationHandlerWithAuthz(store storage.Storage, authz *FileAuthz) *
 
 // SignerProgress is the per-signer element returned by the status endpoint.
 type SignerProgress struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Email     string            `json:"email"`
-	Order     int               `json:"order"`
+	ID        string              `json:"id"`
+	Name      string              `json:"name"`
+	Email     string              `json:"email"`
+	Order     int                 `json:"order"`
 	Status    models.SignerStatus `json:"status"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	UpdatedAt time.Time           `json:"updated_at"`
 }
 
 // EnvelopeStatusResponse is the full status payload.
 type EnvelopeStatusResponse struct {
-	EnvelopeID string                `json:"envelope_id"`
-	Title      string                `json:"title"`
-	Status     models.EnvelopeStatus `json:"status"`
+	EnvelopeID string                  `json:"envelope_id"`
+	Title      string                  `json:"title"`
+	Status     models.EnvelopeStatus   `json:"status"`
 	OrderMode  models.SigningOrderMode `json:"order_mode"`
-	Signers    []SignerProgress       `json:"signers"`
-	CreatedAt  time.Time             `json:"created_at"`
-	UpdatedAt  time.Time             `json:"updated_at"`
+	Signers    []SignerProgress        `json:"signers"`
+	CreatedAt  time.Time               `json:"created_at"`
+	UpdatedAt  time.Time               `json:"updated_at"`
 }
 
 // Status returns per-signer progress for the envelope.

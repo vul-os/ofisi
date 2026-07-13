@@ -407,7 +407,7 @@ func auditEventsToChainInputs(events []*models.AuditEvent) []signing.AuditChainI
 		inputs = append(inputs, signing.AuditChainInput{
 			ID:            ev.ID,
 			EnvelopeID:    ev.EnvelopeID,
-			SignerID:       ev.SignerID,
+			SignerID:      ev.SignerID,
 			Action:        string(ev.Action),
 			Timestamp:     ev.Timestamp,
 			IP:            ev.IP,

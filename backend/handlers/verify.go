@@ -65,28 +65,28 @@ func (h *VerifyHandler) PublicKey(c *gin.Context) {
 
 // SignerVerifyResult is the per-signer verification result.
 type SignerVerifyResult struct {
-	SignerID  string    `json:"signer_id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	Identity  string    `json:"identity"`
-	SignedAt  time.Time `json:"signed_at,omitempty"`
-	TokenOK   bool      `json:"token_ok"`
-	TokenErr  string    `json:"token_error,omitempty"`
+	SignerID string    `json:"signer_id"`
+	Name     string    `json:"name"`
+	Email    string    `json:"email"`
+	Identity string    `json:"identity"`
+	SignedAt time.Time `json:"signed_at,omitempty"`
+	TokenOK  bool      `json:"token_ok"`
+	TokenErr string    `json:"token_error,omitempty"`
 }
 
 // VerifyResponse is the full verification report returned to the caller.
 type VerifyResponse struct {
-	OK           bool                 `json:"ok"`             // true only when ALL checks pass
-	EnvelopeID   string               `json:"envelope_id"`
-	Title        string               `json:"title"`
-	SealedAt     time.Time            `json:"sealed_at"`
-	FinalHash    string               `json:"final_doc_hash"`
-	HashMatch    bool                 `json:"hash_match"`     // re-hash of uploaded PDF == manifest.final_doc_hash
-	HashErr      string               `json:"hash_error,omitempty"`
-	ChainOK      bool                 `json:"chain_ok"`       // audit hash-chain intact
-	ChainErr     string               `json:"chain_error,omitempty"`
-	Signers      []SignerVerifyResult `json:"signers"`
-	TotalEvents  int                  `json:"total_audit_events"`
+	OK          bool                 `json:"ok"` // true only when ALL checks pass
+	EnvelopeID  string               `json:"envelope_id"`
+	Title       string               `json:"title"`
+	SealedAt    time.Time            `json:"sealed_at"`
+	FinalHash   string               `json:"final_doc_hash"`
+	HashMatch   bool                 `json:"hash_match"` // re-hash of uploaded PDF == manifest.final_doc_hash
+	HashErr     string               `json:"hash_error,omitempty"`
+	ChainOK     bool                 `json:"chain_ok"` // audit hash-chain intact
+	ChainErr    string               `json:"chain_error,omitempty"`
+	Signers     []SignerVerifyResult `json:"signers"`
+	TotalEvents int                  `json:"total_audit_events"`
 }
 
 // ─────────────────────────────────────────────────────────
@@ -283,13 +283,13 @@ func verifyPDFBytes(pdfBytes []byte) VerifyResponse {
 
 // embeddedManifest is a minimal parse target for the JSON embedded in the PDF.
 type embeddedManifest struct {
-	EnvelopeID   string                `json:"envelope_id"`
-	Title        string                `json:"title"`
-	SourceFileID string                `json:"source_file_id"`
-	SealedAt     time.Time             `json:"sealed_at"`
-	FinalHash    string                `json:"final_doc_hash"`
-	Signers      []embeddedSignerRow   `json:"signers"`
-	AuditEvents  []embeddedAuditEvent  `json:"audit_events"`
+	EnvelopeID   string               `json:"envelope_id"`
+	Title        string               `json:"title"`
+	SourceFileID string               `json:"source_file_id"`
+	SealedAt     time.Time            `json:"sealed_at"`
+	FinalHash    string               `json:"final_doc_hash"`
+	Signers      []embeddedSignerRow  `json:"signers"`
+	AuditEvents  []embeddedAuditEvent `json:"audit_events"`
 }
 
 type embeddedSignerRow struct {
@@ -307,7 +307,7 @@ type embeddedSignerRow struct {
 type embeddedAuditEvent struct {
 	ID            string    `json:"id"`
 	EnvelopeID    string    `json:"envelope_id"`
-	SignerID       string   `json:"signer_id,omitempty"`
+	SignerID      string    `json:"signer_id,omitempty"`
 	Action        string    `json:"action"`
 	Timestamp     time.Time `json:"timestamp"`
 	IP            string    `json:"ip,omitempty"`

@@ -116,10 +116,12 @@ func (s *collabStorage) DeleteSuggestion(fileID, sgID string) error {
 	return nil
 }
 
-func (s *collabStorage) CreateShareLink(*models.ShareLink) error               { return nil }
-func (s *collabStorage) GetShareLinkByToken(string) (*models.ShareLink, error) { return nil, errFileNotFound }
-func (s *collabStorage) ListShareLinks(string) ([]*models.ShareLink, error)    { return nil, nil }
-func (s *collabStorage) RevokeShareLink(string, string) error                  { return errFileNotFound }
+func (s *collabStorage) CreateShareLink(*models.ShareLink) error { return nil }
+func (s *collabStorage) GetShareLinkByToken(string) (*models.ShareLink, error) {
+	return nil, errFileNotFound
+}
+func (s *collabStorage) ListShareLinks(string) ([]*models.ShareLink, error) { return nil, nil }
+func (s *collabStorage) RevokeShareLink(string, string) error               { return errFileNotFound }
 
 // ── collabStack ───────────────────────────────────────────────────────────────
 // All handlers share the same storage + authz instance, mirroring production.

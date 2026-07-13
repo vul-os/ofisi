@@ -38,13 +38,13 @@ type Suggestion struct {
 	// From / To are the character-offset range in the base document text that
 	// this suggestion targets. For an insert, From == To (cursor position).
 	// For a delete, From < To is the range to remove.
-	From     int    `json:"from"`
-	To       int    `json:"to"`
+	From int `json:"from"`
+	To   int `json:"to"`
 	// Text is the proposed insertion text (empty for a delete suggestion).
 	Text     string `json:"text"`
 	SeqClock string `json:"seq_clock"`
 	// ReviewerID is set when a reviewer accepts or rejects.
-	ReviewerID string `json:"reviewer_id,omitempty"`
+	ReviewerID string    `json:"reviewer_id,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }

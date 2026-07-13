@@ -58,8 +58,8 @@ func (h *SlidesExportHandler) Export(c *gin.Context) {
 	}
 
 	var rawDeck struct {
-		Title  string                   `json:"title"`
-		Slides []slides_export.Slide    `json:"slides"`
+		Title  string                `json:"title"`
+		Slides []slides_export.Slide `json:"slides"`
 	}
 	if err := json.Unmarshal(contentBytes, &rawDeck); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid slide deck format"})

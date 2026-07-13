@@ -234,7 +234,7 @@ func TestGenerateDOCX_ProducesValidZip(t *testing.T) {
 func TestGenerateDOCX_ContainsRequiredEntries(t *testing.T) {
 	paras := []Paragraph{
 		{Text: "Heading", HeadingLevel: 1},
-		{Text: "Body",    HeadingLevel: 0},
+		{Text: "Body", HeadingLevel: 0},
 	}
 	docxBytes, err := GenerateDOCX("My Doc", paras)
 	if err != nil {
@@ -266,7 +266,7 @@ func TestGenerateDOCX_ContainsRequiredEntries(t *testing.T) {
 func TestGenerateDOCX_DocumentXMLContainsText(t *testing.T) {
 	paras := []Paragraph{
 		{Text: "Hello Vulos", HeadingLevel: 1},
-		{Text: "World text",  HeadingLevel: 0},
+		{Text: "World text", HeadingLevel: 0},
 	}
 	docxBytes, err := GenerateDOCX("Test", paras)
 	if err != nil {

@@ -27,7 +27,7 @@ func TestSweepAttempts_EvictsStaleEntriesPastTTL(t *testing.T) {
 	now := time.Now()
 
 	h.attempts["1.1.1.1"] = &attemptRecord{lastSeen: now.Add(-2 * attemptTTL)} // stale
-	h.attempts["2.2.2.2"] = &attemptRecord{lastSeen: now}                     // fresh
+	h.attempts["2.2.2.2"] = &attemptRecord{lastSeen: now}                      // fresh
 
 	h.mu.Lock()
 	h.lastSweep = time.Time{} // force the sweep to run regardless of the interval gate

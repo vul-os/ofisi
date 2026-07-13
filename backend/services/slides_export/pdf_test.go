@@ -29,7 +29,10 @@ func TestStripHTML(t *testing.T) {
 
 // TestHexToRGB verifies colour parsing.
 func TestHexToRGB(t *testing.T) {
-	cases := []struct{ hex string; r, g, b uint8 }{
+	cases := []struct {
+		hex     string
+		r, g, b uint8
+	}{
 		{"#1a1a2e", 0x1a, 0x1a, 0x2e},
 		{"ffffff", 0xff, 0xff, 0xff},
 		{"000000", 0x00, 0x00, 0x00},

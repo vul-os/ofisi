@@ -19,8 +19,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/signintech/gopdf"
 	_ "embed"
+	"github.com/signintech/gopdf"
 
 	ximage "golang.org/x/image/font/gofont/goregular"
 )
