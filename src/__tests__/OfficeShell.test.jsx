@@ -2,13 +2,14 @@
  * OfficeShell tests
  * 1. Renders the shell (after auth mock)
  * 2. Deep-link routes to the right pane
- * 3. Auth boundary redirects on 401
+ *
+ * The auth boundary itself is covered against the REAL component in
+ * RequireAuth.test.jsx.
  */
 
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { useState, useEffect } from 'react'
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -73,47 +74,5 @@ describe('OfficeShell', () => {
     await waitFor(() => {
       expect(screen.getByTestId('pdf-editor')).toBeTruthy()
     })
-  })
-})
-
-// ─── Auth boundary test (RequireAuth.test.jsx is the dedicated test file) ─────
-// The RequireAuth 401 redirect is fully covered in a separate describe block
-// below using a direct inline component (no module re-import tricks needed).
-
-describe('RequireAuth inline — redirects on 401', () => {
-  // Inline copy of RequireAuth logic for isolated unit testing.
-  // This avoids the vi.mock() scoping conflict with the suite above.
-  function InlineRequireAuth({ children, onRedirect }) {
-    const [state, setState] = useState('loading')
-    useEffect(() => {
-      fetch('/api/auth/me', { credentials: 'include' })
-        .then(r => {
-          if (r.status === 401) {
-            onRedirect?.('https://app.vulos.org/login?next=')
-          } else {
-            setState('authed')
-          }
-        })
-        .catch(() => setState('authed'))
-    }, [])
-    if (state === 'loading') return <div data-testid="loading">loading</div>
-    return children
-  }
-
-  it('calls onRedirect with app.vulos.org/login when /api/auth/me returns 401', async () => {
-    const origFetch = global.fetch
-    global.fetch = vi.fn().mockResolvedValue({ status: 401 })
-
-    const redirectTo = vi.fn()
-
-    await act(async () => {
-      render(<InlineRequireAuth onRedirect={redirectTo}><div>protected</div></InlineRequireAuth>)
-    })
-
-    await waitFor(() => {
-      expect(redirectTo).toHaveBeenCalledWith(expect.stringContaining('app.vulos.org/login'))
-    })
-
-    global.fetch = origFetch
   })
 })
