@@ -195,7 +195,7 @@ type StorageReservation struct {
 // close). On a successful Decision the caller holds the returned reservation and
 // MUST Commit (write succeeded) or Release (write failed) it.
 //
-// Call BEFORE issuing the write/presigned-PUT.
+// Call BEFORE issuing the blob write.
 func GateStorage(ctx context.Context, accountID string, newBytes int64) (Decision, *StorageReservation) {
 	ent := entitlementFor(ctx, accountID)
 	if ent.Suspended {

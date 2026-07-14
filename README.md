@@ -260,7 +260,7 @@ storage:
 
 | Variable | Purpose |
 |----------|---------|
-| `DEPLOY_MODE` | Typed deployment class: `standalone` (default when unset — fully sovereign self-host), `os` (Office behind a Vulos OS box gateway; storage via scoped `X-Vulos-Storage-*` headers), or `cloud` (multi-tenant, per-object presigned-URL storage). Read once at boot and validated for coherent config. In `os`/`cloud` mode the process **refuses to start** unless an authenticated identity posture is configured (auth enabled or SSO introspection), closing the silent multi-tenant fail-open. |
+| `DEPLOY_MODE` | Typed deployment class: `standalone` (default when unset — fully sovereign self-host and the client-side demo/showcase) or `os` (Office behind a Vulos OS box gateway; storage via scoped `X-Vulos-Storage-*` headers). Read once at boot and validated for coherent config. Apps run on the user's OS box or standalone — never multi-tenant cloud-hosted. In `os` mode the process **refuses to start** unless an authenticated identity posture is configured (auth enabled or SSO introspection), closing the silent hosted fail-open. |
 | `VULOS_STORAGE_BROKER_SECRET` | Shared secret gating the OS-mode scoped-storage header seam (`DEPLOY_MODE=os`), so Office never holds full-bucket credentials. |
 | `DATABASE_URL` | **Postgres backend** — full `postgres://…` connection URL. When set, selects Postgres as the document storage backend (schema `office`) and overrides `config.yaml storage.type`. Alias: `VULOS_DATABASE_URL` (checked second). Unset = embedded JSON-file default. |
 | `VULOS_DATABASE_URL` | Alias for `DATABASE_URL` (checked if `DATABASE_URL` is unset). |

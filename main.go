@@ -69,16 +69,13 @@ func main() {
 	log.Printf("vulos-office %s starting", Version)
 	obs.Init()
 
-	// Typed DEPLOY_MODE (standalone|os|cloud): read once, validate coherent
-	// config, self-report at boot. Formalizes what Office previously inferred from
+	// Typed DEPLOY_MODE (standalone|os): read once, validate coherent config,
+	// self-report at boot. Formalizes what Office previously inferred from
 	// scattered env (VULOS_CP_BASE_URL / VULOS_STORAGE_BROKER_SECRET / TIGRIS_*).
 	// Never fails the boot — an invalid value degrades to the safe Standalone
-	// default with a logged warning.
+	// default with a logged warning. Blob I/O is the gateway-header seam (os) or
+	// the process-wide local client (standalone); see backend/handlers/bucket_store.go.
 	mode := deploymode.Load()
-	// The cloud blob path (per-object presign; NEVER raw bucket creds) is engaged
-	// only in cloud mode. Install it into the shared blob store before any file
-	// handler runs; a no-op in standalone/os (header-seam / process-wide client).
-	handlers.ConfigureStorageMode(mode)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -148,12 +145,12 @@ func main() {
 		log.Printf("[sso] session introspection disabled (no %s); local single-identity mode", session.EnvIdentityURL)
 	}
 
-	// ── Multi-tenant boot gate (fail-closed) ──────────────────────────────────
-	// A hosted deployment (DEPLOY_MODE=os|cloud) MUST come up with an authenticated
+	// ── Hosted-mode boot gate (fail-closed) ───────────────────────────────────
+	// A hosted deployment (DEPLOY_MODE=os) MUST come up with an authenticated
 	// posture. The protected/write route groups below install auth middleware ONLY
 	// when (cfg.Auth.Enabled || sessionIntrospector != nil); with neither, a hosted
 	// process would boot with NO auth wall and every caller would resolve to the
-	// single shared "self" identity — a silent multi-tenant fail-open. RequireAuthPosture
+	// single shared "self" identity — a silent fail-open. RequireAuthPosture
 	// refuses that here (fatal), naming the missing config. Standalone is unaffected.
 	// Passed the EXACT condition the route groups gate on.
 	if err := mode.RequireAuthPosture(cfg.Auth.Enabled, sessionIntrospector != nil); err != nil {

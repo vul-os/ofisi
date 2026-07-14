@@ -17,10 +17,9 @@ func TestFromEnv_ValidValues(t *testing.T) {
 	cases := map[string]Mode{
 		"standalone": Standalone,
 		"os":         OS,
-		"cloud":      Cloud,
 		// case-insensitive + surrounding whitespace tolerated.
-		"  CLOUD ": Cloud,
-		"Os":       OS,
+		"  STANDALONE ": Standalone,
+		"Os":            OS,
 	}
 	for raw, want := range cases {
 		t.Run(raw, func(t *testing.T) {
@@ -36,6 +35,20 @@ func TestFromEnv_ValidValues(t *testing.T) {
 	}
 }
 
+// TestFromEnv_CloudRejected proves the retired multi-tenant "cloud" mode is no
+// longer a recognised value: it degrades to the safe Standalone default with an
+// error rather than resurrecting the removed presign path.
+func TestFromEnv_CloudRejected(t *testing.T) {
+	t.Setenv(EnvVar, "cloud")
+	m, err := FromEnv()
+	if err == nil {
+		t.Fatalf("retired DEPLOY_MODE=cloud: expected an error, got nil")
+	}
+	if m != Standalone {
+		t.Fatalf("retired DEPLOY_MODE=cloud = %q, want fallback %q", m, Standalone)
+	}
+}
+
 func TestFromEnv_InvalidValue_FallsBackWithError(t *testing.T) {
 	t.Setenv(EnvVar, "hybrid")
 	m, err := FromEnv()
@@ -48,13 +61,15 @@ func TestFromEnv_InvalidValue_FallsBackWithError(t *testing.T) {
 }
 
 func TestMode_Valid(t *testing.T) {
-	for _, m := range []Mode{Standalone, OS, Cloud} {
+	for _, m := range []Mode{Standalone, OS} {
 		if !m.Valid() {
 			t.Errorf("%q should be Valid()", m)
 		}
 	}
-	if Mode("nope").Valid() {
-		t.Errorf(`Mode("nope") should not be Valid()`)
+	for _, bad := range []Mode{"cloud", "nope"} {
+		if bad.Valid() {
+			t.Errorf("Mode(%q) should not be Valid()", bad)
+		}
 	}
 }
 
@@ -65,66 +80,22 @@ func TestMode_IsCloudAdjacent(t *testing.T) {
 	if !OS.IsCloudAdjacent() {
 		t.Errorf("os must be cloud-adjacent")
 	}
-	if !Cloud.IsCloudAdjacent() {
-		t.Errorf("cloud must be cloud-adjacent")
-	}
-}
-
-func TestMode_UsesPresignStorage(t *testing.T) {
-	if Standalone.UsesPresignStorage() || OS.UsesPresignStorage() {
-		t.Errorf("only cloud uses the presign storage seam")
-	}
-	if !Cloud.UsesPresignStorage() {
-		t.Errorf("cloud must use the presign storage seam")
-	}
 }
 
 func TestLoad_NeverPanics(t *testing.T) {
 	t.Setenv(EnvVar, "garbage")
-	t.Setenv(EnvPresignURL, "https://app.vulos.org") // keep Load() out of the cloud fatal gate
 	// Load must degrade to Standalone and never panic on a bad value.
 	if m := Load(); m != Standalone {
 		t.Fatalf("Load() with garbage = %q, want %q", m, Standalone)
 	}
 }
 
-// TestValidateCloud_NoPresign_Errors is the CRITICAL fail-closed regression
-// guard: DEPLOY_MODE=cloud with no presign seam configured must be refused
-// (Load turns this into log.Fatalf), never silently degraded to a fallback
-// that would hand Office raw, suite-wide bucket credentials in a multi-tenant
-// cloud process.
-func TestValidateCloud_NoPresign_Errors(t *testing.T) {
-	t.Setenv(EnvPresignURL, "")
-	if err := Cloud.validateCloud(); err == nil {
-		t.Fatalf("VULN: Cloud.validateCloud() with no %s configured returned nil — cloud boot must be refused", EnvPresignURL)
-	}
-}
-
-func TestValidateCloud_WithPresign_OK(t *testing.T) {
-	t.Setenv(EnvPresignURL, "https://app.vulos.org")
-	if err := Cloud.validateCloud(); err != nil {
-		t.Fatalf("Cloud.validateCloud() with %s set: unexpected error %v", EnvPresignURL, err)
-	}
-}
-
-func TestValidateCloud_StandaloneAndOS_Unaffected(t *testing.T) {
-	// Standalone and OS never require the presign seam — validateCloud must be
-	// a no-op for them regardless of whether the env var is set.
-	t.Setenv(EnvPresignURL, "")
-	if err := Standalone.validateCloud(); err != nil {
-		t.Fatalf("Standalone.validateCloud() must never error, got %v", err)
-	}
-	if err := OS.validateCloud(); err != nil {
-		t.Fatalf("OS.validateCloud() must never error, got %v", err)
-	}
-}
-
-// TestRequireAuthPosture is the fail-closed multi-tenant boot-gate regression
-// guard. A hosted mode (os/cloud) with NEITHER native auth NOR a wired session
+// TestRequireAuthPosture is the fail-closed hosted-mode boot-gate regression
+// guard. An OS-hosted mode with NEITHER native auth NOR a wired session
 // introspector must be REFUSED (Load/main turns the error into a fatal), because
 // the protected/write route groups would otherwise install no auth middleware
 // and every caller would collapse to the single shared "self" identity — a
-// silent multi-tenant fail-open. Standalone must always be allowed.
+// silent fail-open. Standalone must always be allowed.
 func TestRequireAuthPosture(t *testing.T) {
 	cases := []struct {
 		name            string
@@ -134,15 +105,12 @@ func TestRequireAuthPosture(t *testing.T) {
 		wantErr         bool
 	}{
 		// VULN case: hosted mode, no auth wall at all → must refuse to boot.
-		{"cloud_no_auth_no_introspector_REFUSED", Cloud, false, false, true},
 		{"os_no_auth_no_introspector_REFUSED", OS, false, false, true},
 
 		// Hosted mode with EITHER identity source → boot proceeds.
-		{"cloud_auth_enabled_ok", Cloud, true, false, false},
-		{"cloud_introspector_ok", Cloud, false, true, false},
-		{"cloud_both_ok", Cloud, true, true, false},
 		{"os_auth_enabled_ok", OS, true, false, false},
 		{"os_introspector_ok", OS, false, true, false},
+		{"os_both_ok", OS, true, true, false},
 
 		// Standalone single-tenant self-host: always allowed, even with no auth.
 		{"standalone_no_auth_ok", Standalone, false, false, false},

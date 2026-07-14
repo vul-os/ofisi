@@ -24,8 +24,6 @@ import (
 	"io"
 	"log"
 
-	"vulos-office/backend/deploymode"
-	"vulos-office/backend/session"
 	"vulos-office/backend/storage"
 
 	"github.com/gin-gonic/gin"
@@ -44,50 +42,6 @@ var sharedBucketStore = &BucketStore{}
 // no-op.
 func SharedBucketStore() *BucketStore {
 	return sharedBucketStore
-}
-
-// storagePresign is the cloud presign client, installed by ConfigureStorageMode
-// when DEPLOY_MODE=cloud. Nil in standalone/os mode, where the header-seam /
-// process-wide client path is used instead.
-var storagePresign *storage.PresignClient
-
-// ConfigureStorageMode wires the blob-storage path for the resolved DEPLOY_MODE.
-// In CLOUD mode it installs the per-object presign client (Office never holds
-// raw bucket credentials — see backend/storage/presign.go). In standalone/os
-// mode it is a no-op: the existing gateway-header seam / process-wide client
-// path is used unchanged. Called once from main() at boot.
-//
-// FAIL CLOSED: main() already refuses to boot before reaching this call when
-// DEPLOY_MODE=cloud has no presign seam configured (deploymode.Load ->
-// validateCloud). This is a second, defense-in-depth gate at the call site
-// itself: if UsesPresignStorage() is ever true with no presign client resolved
-// (e.g. a future caller invokes this directly, bypassing Load's boot gate), we
-// refuse to silently fall back to clientFor()'s process-wide OrgBucketClient(),
-// which would hand a multi-tenant cloud process raw, suite-wide bucket creds.
-func ConfigureStorageMode(mode deploymode.Mode) {
-	if !mode.UsesPresignStorage() {
-		return
-	}
-	storagePresign = storage.PresignClientFromEnv()
-	if storagePresign == nil {
-		log.Fatalf("[bucket_store] DEPLOY_MODE=cloud but %s is unset — refusing to boot: "+
-			"falling back to the process-wide object client would hand this multi-tenant "+
-			"cloud process raw, suite-wide bucket credentials", storage.EnvPresignURL)
-	}
-	log.Printf("[bucket_store] cloud storage: per-object presign path enabled (no raw bucket creds held)")
-}
-
-// sessionCookieFrom extracts the end-user's vc_session cookie value from the
-// request so the presign client can forward it to the gateway (which derives the
-// userID from it). Empty when absent.
-func sessionCookieFrom(c *gin.Context) string {
-	if c == nil || c.Request == nil {
-		return ""
-	}
-	if ck, err := c.Request.Cookie(session.CookieName); err == nil {
-		return ck.Value
-	}
-	return ""
 }
 
 // seamConfigFromContext reads the per-request storage seam injected by the OS
@@ -128,19 +82,6 @@ func (b *BucketStore) clientFor(c *gin.Context) (*storage.OfficeS3Client, error)
 // callers can treat SQLite/local as the sole source. The contentType argument
 // is informational and currently unused.
 func (b *BucketStore) PutObject(c *gin.Context, accountID, name string, data []byte, contentType string) error {
-	// CLOUD: mint a per-object presigned PUT from the gateway and upload to it —
-	// Office never holds raw bucket creds. The gateway composes the full key
-	// "<userID>/office/<relKey>" from the forwarded session, so we pass only the
-	// relative object name. A gateway with no object store (type="local") returns
-	// stored=false and we treat the local/SQLite store as authoritative.
-	if storagePresign != nil {
-		relKey := storage.SanitizePresignRelKey(name)
-		if _, err := storagePresign.Put(c.Request.Context(), sessionCookieFrom(c), relKey, data, contentType); err != nil {
-			log.Printf("[bucket_store] presign PutObject key=%q: %v", relKey, err)
-			return err
-		}
-		return nil
-	}
 	client, err := b.clientFor(c)
 	if err != nil {
 		log.Printf("[bucket_store] resolve client: %v", err)
@@ -161,16 +102,6 @@ func (b *BucketStore) PutObject(c *gin.Context, accountID, name string, data []b
 // "<accountID>/<name>". Returns (nil, nil) when no S3 client applies so callers
 // can skip the object-store path cleanly.
 func (b *BucketStore) GetObject(c *gin.Context, accountID, name string) ([]byte, error) {
-	// CLOUD: fetch via a per-object presigned GET (no raw creds held).
-	if storagePresign != nil {
-		relKey := storage.SanitizePresignRelKey(name)
-		data, _, err := storagePresign.Get(c.Request.Context(), sessionCookieFrom(c), relKey)
-		if err != nil {
-			log.Printf("[bucket_store] presign GetObject key=%q: %v", relKey, err)
-			return nil, err
-		}
-		return data, nil
-	}
 	client, err := b.clientFor(c)
 	if err != nil {
 		return nil, err
@@ -195,20 +126,6 @@ func (b *BucketStore) GetObject(c *gin.Context, accountID, name string) ([]byte,
 // DeleteObject removes the object for the current request's caller at the key
 // "<accountID>/<name>". Silent no-op when no S3 client applies.
 func (b *BucketStore) DeleteObject(c *gin.Context, accountID, name string) error {
-	// CLOUD: the OS gateway presign contract mints only GET/PUT grants (S3
-	// presigned URLs sign a single method; there is no DELETE presign surface),
-	// so deletes go through the gateway's separate server-mediated delete
-	// endpoint instead of a minted grant — the gateway performs the delete
-	// itself after composing "<userID>/office/<relKey>" from the forwarded
-	// session, so Office never touches the object store directly here either.
-	if storagePresign != nil {
-		relKey := storage.SanitizePresignRelKey(name)
-		if err := storagePresign.Delete(c.Request.Context(), sessionCookieFrom(c), relKey); err != nil {
-			log.Printf("[bucket_store] presign DeleteObject key=%q: %v", relKey, err)
-			return err
-		}
-		return nil
-	}
 	client, err := b.clientFor(c)
 	if err != nil {
 		return err
