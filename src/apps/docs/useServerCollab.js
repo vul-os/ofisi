@@ -1,36 +1,38 @@
 /**
- * useServerCollab — React hook wiring the WAVE37 server-mediated collaboration
- * session (ServerCollabSession) into a TipTap-backed editor.
+ * useServerCollab — React hook wiring the server-mediated collaboration session
+ * (YServerCollabSession) into the Docs editor's Y.Doc.
  *
  * This is the CLOUD / account collaboration path: an ACL-gated server relay that
- * persists CRDT ops authoritatively, so two editors on the account path converge
- * and the doc stays saved even with ZERO p2p peers, and a late joiner catches up
- * from the server. It is ADDITIVE and orthogonal to both:
- *   • the cloud DocsCollabSession (p2p fabric, plaintext) and
- *   • the E2E P2PCollabSession (invite-link, encrypted).
+ * persists the document's Yjs updates authoritatively, so two editors on the
+ * account path converge and stay saved even with ZERO p2p peers, and a late
+ * joiner catches up from the server.
  *
- * ── p2p-vs-server decision ──────────────────────────────────────────────────
- * The E2E p2p path (opened by a `#vp2p=` invite fragment or "Collaborate via
- * link") is E2E-ENCRYPTED and its ops must NEVER traverse the readable server.
- * So this hook is DISABLED whenever the E2E p2p session is active (`e2eActive`).
- * In every other case — the normal account path — the server session runs, and
- * it is precisely the fallback that keeps collaboration working when the p2p
- * fabric can't reach a relay/peer (its degrade-to-local-only gap). The two are
- * complementary: local edits fan out to BOTH the fabric DocsCollabSession and
- * this server session; because TextCRDT.apply is idempotent/commutative, ops
- * arriving from either transport converge with no double-apply.
+ * ── p2p-vs-server decision (unchanged) ─────────────────────────────────────
+ * The E2E p2p path (a `#vp2p=` invite fragment or "Collaborate via link") is
+ * end-to-end encrypted and its updates must NEVER traverse the readable server,
+ * so this hook is DISABLED whenever that session is active (`e2eActive`). In
+ * every other case the server session runs; it is the fallback that keeps
+ * collaboration working when no p2p peer is reachable.
  *
- * Graceful: if the server route is absent/unreachable (self-host without the
- * endpoint, offline), join()'s bootstrap fails soft and the editor keeps working
- * locally (autosave still persists via the doc service).
+ * ── What the caller must do ────────────────────────────────────────────────
+ * Nothing, per keystroke. The document IS the Y.Doc: local edits flow out of it
+ * and remote updates flow into it, and y-prosemirror keeps the editor in step.
+ * There is no onLocalText/onRemoteText contract any more — that text-diff
+ * contract was the bug (it could not carry formatting, and its offsets did not
+ * map to document positions).
  *
- * Returns { active, live, readOnly, onLocalText } where onLocalText(prev, next)
- * must be called from the editor's onUpdate, and remote converged text is pushed
- * via the onRemoteText callback the caller supplies.
+ * The caller passes the Y context and the document's authoritative ProseMirror
+ * JSON (`seedJSON`, from models.File.Content) which is used ONLY to seed a
+ * document the server has no Yjs state for — a brand-new doc, or an existing one
+ * being upgraded from the legacy text-CRDT log (see yServerSession.js).
+ *
+ * `ready` goes true once the document is hydrated (bootstrapped and/or seeded).
+ * The editor must not be editable before that: typing into an empty document
+ * that is about to be hydrated would fork it.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ServerCollabSession } from '../../lib/crdt/serverSession.js'
+import { YServerCollabSession } from '../../lib/crdt/yServerSession.js'
 
 function getOrCreatePeerId() {
   try {
@@ -45,41 +47,37 @@ function getOrCreatePeerId() {
 /**
  * @param {object} opts
  * @param {string} opts.fileId
- * @param {(text: string) => void} opts.onRemoteText  apply converged text to editor
- * @param {boolean} [opts.enabled=true]   master switch (e.g. off in single-user)
- * @param {boolean} [opts.e2eActive=false] true when the E2E p2p session is live —
- *                                          the server path is suppressed so
- *                                          encrypted ops never hit the server.
+ * @param {object} opts.ctx        { ydoc, shadow, schema } (createYContext)
+ * @param {object} opts.seedJSON   authoritative PM JSON; null until the file loads
+ * @param {boolean} [opts.enabled=true]
+ * @param {boolean} [opts.e2eActive=false]
  */
-export function useServerCollab({ fileId, onRemoteText, enabled = true, e2eActive = false }) {
+export function useServerCollab({ fileId, ctx, seedJSON, enabled = true, e2eActive = false }) {
   const [active, setActive] = useState(false)
   const [live, setLive] = useState(false)
   const [readOnly, setReadOnly] = useState(false)
-  // Server-mediated presence roster (accountId → identity + cursor). This makes
-  // "who is here" + live cursors work on the CLOUD path — i.e. even when the p2p
-  // fabric can't reach a relay/peer, so presence is no longer p2p-only.
+  const [degraded, setDegraded] = useState(false)
+  const [ready, setReady] = useState(false)
   const [roster, setRoster] = useState([])
   const sessionRef = useRef(null)
-  const onRemoteTextRef = useRef(onRemoteText)
-  onRemoteTextRef.current = onRemoteText
   const liveTimerRef = useRef(null)
+  // The seed is only read at join time; keep it in a ref so a later re-render
+  // (autosave updating the file object) cannot re-run the join effect.
+  const seedRef = useRef(seedJSON)
+  seedRef.current = seedJSON
+
+  const hasSeed = seedJSON != null
 
   useEffect(() => {
-    // Suppress the server path while the E2E p2p session is active — its ops are
-    // encrypted and must not be routed through the readable server.
-    if (!enabled || e2eActive || !fileId) {
-      setActive(false)
-      return
-    }
+    if (!enabled || e2eActive || !fileId || !ctx) { setActive(false); return }
+    // Wait for the document's authoritative content: joining before it is known
+    // would seed an EMPTY document over a real one.
+    if (!hasSeed) return
     if (typeof window === 'undefined') return
 
     let cancelled = false
-    const peerId = getOrCreatePeerId()
-    const session = new ServerCollabSession({ fileId, peerId })
+    const session = new YServerCollabSession({ fileId, peerId: getOrCreatePeerId(), ctx })
 
-    session.addEventListener('change', (ev) => {
-      if (ev.detail?.remote) onRemoteTextRef.current?.(ev.detail.text)
-    })
     session.addEventListener('readonly', () => { if (!cancelled) setReadOnly(true) })
     session.addEventListener('presence', (ev) => {
       if (!cancelled) setRoster(ev.detail?.roster || [])
@@ -88,12 +86,18 @@ export function useServerCollab({ fileId, onRemoteText, enabled = true, e2eActiv
     sessionRef.current = session
     setActive(true)
 
-    session.join().catch((err) => {
-      // Bootstrap/stream unavailable — non-fatal, editor stays local (autosave).
-      console.warn('[server-collab] join failed (local-only):', err?.message)
-    })
+    session.join({ seedJSON: seedRef.current })
+      .then((res) => {
+        if (cancelled) return
+        setDegraded(!!res.degraded)
+        setReady(true)
+      })
+      .catch((err) => {
+        // Never leave the editor locked out: a failed join degrades to local-only.
+        console.warn('[y-collab] join failed (local-only):', err?.message)
+        if (!cancelled) { setDegraded(true); setReady(true) }
+      })
 
-    // Poll the session's live flag (SSE open/close) so the UI can reflect it.
     liveTimerRef.current = setInterval(() => {
       if (!cancelled) setLive(!!session.live)
     }, 1000)
@@ -106,22 +110,15 @@ export function useServerCollab({ fileId, onRemoteText, enabled = true, e2eActiv
       setActive(false)
       setLive(false)
       setReadOnly(false)
+      setDegraded(false)
+      setReady(false)
       setRoster([])
     }
-  }, [fileId, enabled, e2eActive])
+  }, [fileId, enabled, e2eActive, ctx, hasSeed])
 
-  // Push a local editor text change into the server CRDT session.
-  const onLocalText = useCallback((prevText, nextText) => {
-    const s = sessionRef.current
-    if (!s) return []
-    return s.applyLocal(prevText, nextText)
-  }, [])
-
-  // Announce the local cursor/selection + identity to the other viewers over the
-  // server path. Debounced inside the session. No-op when the session is absent.
   const broadcastPresence = useCallback((presence) => {
     sessionRef.current?.setPresence?.(presence)
   }, [])
 
-  return { active, live, readOnly, roster, onLocalText, broadcastPresence, session: sessionRef }
+  return { active, live, readOnly, degraded, ready, roster, broadcastPresence, session: sessionRef }
 }

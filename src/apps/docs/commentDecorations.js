@@ -32,11 +32,34 @@
  * current live `[from,to]` for each decoration so the caller can persist the
  * moved positions back into the CommentStore (`remapAnchors`). A range that
  * collapsed to zero width is reported as `null` → the store marks it orphaned.
+ *
+ * RE-ANCHORING UNDER COLLABORATION
+ * --------------------------------
+ * Position mapping alone is NOT enough once a remote peer can change the
+ * document. y-prosemirror applies a remote change by REPLACING the whole
+ * document (see its sync-plugin `_typeChanged`: `tr.replace(0, doc.content.size,
+ * …)`), so every decoration mapped through that transaction collapses and the
+ * highlight is simply lost — the comment would silently stop pointing at its
+ * text.
+ *
+ * So when collaboration is active we ALSO hold each anchor as a Yjs RELATIVE
+ * POSITION — a position expressed against the CRDT's own item ids rather than a
+ * numeric offset. It survives any concurrent edit by construction (it is what
+ * y-prosemirror itself uses to restore the local selection across a remote
+ * change). On a remote transaction we rebuild the decorations by resolving those
+ * relative positions against the new document, instead of mapping the old ones.
+ * An anchor whose text a peer deleted resolves to nothing and is reported as
+ * orphaned, exactly as a locally-deleted one is.
  */
 
 import { Extension } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import {
+  ySyncPluginKey,
+  absolutePositionToRelativePosition,
+  relativePositionToAbsolutePosition,
+} from 'y-prosemirror'
 
 export const COMMENT_PLUGIN_KEY = new PluginKey('commentDecorations')
 
@@ -197,6 +220,81 @@ export function readMappedRanges(decorationSet, comments) {
   return out
 }
 
+// ---------------------------------------------------------------------------
+// Collaborative re-anchoring (Yjs relative positions)
+// ---------------------------------------------------------------------------
+
+/** The y-prosemirror binding for this editor, or null when collab is off. */
+function yBinding(state) {
+  try {
+    const ystate = ySyncPluginKey.getState(state)
+    if (!ystate || !ystate.binding || !ystate.type) return null
+    return ystate
+  } catch { return null }
+}
+
+/** True when this transaction is a remote peer's change applied by the sync plugin. */
+export function isRemoteChange(tr) {
+  try { return !!tr?.getMeta(ySyncPluginKey)?.isChangeOrigin } catch { return false }
+}
+
+/**
+ * Convert each decoration's [from,to] into Yjs RELATIVE positions, so the anchor
+ * can be recovered after a remote change replaces the document. A no-op (returns
+ * the previous map) when the document is not collaborative.
+ */
+function captureRelativeAnchors(state, decorationSet, prev) {
+  const ystate = yBinding(state)
+  if (!ystate) return prev
+  const rel = new Map()
+  try {
+    for (const d of decorationSet.find()) {
+      const id = decorationCommentId(d)
+      if (!id || rel.has(id)) continue
+      rel.set(id, {
+        from: absolutePositionToRelativePosition(d.from, ystate.type, ystate.binding.mapping),
+        to: absolutePositionToRelativePosition(d.to, ystate.type, ystate.binding.mapping),
+      })
+    }
+  } catch {
+    return prev  // binding not ready — keep what we had
+  }
+  return rel
+}
+
+/**
+ * Rebuild the decoration set from the relative anchors after a remote change.
+ * Returns null when there is nothing to rebuild from (caller falls back).
+ *
+ * An anchor whose text the peer deleted resolves to null / a collapsed range and
+ * is dropped — the comment becomes orphaned, which is the same outcome as a local
+ * deletion and is what the panel already knows how to show.
+ */
+function rebuildFromRelativeAnchors(state, old) {
+  const ystate = yBinding(state)
+  if (!ystate || !old.rel || old.rel.size === 0) return null
+  const decos = []
+  try {
+    for (const [id, r] of old.rel) {
+      const from = relativePositionToAbsolutePosition(ystate.doc, ystate.type, r.from, ystate.binding.mapping)
+      const to = relativePositionToAbsolutePosition(ystate.doc, ystate.type, r.to, ystate.binding.mapping)
+      if (from == null || to == null || to <= from) continue   // orphaned
+      const size = state.doc.content.size
+      if (from < 0 || to > size) continue
+      const comment = (old.comments || []).find((c) => c.id === id)
+      decos.push(specToDecoration({
+        commentId: id,
+        from,
+        to,
+        resolved: comment?.state === 'resolved',
+      }, old.activeId))
+    }
+  } catch {
+    return null
+  }
+  return { ...old, decorations: DecorationSet.create(state.doc, decos) }
+}
+
 /**
  * Return the comment id whose highlight covers the editor's current caret
  * position, or null. Used for the keyboard "focus comment at cursor" shortcut.
@@ -242,6 +340,10 @@ export function createCommentDecorationsExtension(opts = {}) {
                 activeId: null,
                 flashId: null,
                 decorations: DecorationSet.empty,
+                // commentId → { from: Y.RelativePosition, to: Y.RelativePosition }
+                // Only populated when the document is collaborative. See the
+                // RE-ANCHORING note in the header.
+                rel: new Map(),
               }
             },
             apply(tr, old, _oldState, newState) {
@@ -252,17 +354,37 @@ export function createCommentDecorationsExtension(opts = {}) {
                 let flashId = old.flashId
                 if (meta.flash !== undefined) flashId = meta.flash
                 if (meta.clearFlash !== undefined && old.flashId === meta.clearFlash) flashId = null
+                const decorations = buildDecorationSet(newState.doc, comments, activeId, flashId)
                 return {
                   comments,
                   activeId,
                   flashId,
-                  decorations: buildDecorationSet(newState.doc, comments, activeId, flashId),
+                  decorations,
+                  rel: captureRelativeAnchors(newState, decorations, old.rel),
                 }
               }
               if (!tr.docChanged) return old
-              // Map existing decorations through the edit so highlights follow
-              // their text; this is the "survive edits" path.
-              return { ...old, decorations: old.decorations.map(tr.mapping, tr.doc) }
+
+              // A REMOTE peer's change: y-prosemirror replaced the whole document,
+              // so mapping the old decorations through this transaction would
+              // simply delete them. Rebuild from the CRDT-relative anchors, which
+              // track the text itself rather than a numeric offset.
+              if (isRemoteChange(tr)) {
+                const rebuilt = rebuildFromRelativeAnchors(newState, old)
+                if (rebuilt) return rebuilt
+                // No relative anchors yet (e.g. the very first remote frame before
+                // any comment was rendered) — fall through to plain mapping.
+              }
+
+              // Local edit: map existing decorations through it so highlights
+              // follow their text, then refresh the relative anchors from the
+              // mapped positions.
+              const decorations = old.decorations.map(tr.mapping, tr.doc)
+              return {
+                ...old,
+                decorations,
+                rel: captureRelativeAnchors(newState, decorations, old.rel),
+              }
             },
           },
           props: {

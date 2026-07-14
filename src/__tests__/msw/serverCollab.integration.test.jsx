@@ -22,8 +22,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { server, resetMock, mockState } from './server.js'
+import { getSchema } from '@tiptap/core'
+import StarterKit from '@tiptap/starter-kit'
 import { ServerCollabSession } from '../../lib/crdt/serverSession.js'
 import { useServerCollab } from '../../apps/docs/useServerCollab.js'
+import { Y, createYContext, Y_FRAGMENT } from '../../lib/crdt/ydoc.js'
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }))
 afterEach(() => server.resetHandlers())
@@ -218,23 +221,44 @@ describe('WAVE37 graceful degrade (no server relay)', () => {
 })
 
 // ── The useServerCollab hook (UI wiring of the read-only gate) ───────────────
+//
+// The hook now carries the STRUCTURE-AWARE document (a Y.Doc) rather than a
+// plain-text diff: a local edit is a Yjs update out of the document, not an
+// onLocalText(prev, next) call. The contract these tests pin is unchanged — a
+// viewer's publish is refused by the server and the UI must reflect it, and the
+// server path must stay silent while the E2E p2p session owns the document.
 
 describe('useServerCollab hook — UI reflects the server read-only gate', () => {
-  it('sets readOnly=true when a viewer\'s op push is refused', async () => {
+  /** A Y context with a real Docs schema, as DocsEditor builds it. */
+  function makeCtx() {
+    const ydoc = new Y.Doc()
+    const ctx = createYContext(getSchema([StarterKit]), ydoc)
+    return ctx
+  }
+  const seedJSON = { type: 'doc', content: [{ type: 'paragraph' }] }
+
+  it('sets readOnly=true when a viewer\'s edit is refused by the server', async () => {
     resetMock({ role: 'viewer' })
-    const remote = vi.fn()
+    const ctx = makeCtx()
     const { result } = renderHook(() =>
-      useServerCollab({ fileId: 'doc1', onRemoteText: remote, enabled: true }))
+      useServerCollab({ fileId: 'doc1', ctx, seedJSON, enabled: true }))
 
     await waitFor(() => expect(result.current.active).toBe(true))
-    act(() => { result.current.onLocalText('', 'blocked') })
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    // A local edit to the document — the session publishes it and is refused 403.
+    act(() => {
+      const frag = ctx.ydoc.getXmlFragment(Y_FRAGMENT)
+      const p = new Y.XmlElement('paragraph')
+      p.insert(0, [new Y.XmlText('blocked')])
+      frag.insert(frag.length, [p])
+    })
     await waitFor(() => expect(result.current.readOnly).toBe(true))
   })
 
-  it('is suppressed while the E2E p2p session is active (encrypted ops never hit the server)', async () => {
+  it('is suppressed while the E2E p2p session is active (encrypted updates never hit the server)', async () => {
     const before = mockState.calls.length
     const { result } = renderHook(() =>
-      useServerCollab({ fileId: 'doc1', onRemoteText: vi.fn(), enabled: true, e2eActive: true }))
+      useServerCollab({ fileId: 'doc1', ctx: makeCtx(), seedJSON, enabled: true, e2eActive: true }))
     // Never activates → never bootstraps → no /v1 collab traffic.
     await tick(50)
     expect(result.current.active).toBe(false)

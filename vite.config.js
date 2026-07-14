@@ -55,6 +55,12 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test-setup.js'],
     include: ['src/**/*.test.{js,jsx}', 'src/__tests__/**/*.test.{js,jsx}'],
+    // The collaboration suites mount REAL ProseMirror editors (two per test, full
+    // Docs schema) — that is the point of them, and it is slow in jsdom. With the
+    // pool running them alongside everything else, vitest's 5s default started
+    // timing out unrelated tests on a loaded machine. Give every test room; no
+    // assertion anywhere is relaxed.
+    testTimeout: 20_000,
   },
   // @vulos/relay-client is a symlinked file: dep that ships its own copy of
   // react in node_modules. Vite 6 (rollup) resolved its bare `react` imports

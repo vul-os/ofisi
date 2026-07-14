@@ -59,8 +59,11 @@ test.describe('Sheets chart wizard (wave-54) — real-browser insert flow', () =
     await expect(dialog).toBeVisible()
     // All five wave-54 chart types are offered as a radiogroup.
     const radios = dialog.getByRole('radiogroup', { name: 'Chart type' })
+    // exact: the wave-62 chart types added "Stacked column" / "% column" /
+    // "Stacked bar" …, so a substring match on "Column" now resolves to three
+    // radios (strict-mode violation). Match the exact label.
     for (const t of ['Column', 'Bar', 'Line', 'Area', 'Pie']) {
-      await expect(radios.getByRole('radio', { name: t })).toBeVisible()
+      await expect(radios.getByRole('radio', { name: t, exact: true })).toBeVisible()
     }
     // The range field exists (defaults may be empty on a deep-link with no marquee).
     await expect(dialog.locator('#chart-range')).toBeVisible()
@@ -82,7 +85,7 @@ test.describe('Sheets chart wizard (wave-54) — real-browser insert flow', () =
       await expect(dialog).toBeVisible()
 
       // Pick the type (radiogroup → aria-checked flips) and type an A1 range.
-      const radio = dialog.getByRole('radio', { name: kind })
+      const radio = dialog.getByRole('radio', { name: kind, exact: true })
       await radio.click()
       await expect(radio).toHaveAttribute('aria-checked', 'true')
       await dialog.locator('#chart-range').fill('A1:B3')
@@ -108,7 +111,7 @@ test.describe('Sheets chart wizard (wave-54) — real-browser insert flow', () =
     await page.getByRole('button', { name: 'Insert chart' }).click()
     const dialog = page.getByRole('dialog', { name: 'Insert chart' })
     await expect(dialog).toBeVisible()
-    await dialog.getByRole('radio', { name: 'Column' }).click()
+    await dialog.getByRole('radio', { name: 'Column', exact: true }).click()
     await dialog.locator('#chart-range').fill('A1:B3')
     await dialog.getByRole('button', { name: 'Insert chart' }).click()
     await expect(dialog).toBeHidden()
@@ -142,7 +145,7 @@ test.describe('Sheets chart wizard (wave-54) — real-browser insert flow', () =
 
     await page.getByRole('button', { name: 'Insert chart' }).click()
     const dialog = page.getByRole('dialog', { name: 'Insert chart' })
-    await dialog.getByRole('radio', { name: 'Column' }).click()
+    await dialog.getByRole('radio', { name: 'Column', exact: true }).click()
     await dialog.locator('#chart-range').fill('A1:B3')
     // Type a script-y title into the wizard's plain text input.
     await dialog.locator('#chart-title').fill('<img src=x onerror=window.__pwn()>')

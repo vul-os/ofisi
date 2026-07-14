@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useEditor, EditorContent, Extension, Mark } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { DOMParser as PMDOMParser } from '@tiptap/pm/model'
+import { ySyncPluginKey } from 'y-prosemirror'
 import StarterKit from '@tiptap/starter-kit'
 import { DocImage, fileToDataUri, isEmbeddableImage } from './docsImage.js'
 import Link from '@tiptap/extension-link'
@@ -58,10 +60,12 @@ import HistoryPanel from '../../components/HistoryPanel'
 import CommentsPanel from '../../components/CommentsPanel'
 import SuggestionPanel from '../../components/SuggestionPanel'
 import ActivityFeed from '../../components/ActivityFeed'
-import { DocsCollabSession } from '../../lib/crdt/index.js'
 import { useP2PCollab } from './useP2PCollab.js'
 import { useServerCollab } from './useServerCollab.js'
 import { docsCollabEnabled, DOCS_COLLAB_OFF_NOTICE } from '../../lib/flags.js'
+import { Y, createYContext, Y_FRAGMENT } from '../../lib/crdt/ydoc.js'
+import { YCollab } from './collabExtension.js'
+import { useCollabFabric } from '../../lib/collab/useCollabFabric.js'
 import P2PShareModal from './components/P2PShareModal.jsx'
 import AccountShareModal from '../../components/AccountShareModal.jsx'
 import { useAuthStore } from '../../store/authStore'
@@ -113,88 +117,52 @@ const RETRY_DELAY_MS = 4000
 const AUTOSAVE_DELAY_MS = 2000
 
 // ---------------------------------------------------------------------------
-// applyTextPatch — apply a remote CRDT text change to a TipTap editor
-// without clobbering the local caret position.
+// Collaborative sync (structure-aware).
 //
-// Strategy: locate the changed region (common prefix/suffix), then issue
-// TipTap deleteRange + insertContentAt so only the changed characters are
-// touched. This keeps the caret stable for insertions and deletions outside
-// the user's current cursor region.
+// The document is a Y.XmlFragment kept in lock-step with the ProseMirror
+// document by y-prosemirror (see collabExtension.js). Remote changes arrive as
+// Yjs updates and are applied as ProseMirror TRANSACTIONS with correctly mapped
+// positions, so formatting and structure propagate and a remote change can never
+// be placed at a wrong offset.
+//
+// This replaces the old plain-text transport, which diffed editor.getText() and
+// replayed the diff with deleteRange + insertContentAt at a character offset. It
+// could not carry formatting or structure at all, and getText() emits no
+// delimiters between block nodes — so its offsets did not address positions in a
+// structured document and a remote insert could land inside the wrong node.
 // ---------------------------------------------------------------------------
-// WAVE-52: detect structured block nodes (tables) whose cell layout means the
-// plain-text offset used by the character patch below no longer maps 1:1 to a
-// ProseMirror document position. Applying a text-offset delete/insert across a
-// table boundary can split cells or orphan rows. When such a node is present we
-// skip the fragile in-place patch (the authoritative doc JSON is still saved on
-// every edit, and late-joiner/full-state reconcile keeps peers convergent), so
-// a remote keystroke can never corrupt table structure. Non-table docs keep the
-// caret-stable minimal patch exactly as before.
-//
-// WAVE-57: an `image` is an atomic (leaf) block node that contributes no text
-// to the plain-text projection the patch diffs against, so a text-offset
-// delete/insert straddling it could clobber the node the same way it can split
-// a table cell. Treat images as structured too — when a doc contains an image we
-// fall back to full-state reconcile (authoritative JSON still saved every edit),
-// keeping the image node stable across the wave-37 CRDT.
-function docHasStructuredNodes(editor) {
-  let found = false
-  try {
-    editor.state.doc.descendants((node) => {
-      // P4: math nodes are atomic leaf nodes carrying no plain text — treat them
-      // as structured (like image/table) so a text-offset patch can't clobber them.
-      if (node.type.name === 'table' || node.type.name === 'image' ||
-          node.type.name === 'mathInline' || node.type.name === 'mathBlock') {
-        found = true; return false
-      }
-      return true
-    })
-  } catch { /* non-fatal */ }
-  return found
+
+/**
+ * True when a transaction was produced by the sync plugin applying a REMOTE
+ * peer's change (rather than by the local user). y-prosemirror stamps those
+ * transactions with isChangeOrigin.
+ */
+function isRemoteTransaction(tr) {
+  try { return !!tr?.getMeta(ySyncPluginKey)?.isChangeOrigin } catch { return false }
 }
 
-export function applyTextPatch(editor, prevText, nextText) {
-  if (prevText === nextText) return
-
-  // Tables (and other structured blocks) make the plain-text→doc-position
-  // mapping ambiguous; skip the in-place patch rather than risk corrupting the
-  // node tree. Convergence is preserved by JSON persistence + full-state sync.
-  if (docHasStructuredNodes(editor)) return
-
-  // Find common prefix.
-  let pre = 0
-  while (pre < prevText.length && pre < nextText.length && prevText[pre] === nextText[pre]) pre++
-
-  // Find common suffix (not overlapping prefix).
-  let suf = 0
-  while (
-    suf < prevText.length - pre &&
-    suf < nextText.length - pre &&
-    prevText[prevText.length - 1 - suf] === nextText[nextText.length - 1 - suf]
-  ) suf++
-
-  const deleteCount = prevText.length - pre - suf
-  const insertStr = nextText.slice(pre, nextText.length - suf)
-
-  // TipTap positions are 1-based (the doc node itself occupies position 0).
-  // getText() returns all chars with no extra delimiters, but character
-  // offset in the doc may differ from string offset in multi-node docs.
-  // For a plain-text approximation we use from=pre+1 which is valid for
-  // simple single-paragraph docs; for richly-structured docs this is a
-  // best-effort reconcile.
-  const from = pre + 1
-  const to = from + deleteCount
-
-  // UNDO-INTEGRITY: a REMOTE peer's edit must NOT enter this editor's local undo
-  // history. Without addToHistory:false, TipTap's history extension records the
-  // remote deleteRange/insert, so the local user's next Ctrl+Z reverts the PEER's
-  // change — which then re-broadcasts as a local delete and corrupts the shared
-  // document (and Ctrl+Y could resurrect a peer-deleted node). Tag the transaction
-  // so only genuinely-local keystrokes are undoable.
-  editor.chain()
-    .command(({ tr }) => { tr.setMeta('addToHistory', false); return true })
-    .deleteRange({ from, to })
-    .insertContentAt(from, insertStr)
-    .run()
+/**
+ * The document's authoritative content as ProseMirror JSON, for seeding the
+ * Y.Doc on first open (see yServerSession.js — this is the whole migration).
+ *
+ * `content` is what the document has always been saved as: TipTap JSON, or an
+ * imported `_html` string (already sanitised by resolveContent). Page setup and
+ * header/footer ride the same object as sibling keys and are NOT part of the
+ * document — they are stripped so the seed is exactly the ProseMirror document
+ * (and so the deterministic seed hash is stable).
+ */
+export function contentToPMJSON(content, schema) {
+  const resolved = resolveContent(content)
+  if (typeof resolved === 'string') {
+    // Imported HTML. Parse it against the real schema so anything the schema
+    // cannot represent is dropped here, not smuggled into the document.
+    const el = document.createElement('div')
+    el.innerHTML = resolved
+    return PMDOMParser.fromSchema(schema).parse(el).toJSON()
+  }
+  const { pageSetup: _ps, headerFooter: _hf, _html: _h, ...doc } = resolved
+  if (!doc || doc.type !== 'doc') return { type: 'doc', content: [{ type: 'paragraph' }] }
+  return doc
 }
 
 // Derive a stable peerId for this browser session (persists across reloads).
@@ -249,6 +217,24 @@ function buildSuggestionPlugin() {
           })
           return {
             suggestions: meta.suggestions,
+            decorations: DecorationSet.create(newState.doc, decos),
+          }
+        }
+        // A remote peer's change replaces the whole document (y-prosemirror), so
+        // mapping the old decorations through it would delete them and the pending
+        // suggestions would silently stop being highlighted. Rebuild them from the
+        // suggestion list instead.
+        //
+        // (Suggestion offsets are still plain-text offsets — that is a pre-existing
+        // limitation of the suggestion model, not of the sync path. What matters
+        // here is that a remote edit does not make the highlights vanish.)
+        if (isRemoteTransaction(tr)) {
+          const pending = (old.suggestions || []).filter((s) => s.state === 'pending')
+          const decos = pending.flatMap((s) => {
+            try { return [makeSuggestionDecoration(s.from, s.to, s.kind)] } catch { return [] }
+          })
+          return {
+            suggestions: old.suggestions,
             decorations: DecorationSet.create(newState.doc, decos),
           }
         }
@@ -352,49 +338,40 @@ export default function DocsEditor() {
   const [suggestions, setSuggestions] = useState([])
   const suggestionModeRef = useRef(false)
   const prevTextForSugRef = useRef('')   // plain text before the suggestion-mode edit
-  const [collabPeers, setCollabPeers] = useState({})  // peerId → state
   const saveTimer = useRef(null)
   const retryTimer = useRef(null)
   const titleRef = useRef(title)
   titleRef.current = title
 
-  // CRDT collab session (OFFICE-22)
-  const collabRef = useRef(null)
   // Stable ref of the collab gate for the once-created useEditor callbacks.
   const collabEnabledRef = useRef(collabEnabled)
   collabEnabledRef.current = collabEnabled
-  // Tracks the plain text the CRDT last saw so we can diff on next local edit.
-  const prevCrdtTextRef = useRef('')
-  // Flag: true while we're applying a remote op so onUpdate doesn't re-broadcast.
+  // Flag: true while we apply a PROGRAMMATIC local edit (accepting a suggestion)
+  // so the suggestion-mode intercept in onUpdate doesn't capture it as a proposal.
   const applyingRemoteRef = useRef(false)
 
+  // ── The collaborative document (Yjs) ──────────────────────────────────────
+  // The Y.Doc IS the document when collab is on: local edits flow out of it and
+  // remote updates flow into it, and y-prosemirror keeps the ProseMirror document
+  // in step. `yctx` also carries the shadow doc + schema that the sessions use to
+  // validate an untrusted peer's update BEFORE it can reach the live document.
+  const ydoc = useMemo(
+    () => (collabEnabled && id ? new Y.Doc() : null),
+    [collabEnabled, id],
+  )
+  const yctx = useMemo(() => (ydoc ? createYContext(null, ydoc) : null), [ydoc])
+  // Seed content (the document's authoritative PM JSON). Null until the file has
+  // loaded — the sessions must not join before it is known, or they would seed an
+  // EMPTY document over a real one.
+  const [seedJSON, setSeedJSON] = useState(null)
+
   // ── WAVE-25: secure local/P2P collab (invite-link, E2E, ro-enforced) ───────
-  // Additive second collab mode — orthogonal to the cloud DocsCollabSession
-  // above. Active only when the URL carries a #vp2p= invite or the user shares.
   const [showP2PShare, setShowP2PShare] = useState(false)
   // Account-based sharing (named users, role-scoped, ACL-enforced). The primary
   // Share entry point; it offers the complementary P2P E2E link path alongside.
   const [showAccountShare, setShowAccountShare] = useState(false)
   const myAccountId = useAuthStore((s) => s.accountId)
-  const editorRefForP2P = useRef(null)   // set below once `editor` exists
-  const applyRemoteP2PText = useCallback((remoteText) => {
-    const ed = editorRefForP2P.current
-    if (!ed) return
-    applyingRemoteRef.current = true
-    try {
-      const cur = ed.getText()
-      if (cur !== remoteText) {
-        applyTextPatch(ed, cur, remoteText)
-        prevCrdtTextRef.current = ed.getText()
-      }
-    } finally {
-      applyingRemoteRef.current = false
-    }
-  }, [])
-  const p2p = useP2PCollab({ fileId: id, onRemoteText: applyRemoteP2PText, enabled: collabEnabled })
-  // Stable ref so the once-created onUpdate closure always calls the latest
-  // p2p.onLocalText (assigned on every render below).
-  const p2pOnLocalTextRef = useRef(null)
+  const p2p = useP2PCollab({ fileId: id, ctx: yctx, enabled: collabEnabled })
 
   // Honesty guard: an invite link was opened but live co-editing is disabled for
   // this build. The link can never connect them — say so instead of leaving them
@@ -423,20 +400,26 @@ export default function DocsEditor() {
     )
   }, [p2p.peeringUnavailable, showToast])
 
-  // WAVE37: server-mediated collab (the CLOUD / account path). Complements the
-  // p2p fabric — keeps two editors in sync + persisted even when no p2p peer is
+  // Server-mediated collab (the CLOUD / account path). Complements the p2p
+  // fabric — keeps two editors in sync + persisted even when no p2p peer is
   // reachable, and gives a late joiner current state from the server. Suppressed
-  // while the E2E p2p session is active (encrypted ops must not hit the readable
-  // server) via e2eActive. Remote text applies through the SAME guarded patch as
-  // p2p, so ops from either transport converge with no double-apply.
+  // while the E2E p2p session is active (encrypted updates must not hit the
+  // readable server) via e2eActive. Both transports carry Yjs updates into the
+  // SAME Y.Doc; Yjs merges are idempotent + commutative, so an update that
+  // arrives over both never double-applies.
   const server = useServerCollab({
     fileId: id,
-    onRemoteText: applyRemoteP2PText,
+    ctx: yctx,
+    seedJSON,
     e2eActive: p2p.active,
     enabled: collabEnabled,
   })
-  const serverOnLocalTextRef = useRef(null)
-  serverOnLocalTextRef.current = server.onLocalText
+
+  // The collaborative document is HYDRATED once the server session has
+  // bootstrapped (or seeded, or honestly degraded to local-only). Until then the
+  // editor must stay read-only: typing into a document that is about to be
+  // hydrated would fork it. When collab is off there is nothing to wait for.
+  const collabReady = !collabEnabled || server.ready
 
   // Subscribe to save state changes for this file
   useEffect(() => {
@@ -446,7 +429,20 @@ export default function DocsEditor() {
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3, 4] },
+        // With collaboration on, undo/redo MUST come from Yjs (see
+        // collabExtension.js): ProseMirror's history is document-wide, so Ctrl+Z
+        // would revert a REMOTE peer's change — which then re-broadcasts as a
+        // local delete and corrupts the shared document. The Yjs UndoManager is
+        // user-scoped; it only ever undoes this user's own edits.
+        ...(collabEnabled ? { history: false } : {}),
+      }),
+      // The Yjs sync + undo plugins. Only present when collaboration is on; with
+      // it off the editor is a plain single-user TipTap editor.
+      ...(collabEnabled && ydoc
+        ? [YCollab.configure({ fragment: ydoc.getXmlFragment(Y_FRAGMENT) })]
+        : []),
       // WAVE-57: hardened inline-image node (raster-only embeds, width/align/alt).
       DocImage,
       Link.configure({ openOnClick: false }),
@@ -490,7 +486,13 @@ export default function DocsEditor() {
       // P5: live-updating table of contents (auto-refreshes from headings).
       TableOfContentsNode,
     ],
-    content: resolveContent(file?.content),
+    // With collaboration ON the document comes from the Y.Doc (the sync plugin
+    // owns the content), so passing `content` here would fight the seed and could
+    // duplicate the document. It is seeded once, from the same authoritative JSON,
+    // in the effect below.
+    content: collabEnabled ? undefined : resolveContent(file?.content),
+    // Not editable until the collaborative document is hydrated — see collabReady.
+    editable: !collabEnabled,
     // WAVE-57: paste / drop a raster image → embed it as a bounded base64 data:
     // URI. Goes through isEmbeddableImage + fileToDataUri (raster-only, size-
     // capped, SVG refused) — the exact same gate as the toolbar picker, so no
@@ -530,11 +532,18 @@ export default function DocsEditor() {
         return true
       },
     },
-    onUpdate: ({ editor: ed }) => {
+    onUpdate: ({ editor: ed, transaction }) => {
+      // A REMOTE peer's change arrives as a ProseMirror transaction from the sync
+      // plugin. It must not be treated as a local edit: suggestion mode would
+      // "undo" the peer's change and record it as this user's proposal. We still
+      // autosave it below — the document's authoritative JSON should reflect what
+      // the document now says, whoever typed it.
+      const remote = collabEnabledRef.current && isRemoteTransaction(transaction)
+
       // ── OFFICE-27: suggestion mode intercept ──────────────────────────────
       // When suggestion mode is active: undo the edit, compute the diff, and
       // record it as a pending suggestion instead of applying it directly.
-      if (suggestionModeRef.current && !applyingRemoteRef.current) {
+      if (suggestionModeRef.current && !applyingRemoteRef.current && !remote) {
         const nextText = ed.getText()
         const prevText = prevTextForSugRef.current
         if (nextText !== prevText) {
@@ -575,24 +584,11 @@ export default function DocsEditor() {
       setRetryCount(0)
       saveTimer.current = setTimeout(() => doSave(), AUTOSAVE_DELAY_MS)
 
-      // CRDT broadcast: skip if this update was triggered by a remote apply, and
-      // skip entirely when live co-editing is disabled (nothing leaves this tab).
-      if (collabEnabledRef.current && !applyingRemoteRef.current) {
-        const nextText = ed.getText()
-        if (collabRef.current) {
-          collabRef.current.applyLocal(prevCrdtTextRef.current, nextText)
-        }
-        // WAVE-25: also drive the P2P session when active (no-op for ro peers).
-        if (p2pOnLocalTextRef.current) {
-          p2pOnLocalTextRef.current(prevCrdtTextRef.current, nextText)
-        }
-        // WAVE37: also drive the server-mediated session (the cloud/account path;
-        // inert while the E2E p2p session is active, no-op for viewers).
-        if (serverOnLocalTextRef.current) {
-          serverOnLocalTextRef.current(prevCrdtTextRef.current, nextText)
-        }
-        prevCrdtTextRef.current = nextText
-      }
+      // NOTE: there is no broadcast here any more. The document IS the Y.Doc —
+      // y-prosemirror writes every local transaction into it, and the sessions
+      // (server + p2p) carry its updates. The old code diffed ed.getText() and
+      // shipped the diff, which is exactly what could not carry formatting and
+      // could land a remote change at the wrong offset.
     },
     onSelectionUpdate: ({ editor: ed }) => {
       // OFFICE-25: broadcast local caret/selection position to peers over BOTH
@@ -640,77 +636,38 @@ export default function DocsEditor() {
     })
   }, [id])
 
-  // Apply pending content once editor is ready
+  // Apply pending content once editor is ready.
+  // NOT in collab mode: there the document comes from the Y.Doc (seeded below).
+  // Calling setContent would fight the seed and could duplicate the document.
   useEffect(() => {
+    if (collabEnabled) { if (pendingContent !== null) setPendingContent(null); return }
     if (editor && pendingContent !== null) {
       editor.commands.setContent(pendingContent, false)
       setPendingContent(null)
     }
-  }, [editor, pendingContent])
+  }, [editor, pendingContent, collabEnabled])
 
-  // ── CRDT collab session (OFFICE-22) ──────────────────────────────────────
+  // ── Seed the collaborative document from its authoritative content ────────
+  // The document's content has always been persisted as TipTap JSON on the file
+  // itself (models.File.Content) — that is what the editor has always opened, and
+  // the only representation that ever held the formatting and structure. It is
+  // therefore also the migration path: a document whose server op log is still in
+  // the legacy text-CRDT format is seeded from HERE, and the legacy log is dropped
+  // (see lib/crdt/yServerSession.js). The session uses this only if the server
+  // holds no Yjs state for the document.
   useEffect(() => {
-    if (!id) return
-    // Co-editing disabled → never join the fabric. No ops are broadcast and no
-    // remote op is ever applied to this editor. (Presence/live cursors ride the
-    // same fabric, so they are off too — the UI says so rather than showing an
-    // empty roster that looks like "nobody else is here".)
-    if (!collabEnabled) return
-
-    const peerId = getOrCreatePeerId()
-    const session = new DocsCollabSession({ fileId: id, peerId })
-    collabRef.current = session
-
-    // Remote-change handler: apply peer op to editor without caret jump.
-    session.addEventListener('change', (ev) => {
-      if (!ev.detail.remote) return
-      const remoteText = ev.detail.text
-      // Guard: don't re-broadcast this programmatic update.
-      applyingRemoteRef.current = true
-      try {
-        // We reconcile by replacing editor content only when the plain text
-        // has actually diverged.  We preserve the HTML structure by doing a
-        // character-level merge instead of a full setContent replacement:
-        // for plain-text divergence we fall back to setContent on the
-        // current JSON with the text patched.  The common case (single char
-        // insert/delete) is handled via TipTap's insertContentAt / deleteRange
-        // so the caret stays stable.
-        //
-        // For simplicity in V1 we use a safe full-replace only when the
-        // texts differ, keeping the existing JSON structure otherwise.
-        // This covers the no-caret-jump requirement for small edits.
-        if (editorRef.current) {
-          const ed = editorRef.current
-          const curText = ed.getText()
-          if (curText !== remoteText) {
-            // Build a minimal patch: find common prefix/suffix and apply
-            // TipTap commands to sync the plain-text range that changed.
-            applyTextPatch(ed, curText, remoteText)
-            prevCrdtTextRef.current = ed.getText()
-          }
-        }
-      } finally {
-        applyingRemoteRef.current = false
-      }
-    })
-
-    // Peer connection-state events (for optional UI indicator).
-    session.addEventListener('state', (ev) => {
-      const { peerId: pid, state } = ev.detail
-      setCollabPeers((prev) => ({ ...prev, [pid]: state }))
-    })
-
-    // Async join — errors are non-fatal (signaling may be unavailable
-    // in single-user / offline mode; local editing continues normally).
-    session.join().catch((err) => {
-      console.warn('[collab] fabric join failed (single-user mode):', err?.message)
-    })
-
-    return () => {
-      session.leave()
-      collabRef.current = null
+    if (!collabEnabled || !editor || !id) return
+    if (seedJSON !== null) return               // already computed for this doc
+    if (!file) return                           // still loading
+    // The Y sessions validate untrusted updates against the live schema.
+    if (yctx && !yctx.schema) yctx.schema = editor.schema
+    try {
+      setSeedJSON(contentToPMJSON(file.content, editor.schema))
+    } catch (err) {
+      console.warn('[y-collab] could not read the document content for seeding:', err?.message)
+      setSeedJSON({ type: 'doc', content: [{ type: 'paragraph' }] })
     }
-  }, [id, collabEnabled])
+  }, [collabEnabled, editor, id, file, seedJSON, yctx])
 
   // P5: reflect the spellcheck toggle onto the editable DOM + persist it.
   useEffect(() => {
@@ -721,28 +678,22 @@ export default function DocsEditor() {
     } catch { /* non-fatal */ }
   }, [editor, spellcheck])
 
-  // Keep a ref to the editor instance for use inside the collab event handler.
+  // Keep a ref to the editor instance for use inside effects/handlers.
   const editorRef = useRef(null)
   useEffect(() => {
     editorRef.current = editor
-    editorRefForP2P.current = editor
   }, [editor])
 
-  // WAVE-25: keep the stable ref pointed at the latest p2p.onLocalText.
-  p2pOnLocalTextRef.current = p2p.onLocalText
-
-  // WAVE-25: read-only peers cannot edit the shared document — make the editor
-  // itself non-editable so the UX matches the ro capability (they still see
-  // live remote edits and a read-only badge).
+  // Editability:
+  //   • a read-only P2P peer (view-only invite link) can never edit the shared
+  //     document — the editor matches the capability rather than letting them
+  //     type into a document their edits can't reach;
+  //   • nobody may type before the collaborative document is HYDRATED, or the
+  //     keystrokes would land in a document that is about to be replaced by the
+  //     seed/bootstrap (a fork).
   useEffect(() => {
-    if (editor) editor.setEditable(!p2p.readOnly)
-  }, [editor, p2p.readOnly])
-
-  // WAVE-25: seed the P2P diff baseline once the editor mounts, so the first
-  // local edit diffs against the real content, not ''.
-  useEffect(() => {
-    if (editor && p2p.active) prevCrdtTextRef.current = editor.getText()
-  }, [editor, p2p.active])
+    if (editor) editor.setEditable(!p2p.readOnly && collabReady)
+  }, [editor, p2p.readOnly, collabReady])
 
   // ── OFFICE-27: Suggestion mode ────────────────────────────────────────────
 
@@ -932,15 +883,17 @@ export default function DocsEditor() {
       }
     } catch { localCursorIdentity.current = { accountId: 'local', displayName: 'Me' } }
   }
-  // Expose fabric from collab session for cursor transport.
-  const [fabricForCursors, setFabricForCursors] = useState(null)
-  useEffect(() => {
-    // collabRef.current is set inside the CRDT effect above; check after it runs.
-    const check = () => setFabricForCursors(collabRef.current?.fabric ?? null)
-    // Give the collab effect a tick to run first.
-    const t = setTimeout(check, 100)
-    return () => clearTimeout(t)
-  }, [id])
+  // The peering fabric carries live cursors + the presence roster. The DOCUMENT
+  // no longer rides it (that is Yjs over the server relay / the E2E p2p room) —
+  // this is presence only, which is exactly what the shared hook provides (the
+  // same one Sheets and Slides use). It probes reachability first, so a
+  // standalone server yields an honest empty roster rather than a false "Live".
+  const localPeerId = useMemo(() => getOrCreatePeerId(), [])
+  const { fabric: fabricForCursors, peers: collabPeers } = useCollabFabric({
+    sessionId: id,
+    peerId: localPeerId,
+    enabled: collabEnabled,
+  })
 
   const { remoteCursors, broadcastDocCursor } = useLiveCursors({
     fabric: fabricForCursors,
@@ -1260,8 +1213,12 @@ export default function DocsEditor() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg">
-      {/* Draft-restore banner — only banner we keep, because it requires action */}
-      {draft && (
+      {/* Draft-restore banner — only banner we keep, because it requires action.
+          Withheld until the collaborative document is hydrated: restoring writes
+          a whole document through the editor, and doing that BEFORE the seed /
+          bootstrap lands would put the draft into an empty document that the seed
+          then arrives alongside — i.e. the document twice. */}
+      {draft && collabReady && (
         <div className="flex items-center gap-3 px-4 py-2 bg-warning-bg border-b border-line text-xs text-warning animate-fade-in">
           <AlertCircle size={14} className="flex-shrink-0" />
           <span className="flex-1 text-ink-muted">
@@ -1322,6 +1279,25 @@ export default function DocsEditor() {
                 >
                   <Users size={11} />
                   Live co-editing off
+                </span>
+              </Tooltip>
+            )}
+            {/* Co-editing is ON but we could not reach the sync service (offline,
+                or a deployment without the collab route). The document still
+                saves, but nothing is syncing — and a user must never be left
+                believing their co-editing works when it doesn't. Say it. */}
+            {collabEnabled && server.degraded && (
+              <Tooltip label={
+                "Couldn't reach the collaboration service, so live co-editing is not " +
+                'running for this session. Your changes are still being saved — reload ' +
+                'once you are back online to sync up.'
+              }>
+                <span
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-pill bg-warning-bg text-warning border border-line"
+                  data-testid="collab-degraded-pill"
+                >
+                  <AlertCircle size={11} />
+                  Not syncing
                 </span>
               </Tooltip>
             )}

@@ -24,14 +24,17 @@
  *
  * Values: "on" | "1" | "true" enable; "off" | "0" | "false" disable.
  *
- * DEFAULT: OFF, today, deliberately. The current Docs sync path diffs the
- * document as PLAIN TEXT (editor.getText()), so (a) remote formatting and
- * structure never propagate at all and (b) a plain-text offset does not map to
- * a ProseMirror position in a multi-block document, which can land a remote
- * insertion inside the wrong node and corrupt the document structure. Until
- * that transport is replaced with a structure-aware one, co-editing is off by
- * default and honestly labelled unavailable rather than silently corrupting
- * documents. Set VITE_DOCS_COLLAB=on to re-enable it knowingly.
+ * DEFAULT: ON. The sync path is now structure-aware (Yjs + y-prosemirror — see
+ * lib/crdt/ydoc.js): remote changes arrive as ProseMirror transactions with
+ * correctly mapped positions, so formatting and structure propagate and a remote
+ * change can never be applied at a wrong offset. The flag remains as an operator
+ * kill-switch — set VITE_DOCS_COLLAB=off to ship Docs as a single-user editor,
+ * and the UI will say so plainly rather than degrade silently.
+ *
+ * (It defaulted OFF for exactly one commit: the transport before this one diffed
+ * the document as PLAIN TEXT, which could not carry formatting at all and whose
+ * character offsets did not address positions in a structured document — a remote
+ * insert could land inside the wrong node and corrupt it.)
  */
 
 function env(name) {
@@ -65,7 +68,7 @@ function boolFlag(name, dflt) {
  * simply never sends or applies a remote document op.
  */
 export function docsCollabEnabled() {
-  return boolFlag('VITE_DOCS_COLLAB', false)
+  return boolFlag('VITE_DOCS_COLLAB', true)
 }
 
 /** User-facing copy for why co-editing is unavailable (kept in one place). */

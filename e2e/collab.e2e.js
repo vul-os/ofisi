@@ -119,16 +119,17 @@ test.describe('Comments (E2E)', () => {
 })
 
 /**
- * Live co-editing is FLAG-GATED (VITE_DOCS_COLLAB, see src/lib/flags.js) and the
- * default build ships it OFF, because the sync transport diffs the document as
- * plain text and can place a remote change at the wrong position in a structured
- * document. These tests pin the gate as the bundle actually ships it: no ops
- * leave the tab, and the UI says co-editing is off rather than pretending.
- * (When the transport is structure-aware and the flag defaults on, these become
- * assertions that ops DO flow — see the collab suite in src/apps/docs.)
+ * Server-authoritative collab, in the real browser, over the STRUCTURE-AWARE
+ * document format (Yjs — see src/lib/crdt/ydoc.js).
+ *
+ * The document no longer travels as a plain-text diff (which could not carry
+ * formatting and whose offsets did not address positions in a structured
+ * document). An op on the wire is now a Yjs update envelope {y:1,u:<base64>}, and
+ * that is asserted here so a regression back to the text format is caught in the
+ * bundle the user actually runs, not just in unit tests.
  */
-test.describe('Docs live co-editing gate (E2E)', () => {
-  test('with co-editing off, typing pushes NO ops to the server relay', async ({ page }) => {
+test.describe('Server-authoritative collab (E2E smoke)', () => {
+  test('an editor typing in the doc pushes structure-aware ops to the server relay', async ({ page }) => {
     await installBackend(page, { role: 'owner' })
     const relay = await installCollabRelay(page, { role: 'owner' })
 
@@ -136,29 +137,69 @@ test.describe('Docs live co-editing gate (E2E)', () => {
     await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
 
     await page.locator('.ProseMirror').click()
-    await page.keyboard.type(' a local-only edit')
-    await page.waitForTimeout(1500) // well past the old publish debounce
+    await page.keyboard.type(' plus a server-synced edit')
 
-    // Nothing was sent, and nothing was even requested: no transport was opened.
-    expect(relay.posts).toBe(0)
-    expect(relay.ops.length).toBe(0)
-    // The edit is in the document (single-user editing is unaffected).
-    await expect(page.locator('.ProseMirror')).toContainText('a local-only edit')
+    await expect.poll(() => relay.ops.length, { timeout: 10_000 }).toBeGreaterThan(0)
+    expect(relay.posts).toBeGreaterThan(0)
+
+    // Every op is a Yjs update envelope — never a legacy RGA TextOp ({k,id,p,v,t}),
+    // which is the format that could not carry a heading, a table or a bold mark.
+    for (const rec of relay.ops) {
+      expect(rec.op).toMatchObject({ y: 1 })
+      expect(typeof rec.op.u).toBe('string')
+      expect(rec.op.k).toBeUndefined()
+    }
   })
 
-  test('the UI states plainly that live co-editing is off', async ({ page }) => {
+  test('formatting a selection publishes the change (the text-diff transport could not)', async ({ page }) => {
     await installBackend(page, { role: 'owner' })
-    await installCollabRelay(page, { role: 'owner' })
+    const relay = await installCollabRelay(page, { role: 'owner' })
 
     await page.goto('/docs/doc1')
     await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
 
-    await expect(page.getByTestId('collab-off-pill')).toContainText(/live co-editing off/i)
+    // Select existing text and bold it — NO text changes, only a mark.
+    await page.locator('.ProseMirror').click()
+    await page.keyboard.press('ControlOrMeta+A')
+    const opsBefore = relay.ops.length
+    await page.getByTitle(/Bold/i).first().click()
 
-    // The share dialog says what sharing does and does not do, and offers no
-    // P2P invite link (a link that could never sync).
-    await page.getByRole('button', { name: /Share — with people/i }).click()
-    await expect(page.getByTestId('live-collab-notice')).toContainText(/not appear in real time/i)
-    await expect(page.getByRole('button', { name: /Share via link \(P2P\)/i })).toHaveCount(0)
+    // The mark itself is published. Under the old plain-text transport getText()
+    // was identical before and after, so NOTHING was sent and the peer never saw
+    // the formatting at all.
+    await expect.poll(() => relay.ops.length, { timeout: 10_000 }).toBeGreaterThan(opsBefore)
+    await expect(page.locator('.ProseMirror strong')).toHaveCount(1)
+  })
+
+  test('live presence: the local caret is broadcast to the server presence relay', async ({ page }) => {
+    await installBackend(page, { role: 'owner' })
+    const relay = await installCollabRelay(page, { role: 'owner' })
+
+    await page.goto('/docs/doc1')
+    await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
+
+    await page.locator('.ProseMirror').click()
+    await page.keyboard.type('hello')
+
+    await expect.poll(() => relay.presence.length, { timeout: 10_000 }).toBeGreaterThan(0)
+    const withCursor = relay.presence.find((p) => p.cursor && p.cursor.type === 'doc' && typeof p.cursor.from === 'number')
+    expect(withCursor).toBeTruthy()
+  })
+
+  test('WAVE-14 gate: a viewer\'s ops are refused (403) and the doc stays editable locally', async ({ page }) => {
+    await installBackend(page, { role: 'viewer' })
+    const relay = await installCollabRelay(page, { role: 'viewer' })
+
+    await page.goto('/docs/doc1')
+    await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
+
+    await page.locator('.ProseMirror').click()
+    await page.keyboard.type(' viewer tries to edit')
+
+    // The session attempted a push (the server saw it) but nothing landed in the
+    // log — the viewer is read-only at the relay. The local edit still shows.
+    await expect.poll(() => relay.posts, { timeout: 10_000 }).toBeGreaterThan(0)
+    expect(relay.ops.length).toBe(0)
+    await expect(page.locator('.ProseMirror')).toContainText('viewer tries to edit')
   })
 })
