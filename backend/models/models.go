@@ -270,7 +270,13 @@ type Comment struct {
 	// Body keeps the "@name" text; the client renders it as a chip. Text is
 	// never HTML — it is always escaped on render (React text node), so a
 	// crafted mention/body can carry no markup or script.
-	Mentions  []string  `json:"mentions,omitempty"`
+	Mentions []string `json:"mentions,omitempty"`
+	// Assignee is the account id this comment is assigned to as a task (Google-
+	// parity "assign"). It is validated server-side against the file's actual
+	// collaborators — a comment can never be assigned to a non-participant — and is
+	// CLEARED when the thread is resolved (a resolved task has no open assignee).
+	// Empty means unassigned. The assignee is notified on assignment.
+	Assignee  string    `json:"assignee,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -304,6 +310,10 @@ type CreateCommentRequest struct {
 	// only: the server re-validates each id against the file's collaborator set
 	// before storing/notifying, so a client can never mention a non-collaborator.
 	Mentions []string `json:"mentions,omitempty"`
+	// Assignee optionally assigns the new comment (task) to a collaborator. It is
+	// a HINT — the server validates it against the file's collaborators (see
+	// CommentHandler.validAssignee) and drops it if the account has no access.
+	Assignee string `json:"assignee,omitempty"`
 }
 
 // ---- Notifications (parity: @-mention surfacing) ----
@@ -314,6 +324,8 @@ type NotificationKind string
 const (
 	// NotifyMention is raised when an account is @-mentioned in a comment/reply.
 	NotifyMention NotificationKind = "mention"
+	// NotifyAssign is raised when a comment (task) is assigned to an account.
+	NotifyAssign NotificationKind = "assign"
 )
 
 // Notification is a per-account in-app activity entry. It is addressed to a
@@ -335,6 +347,12 @@ type Notification struct {
 type UpdateCommentRequest struct {
 	Body  string       `json:"body"`
 	State CommentState `json:"state"`
+	// Assignee changes the comment's assignment. A POINTER so the three cases are
+	// distinguishable: nil = leave unchanged, "" = explicitly clear, "acct" =
+	// (re)assign. The id is validated against the file's collaborators server-side.
+	// Note: resolving the thread (State=resolved) always clears the assignee
+	// regardless of this field — a resolved task has no open assignee.
+	Assignee *string `json:"assignee,omitempty"`
 }
 
 type CreateReplyRequest struct {

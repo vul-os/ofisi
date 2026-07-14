@@ -705,7 +705,39 @@ func (s *PostgresStorage) migrateCommentsSchema() {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);
+		-- Comment assignment (task assignee) is kept in a SIDE TABLE rather than a
+		-- new column so the schema stays CREATE-only (additive to existing
+		-- deployments — no ALTER of the comments table needed). One row per
+		-- assigned comment; unassigning deletes the row.
+		CREATE TABLE IF NOT EXISTS comment_assignees (
+			comment_id TEXT PRIMARY KEY,
+			file_id TEXT NOT NULL DEFAULT '',
+			assignee TEXT NOT NULL DEFAULT '',
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
 	`)
+}
+
+// setCommentAssignee upserts (or clears) the assignee side-row for a comment.
+func (s *PostgresStorage) setCommentAssignee(c *models.Comment) {
+	if c.Assignee == "" {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM comment_assignees WHERE comment_id=$1`, c.ID)
+		return
+	}
+	_, _ = s.pool.Exec(context.Background(),
+		`INSERT INTO comment_assignees (comment_id,file_id,assignee,updated_at)
+		 VALUES ($1,$2,$3,NOW())
+		 ON CONFLICT (comment_id) DO UPDATE SET assignee=$3,file_id=$2,updated_at=NOW()`,
+		c.ID, c.FileID, c.Assignee)
+}
+
+// getCommentAssignee reads a comment's assignee ("" when unassigned).
+func (s *PostgresStorage) getCommentAssignee(commentID string) string {
+	var a string
+	_ = s.pool.QueryRow(context.Background(),
+		`SELECT assignee FROM comment_assignees WHERE comment_id=$1`, commentID).Scan(&a)
+	return a
 }
 
 func (s *PostgresStorage) CreateComment(c *models.Comment) error {
@@ -717,6 +749,11 @@ func (s *PostgresStorage) CreateComment(c *models.Comment) error {
 		 ON CONFLICT (id) DO UPDATE SET anchor=$3,body=$5,state=$6,seq_clock=$7,updated_at=$9`,
 		c.ID, c.FileID, anchor, c.AuthorID, c.Body, c.State, c.SeqClock, c.CreatedAt, c.UpdatedAt,
 	)
+	if err == nil {
+		// Persist assignment in the side table (upsert/clear) so it survives the
+		// UpdateComment→CreateComment path and reloads with the comment.
+		s.setCommentAssignee(c)
+	}
 	return err
 }
 
@@ -732,6 +769,7 @@ func (s *PostgresStorage) GetComment(fileID, commentID string) (*models.Comment,
 		return nil, fmt.Errorf("comment not found")
 	}
 	_ = json.Unmarshal(anchor, &c.Anchor)
+	c.Assignee = s.getCommentAssignee(c.ID)
 	return &c, nil
 }
 
@@ -752,6 +790,7 @@ func (s *PostgresStorage) ListComments(fileID string) ([]*models.Comment, error)
 			continue
 		}
 		_ = json.Unmarshal(anchor, &c.Anchor)
+		c.Assignee = s.getCommentAssignee(c.ID)
 		comments = append(comments, &c)
 	}
 	return comments, rows.Err()
@@ -765,6 +804,10 @@ func (s *PostgresStorage) DeleteComment(fileID, commentID string) error {
 	s.migrateCommentsSchema()
 	_, err := s.pool.Exec(context.Background(),
 		`DELETE FROM comments WHERE file_id=$1 AND id=$2`, fileID, commentID)
+	if err == nil {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM comment_assignees WHERE comment_id=$1`, commentID)
+	}
 	return err
 }
 

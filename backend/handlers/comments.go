@@ -97,6 +97,9 @@ func (h *CommentHandler) Create(c *gin.Context) {
 	// never mention — and thereby notify — an account that has no access to the
 	// document (prevents using mentions as a cross-account probe/spam vector).
 	mentions := h.validMentions(fileID, req.Mentions)
+	// Validate the assignee the same way — a comment can only be assigned to an
+	// account that actually collaborates on the file.
+	assignee := h.validAssignee(fileID, req.Assignee)
 
 	cm := &models.Comment{
 		ID:     uuid.New().String(),
@@ -110,6 +113,7 @@ func (h *CommentHandler) Create(c *gin.Context) {
 		State:    models.CommentOpen,
 		SeqClock: hlcNow(),
 		Mentions: mentions,
+		Assignee: assignee,
 	}
 	if err := h.store.CreateComment(cm); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -118,6 +122,8 @@ func (h *CommentHandler) Create(c *gin.Context) {
 	// Surface an in-app notification to each mentioned collaborator (except the
 	// author mentioning themselves).
 	h.notifyMentions(c, fileID, cm.ID, cm.AuthorID, cm.Body, mentions)
+	// Notify the assignee that a task was assigned to them (unless self-assigned).
+	h.notifyAssignment(c, fileID, cm.ID, cm.AuthorID, assignee, cm.Body)
 	c.JSON(http.StatusCreated, cm)
 }
 
@@ -152,6 +158,55 @@ func (h *CommentHandler) validMentions(fileID string, requested []string) []stri
 		return nil
 	}
 	return out
+}
+
+// validAssignee returns the requested assignee id only when it is a real
+// participant (owner or collaborator) of the file — otherwise "". This is the
+// authorization boundary for assignment: a comment can never be assigned to (and
+// notify) an account with no access to the document, mirroring validMentions.
+func (h *CommentHandler) validAssignee(fileID, requested string) string {
+	if requested == "" {
+		return ""
+	}
+	rec, ok, err := h.authz.Store().Get(fileID)
+	if err != nil || !ok {
+		return ""
+	}
+	if rec.Owner == requested {
+		return requested
+	}
+	for _, ce := range rec.Collaborators {
+		if ce.AccountID == requested {
+			return requested
+		}
+	}
+	return ""
+}
+
+// notifyAssignment surfaces an in-app notification to a newly-assigned account
+// (skipping self-assignment). Best-effort — a notify failure never fails the
+// request.
+func (h *CommentHandler) notifyAssignment(c *gin.Context, fileID, commentID, actor, assignee, body string) {
+	if assignee == "" || assignee == actor || h.notify == nil {
+		return
+	}
+	fileName := ""
+	if f, err := h.store.GetFile(fileID); err == nil {
+		fileName = f.Name
+	}
+	snippet := body
+	if len(snippet) > 140 {
+		snippet = snippet[:140]
+	}
+	_ = h.notify.Create(&models.Notification{
+		Account:   assignee,
+		Kind:      models.NotifyAssign,
+		Actor:     actor,
+		FileID:    fileID,
+		FileName:  fileName,
+		CommentID: commentID,
+		Snippet:   snippet,
+	})
 }
 
 // notifyMentions writes one in-app notification per mentioned account (skipping
@@ -217,14 +272,37 @@ func (h *CommentHandler) Update(c *gin.Context) {
 		}
 		cm.Body = req.Body
 	}
+
+	// ASSIGNMENT: changing the assignee is collaborative (like resolve/reopen) —
+	// any participant with comment access may (re)assign the task, but only to a
+	// real collaborator (validated). Track whether it becomes a NEW assignment so
+	// we notify the assignee exactly once.
+	notifyNewAssignee := ""
+	if req.Assignee != nil {
+		next := h.validAssignee(fileID, *req.Assignee) // "" clears (or drops an invalid id)
+		if next != cm.Assignee && next != "" {
+			notifyNewAssignee = next
+		}
+		cm.Assignee = next
+	}
+
 	if req.State != "" {
 		cm.State = req.State
+		// Resolving the thread clears the assignment: a resolved task has no open
+		// assignee. This also suppresses a stale "assigned to you" surface.
+		if req.State == models.CommentResolved {
+			cm.Assignee = ""
+			notifyNewAssignee = ""
+		}
 	}
 	cm.SeqClock = hlcNow()
 
 	if err := h.store.UpdateComment(cm); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if notifyNewAssignee != "" {
+		h.notifyAssignment(c, fileID, cm.ID, requesterID(c), notifyNewAssignee, cm.Body)
 	}
 	c.JSON(http.StatusOK, cm)
 }

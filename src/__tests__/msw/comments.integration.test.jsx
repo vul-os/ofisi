@@ -82,6 +82,33 @@ describe('Comments (MSW integration)', () => {
     expect(mockState.comments.doc1[0].replies).toHaveLength(1)
   })
 
+  it('assigns a comment to a collaborator, then resolve clears the assignment', async () => {
+    // Roster: owner + bob (a real collaborator). carol is NOT on the roster.
+    mockState.owner = 'alice'
+    mockState.collaborators.doc1 = [{ account_id: 'bob', role: 'editor' }]
+    mockState.comments.doc1 = [{
+      id: 'c1', anchor: anchorCtx, author_id: 'alice', body: 'Do this',
+      state: 'open', assignee: '', created_at: new Date().toISOString(), replies: [],
+    }]
+
+    render(<CommentsPanel fileId="doc1" anchorCtx={anchorCtx} authorId="alice" onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('Do this')).toBeInTheDocument())
+
+    // Open the assign menu and pick bob.
+    fireEvent.click(screen.getByRole('button', { name: /^Assign$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /bob/i }))
+
+    await waitFor(() => expect(mockState.comments.doc1[0].assignee).toBe('bob'))
+    expect(mockState.calls).toContain('PUT /files/doc1/comments/c1')
+    // The assignee badge shows.
+    await waitFor(() => expect(screen.getByTitle('Assigned to bob')).toBeInTheDocument())
+
+    // Resolving the thread clears the assignment (server-side + reflected here).
+    fireEvent.click(screen.getByRole('button', { name: /Resolve/i }))
+    await waitFor(() => expect(mockState.comments.doc1[0].state).toBe('resolved'))
+    expect(mockState.comments.doc1[0].assignee).toBe('')
+  })
+
   it('filters comments by Open / Resolved tabs', async () => {
     mockState.comments.doc1 = [
       { id: 'c1', anchor: anchorCtx, author_id: 'a', body: 'Open one', state: 'open', created_at: new Date().toISOString(), replies: [] },

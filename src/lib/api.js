@@ -218,8 +218,8 @@ export const api = {
 
   // OFFICE-26: comments (anchored, threaded, resolvable)
   listComments: (fileId) => request(`/files/${fileId}/comments`),
-  createComment: (fileId, anchor, authorId, body, mentions = []) =>
-    request(`/files/${fileId}/comments`, { method: 'POST', body: JSON.stringify({ anchor, author_id: authorId, body, mentions }) }),
+  createComment: (fileId, anchor, authorId, body, mentions = [], assignee = '') =>
+    request(`/files/${fileId}/comments`, { method: 'POST', body: JSON.stringify({ anchor, author_id: authorId, body, mentions, assignee }) }),
   updateComment: (fileId, commentId, patch) =>
     request(`/files/${fileId}/comments/${commentId}`, { method: 'PUT', body: JSON.stringify(patch) }),
   deleteComment: (fileId, commentId) =>

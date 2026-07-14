@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { X, MessageSquare, CheckCircle, RotateCcw, Trash2, Send, ChevronDown, ChevronUp, Crosshair } from 'lucide-react'
+import { X, MessageSquare, CheckCircle, RotateCcw, Trash2, Send, ChevronDown, ChevronUp, Crosshair, UserCheck } from 'lucide-react'
 import { api } from '../lib/api'
 import { getCommentStore } from '../lib/crdt/comments'
 import { formatTs } from '../lib/format'
@@ -218,6 +218,22 @@ function CommentItem({ item, fileId, authorId, collaborators = [], onUpdated, on
     }
   }
 
+  // ASSIGNMENT: (re)assign or clear the task. The server validates the assignee
+  // against the file's collaborators (an invalid id is dropped) and notifies the
+  // assignee, so we simply reflect whatever it returns.
+  const [assignOpen, setAssignOpen] = useState(false)
+  const handleAssign = async (acct) => {
+    setAssignOpen(false)
+    setBusy(true)
+    try {
+      const updated = await api.updateComment(fileId, item.id, { assignee: acct })
+      onUpdated({ ...item, ...updated })
+      onChange?.()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const isResolved = item.state === 'resolved'
   const isOwn = item.author_id === authorId
 
@@ -239,6 +255,14 @@ function CommentItem({ item, fileId, authorId, collaborators = [], onUpdated, on
             <span className="text-xs font-semibold text-ink tracking-tightish">{item.author_id || 'Anonymous'}</span>
             {isResolved && (
               <span className="text-2xs bg-success-bg text-success px-1.5 py-0.5 rounded-pill font-medium">Resolved</span>
+            )}
+            {!isResolved && item.assignee && (
+              <span
+                className="inline-flex items-center gap-0.5 text-2xs bg-accent-tint text-accent px-1.5 py-0.5 rounded-pill font-medium"
+                title={`Assigned to ${item.assignee}`}
+              >
+                <UserCheck size={9} aria-hidden /> {item.assignee}
+              </span>
             )}
             {item.anchor?.orphaned && (
               <span className="text-2xs bg-warning-bg text-warning px-1.5 py-0.5 rounded-pill font-medium" title="The commented text was edited or removed; this comment may have moved.">
@@ -366,6 +390,52 @@ function CommentItem({ item, fileId, authorId, collaborators = [], onUpdated, on
                 <CheckCircle size={10} /> Resolve
               </button>
             )}
+            {!isResolved && (
+              <div className="relative">
+                <button
+                  onClick={() => setAssignOpen((v) => !v)}
+                  disabled={busy}
+                  aria-haspopup="listbox"
+                  aria-expanded={assignOpen}
+                  className="flex items-center gap-1 text-2xs text-ink-faint hover:text-accent transition-colors rounded-sm focus-visible:outline-none focus-visible:shadow-focus"
+                >
+                  <UserCheck size={10} /> {item.assignee ? 'Reassign' : 'Assign'}
+                </button>
+                {assignOpen && (
+                  <ul
+                    role="listbox"
+                    className="absolute z-10 mt-1 min-w-[9rem] max-h-48 overflow-y-auto rounded-md border border-line bg-paper shadow-e2 py-1 text-xs"
+                  >
+                    {item.assignee && (
+                      <li>
+                        <button
+                          onClick={() => handleAssign('')}
+                          className="w-full text-left px-2.5 py-1 text-ink-muted hover:bg-bg-elev2 rounded-sm"
+                        >
+                          Unassign
+                        </button>
+                      </li>
+                    )}
+                    {collaborators.length === 0 && (
+                      <li className="px-2.5 py-1 text-ink-faint">Share the file to assign people</li>
+                    )}
+                    {collaborators.map((p) => (
+                      <li key={p.account_id}>
+                        <button
+                          onClick={() => handleAssign(p.account_id)}
+                          className={[
+                            'w-full text-left px-2.5 py-1 hover:bg-bg-elev2 rounded-sm truncate',
+                            item.assignee === p.account_id ? 'text-accent font-medium' : 'text-ink',
+                          ].join(' ')}
+                        >
+                          {p.account_id} <span className="text-ink-faint text-2xs">{p.role}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             {isOwn && !editing && (
               <>
                 <button
@@ -455,8 +525,20 @@ export default function CommentsPanel({ fileId, anchorCtx, authorId = 'You', onC
 
   const handleUpdated = useCallback((updated) => {
     const store = getCommentStore(fileId)
-    // The store already has the change; just re-read.
-    setComments(store.list())
+    // The CRDT store tracks body/state/replies but NOT server-only fields like
+    // `assignee` (assignment is a server-validated, notify-bearing action, not a
+    // CRDT field). A blind re-read from the store would therefore WIPE the assignee
+    // badge on every update. So we re-read the store for the collaborative fields,
+    // then overlay: the just-updated server payload for its comment, and the
+    // previously-known server-only fields for the rest.
+    setComments((prev) => {
+      const byId = new Map(prev.map((c) => [c.id, c]))
+      return store.list().map((c) => {
+        const prior = byId.get(c.id)
+        const merged = prior ? { ...c, assignee: prior.assignee } : c
+        return updated && c.id === updated.id ? { ...merged, ...updated } : merged
+      })
+    })
   }, [fileId])
 
   const handleDeleted = useCallback((commentId) => {

@@ -76,6 +76,17 @@ const CAN_RESTORE = new Set(['owner', 'editor'])
 
 const log = (method, path) => mockState.calls.push(`${method} ${path}`)
 
+// validAssignee — the mock's copy of the server authz boundary: a comment can
+// only be assigned to the file owner or a recorded collaborator; anything else
+// (including a stranger id) is dropped to ''.
+function validAssignee(fileId, requested) {
+  if (!requested) return ''
+  const owner = mockState.owner || 'you@vulos.test'
+  if (requested === owner) return requested
+  const collabs = mockState.collaborators?.[fileId] || []
+  return collabs.some((p) => p.account_id === requested) ? requested : ''
+}
+
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
 export const handlers = [
@@ -166,6 +177,9 @@ export const handlers = [
   // ── Comments ─────────────────────────────────────────────────────────────
   // Collaborator roster for @-mention autocomplete AND the share dialog. The
   // owner is included as an 'owner' entry so the dialog can detect ownership.
+  // validAssignee mirrors the server: only owner/collaborators are assignable.
+  // (defined here so both POST and PUT comment handlers can call it)
+
   http.get('/api/files/:id/collaborators', ({ params }) => {
     log('GET', `/files/${params.id}/collaborators`)
     const collabs = mockState.collaborators?.[params.id] || []
@@ -187,6 +201,9 @@ export const handlers = [
       author_id: body.author_id,
       body: body.body,
       mentions: body.mentions || [],
+      // Mirror the server: an assignee is only recorded when it is a real
+      // collaborator (or the owner) of the file — otherwise it is dropped.
+      assignee: validAssignee(params.id, body.assignee),
       state: 'open',
       created_at: new Date().toISOString(),
       replies: [],
@@ -199,8 +216,17 @@ export const handlers = [
     log('PUT', `/files/${params.id}/comments/${params.cid}`)
     const patch = await request.json()
     const c = (mockState.comments[params.id] || []).find((x) => x.id === params.cid)
-    if (c) Object.assign(c, patch)
-    return HttpResponse.json(c || { id: params.cid, ...patch })
+    if (c) {
+      // Validate an assignee change against the roster, mirroring the server.
+      if (patch.assignee !== undefined) c.assignee = validAssignee(params.id, patch.assignee)
+      if (patch.body !== undefined) c.body = patch.body
+      if (patch.state !== undefined) {
+        c.state = patch.state
+        if (patch.state === 'resolved') c.assignee = '' // resolve clears assignment
+      }
+      return HttpResponse.json(c)
+    }
+    return HttpResponse.json({ id: params.cid, ...patch })
   }),
 
   http.delete('/api/files/:id/comments/:cid', ({ params }) => {
