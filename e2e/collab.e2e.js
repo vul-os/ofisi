@@ -118,59 +118,47 @@ test.describe('Comments (E2E)', () => {
   })
 })
 
-test.describe('WAVE37 server-authoritative collab (E2E smoke)', () => {
-  test('an editor typing in the doc pushes ops to the server relay', async ({ page }) => {
+/**
+ * Live co-editing is FLAG-GATED (VITE_DOCS_COLLAB, see src/lib/flags.js) and the
+ * default build ships it OFF, because the sync transport diffs the document as
+ * plain text and can place a remote change at the wrong position in a structured
+ * document. These tests pin the gate as the bundle actually ships it: no ops
+ * leave the tab, and the UI says co-editing is off rather than pretending.
+ * (When the transport is structure-aware and the flag defaults on, these become
+ * assertions that ops DO flow — see the collab suite in src/apps/docs.)
+ */
+test.describe('Docs live co-editing gate (E2E)', () => {
+  test('with co-editing off, typing pushes NO ops to the server relay', async ({ page }) => {
     await installBackend(page, { role: 'owner' })
     const relay = await installCollabRelay(page, { role: 'owner' })
 
     await page.goto('/docs/doc1')
     await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
 
-    // Type into the editor — the ServerCollabSession diffs this to CRDT ops and
-    // POSTs them to /collab/ops (batched on a short debounce).
     await page.locator('.ProseMirror').click()
-    await page.keyboard.type(' plus a server-synced edit')
+    await page.keyboard.type(' a local-only edit')
+    await page.waitForTimeout(1500) // well past the old publish debounce
 
-    // The authoritative op log received the edit through the real session path.
-    await expect.poll(() => relay.ops.length, { timeout: 10_000 }).toBeGreaterThan(0)
-    expect(relay.posts).toBeGreaterThan(0)
-  })
-
-  test('live presence: the local caret is broadcast to the server presence relay', async ({ page }) => {
-    await installBackend(page, { role: 'owner' })
-    const relay = await installCollabRelay(page, { role: 'owner' })
-
-    await page.goto('/docs/doc1')
-    await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
-
-    // Click + type moves the selection, which onSelectionUpdate broadcasts as a
-    // 'doc' cursor over the server presence path (the cloud fallback for "who is
-    // here / where they are" when no p2p peer is reachable).
-    await page.locator('.ProseMirror').click()
-    await page.keyboard.type('hello')
-
-    await expect.poll(() => relay.presence.length, { timeout: 10_000 }).toBeGreaterThan(0)
-    // The broadcast carries a doc cursor with numeric positions.
-    const withCursor = relay.presence.find((p) => p.cursor && p.cursor.type === 'doc' && typeof p.cursor.from === 'number')
-    expect(withCursor).toBeTruthy()
-  })
-
-  test('WAVE-14 gate: a viewer\'s ops are refused (403) and the doc stays editable locally', async ({ page }) => {
-    await installBackend(page, { role: 'viewer' })
-    // Relay rejects this viewer's op push with 403 (editor-gated).
-    const relay = await installCollabRelay(page, { role: 'viewer' })
-
-    await page.goto('/docs/doc1')
-    await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
-
-    await page.locator('.ProseMirror').click()
-    await page.keyboard.type(' viewer tries to edit')
-
-    // The session attempted a push (server saw it) but nothing landed in the log
-    // — the viewer is read-only at the relay. The local edit still shows (the
-    // editor degrades to local-only, autosave path intact) — no crash.
-    await expect.poll(() => relay.posts, { timeout: 10_000 }).toBeGreaterThan(0)
+    // Nothing was sent, and nothing was even requested: no transport was opened.
+    expect(relay.posts).toBe(0)
     expect(relay.ops.length).toBe(0)
-    await expect(page.locator('.ProseMirror')).toContainText('viewer tries to edit')
+    // The edit is in the document (single-user editing is unaffected).
+    await expect(page.locator('.ProseMirror')).toContainText('a local-only edit')
+  })
+
+  test('the UI states plainly that live co-editing is off', async ({ page }) => {
+    await installBackend(page, { role: 'owner' })
+    await installCollabRelay(page, { role: 'owner' })
+
+    await page.goto('/docs/doc1')
+    await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
+
+    await expect(page.getByTestId('collab-off-pill')).toContainText(/live co-editing off/i)
+
+    // The share dialog says what sharing does and does not do, and offers no
+    // P2P invite link (a link that could never sync).
+    await page.getByRole('button', { name: /Share — with people/i }).click()
+    await expect(page.getByTestId('live-collab-notice')).toContainText(/not appear in real time/i)
+    await expect(page.getByRole('button', { name: /Share via link \(P2P\)/i })).toHaveCount(0)
   })
 })

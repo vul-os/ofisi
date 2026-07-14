@@ -61,6 +61,7 @@ import ActivityFeed from '../../components/ActivityFeed'
 import { DocsCollabSession } from '../../lib/crdt/index.js'
 import { useP2PCollab } from './useP2PCollab.js'
 import { useServerCollab } from './useServerCollab.js'
+import { docsCollabEnabled, DOCS_COLLAB_OFF_NOTICE } from '../../lib/flags.js'
 import P2PShareModal from './components/P2PShareModal.jsx'
 import AccountShareModal from '../../components/AccountShareModal.jsx'
 import { useAuthStore } from '../../store/authStore'
@@ -302,6 +303,11 @@ export default function DocsEditor() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { showToast, toast } = useToast()
+  // ── Live co-editing gate (see lib/flags.js) ───────────────────────────────
+  // When OFF, Docs opens NO sync transport (no server relay, no p2p fabric, no
+  // invite-link join) and every collaboration affordance is hidden or explicitly
+  // labelled unavailable. Read once per mount — it is a build-time constant.
+  const collabEnabled = useMemo(() => docsCollabEnabled(), [])
   const { files, saveFileWithDraft, markDirty } = useFilesStore()
   const [file, setFile] = useState(files.find((f) => f.id === id))
   const [title, setTitle] = useState(file?.name || 'Untitled')
@@ -354,6 +360,9 @@ export default function DocsEditor() {
 
   // CRDT collab session (OFFICE-22)
   const collabRef = useRef(null)
+  // Stable ref of the collab gate for the once-created useEditor callbacks.
+  const collabEnabledRef = useRef(collabEnabled)
+  collabEnabledRef.current = collabEnabled
   // Tracks the plain text the CRDT last saw so we can diff on next local edit.
   const prevCrdtTextRef = useRef('')
   // Flag: true while we're applying a remote op so onUpdate doesn't re-broadcast.
@@ -382,10 +391,23 @@ export default function DocsEditor() {
       applyingRemoteRef.current = false
     }
   }, [])
-  const p2p = useP2PCollab({ fileId: id, onRemoteText: applyRemoteP2PText })
+  const p2p = useP2PCollab({ fileId: id, onRemoteText: applyRemoteP2PText, enabled: collabEnabled })
   // Stable ref so the once-created onUpdate closure always calls the latest
   // p2p.onLocalText (assigned on every render below).
   const p2pOnLocalTextRef = useRef(null)
+
+  // Honesty guard: an invite link was opened but live co-editing is disabled for
+  // this build. The link can never connect them — say so instead of leaving them
+  // to believe they joined a session.
+  useEffect(() => {
+    if (!p2p.inviteIgnored) return
+    showToast(
+      'This is a collaboration invite link, but live co-editing is turned off on ' +
+      'this deployment — it cannot connect you to the other editor. You are viewing ' +
+      'your own copy of the document.',
+      'error',
+    )
+  }, [p2p.inviteIgnored, showToast])
 
   // Honesty guard: a `#vp2p=` invite link was opened, but this server doesn't
   // serve the peering fabric (standalone Office binary — see main.go). Rather
@@ -411,6 +433,7 @@ export default function DocsEditor() {
     fileId: id,
     onRemoteText: applyRemoteP2PText,
     e2eActive: p2p.active,
+    enabled: collabEnabled,
   })
   const serverOnLocalTextRef = useRef(null)
   serverOnLocalTextRef.current = server.onLocalText
@@ -552,8 +575,9 @@ export default function DocsEditor() {
       setRetryCount(0)
       saveTimer.current = setTimeout(() => doSave(), AUTOSAVE_DELAY_MS)
 
-      // CRDT broadcast: skip if this update was triggered by a remote apply.
-      if (!applyingRemoteRef.current) {
+      // CRDT broadcast: skip if this update was triggered by a remote apply, and
+      // skip entirely when live co-editing is disabled (nothing leaves this tab).
+      if (collabEnabledRef.current && !applyingRemoteRef.current) {
         const nextText = ed.getText()
         if (collabRef.current) {
           collabRef.current.applyLocal(prevCrdtTextRef.current, nextText)
@@ -574,6 +598,8 @@ export default function DocsEditor() {
       // OFFICE-25: broadcast local caret/selection position to peers over BOTH
       // transports — the p2p fabric (when reachable) and the server presence
       // relay (the cloud fallback). Whichever a given peer is on will see us.
+      // Nothing is broadcast at all when co-editing is disabled.
+      if (!collabEnabledRef.current) return
       const { from, to } = ed.state.selection
       if (broadcastDocCursorRef.current) broadcastDocCursorRef.current(from, to)
       if (broadcastServerCursorRef.current) broadcastServerCursorRef.current(from, to)
@@ -625,6 +651,11 @@ export default function DocsEditor() {
   // ── CRDT collab session (OFFICE-22) ──────────────────────────────────────
   useEffect(() => {
     if (!id) return
+    // Co-editing disabled → never join the fabric. No ops are broadcast and no
+    // remote op is ever applied to this editor. (Presence/live cursors ride the
+    // same fabric, so they are off too — the UI says so rather than showing an
+    // empty roster that looks like "nobody else is here".)
+    if (!collabEnabled) return
 
     const peerId = getOrCreatePeerId()
     const session = new DocsCollabSession({ fileId: id, peerId })
@@ -679,7 +710,7 @@ export default function DocsEditor() {
       session.leave()
       collabRef.current = null
     }
-  }, [id])
+  }, [id, collabEnabled])
 
   // P5: reflect the spellcheck toggle onto the editable DOM + persist it.
   useEffect(() => {
@@ -1279,11 +1310,26 @@ export default function DocsEditor() {
                 title={saveStatus.error || undefined}
               />
             )}
+            {/* Live co-editing is OFF for this build: say so plainly. Without
+                this the topbar simply shows no collaborators, which reads as
+                "nobody else is here" — a lie of omission when the truth is that
+                we would not show them even if they were. */}
+            {!collabEnabled && (
+              <Tooltip label={DOCS_COLLAB_OFF_NOTICE}>
+                <span
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-pill bg-bg-elev2 text-ink-muted border border-line"
+                  data-testid="collab-off-pill"
+                >
+                  <Users size={11} />
+                  Live co-editing off
+                </span>
+              </Tooltip>
+            )}
             {/* Presence roster — avatar bar of everyone in the room (parity with
                 Sheets/Slides). Shows the full roster; a subtle "editing now" cue
                 still comes from the live cursor layer. Falls back to a peer-count
                 pill or a cursor-derived avatar stack when the roster is empty. */}
-            {mergedRoster && mergedRoster.length > 1 ? (
+            {!collabEnabled ? null : mergedRoster && mergedRoster.length > 1 ? (
               <PresenceBar roster={mergedRoster} className="ml-1" />
             ) : collaborators.length > 0 ? (
               <Tooltip label={`${collaborators.length} editing now`}>
@@ -1606,7 +1652,14 @@ export default function DocsEditor() {
         onClose={() => setShowAccountShare(false)}
         file={{ id, name: title }}
         me={myAccountId}
-        onSwitchToLink={async () => {
+        // Honest copy inside the share dialog: sharing still works (people get
+        // access), but their edits will NOT stream in live. Told up front, in the
+        // exact place a user would otherwise assume co-editing.
+        liveCollabNotice={!collabEnabled ? DOCS_COLLAB_OFF_NOTICE : null}
+        // The P2P invite-link path is a co-editing feature: with co-editing off
+        // the button is not offered at all (an invite link that can never sync is
+        // worse than no button).
+        onSwitchToLink={!collabEnabled ? undefined : async () => {
           setShowP2PShare(true)
           // startShare() rejects (peeringUnavailable=true) when this server
           // doesn't serve the fabric — surfaced in the modal itself (its
@@ -1617,15 +1670,19 @@ export default function DocsEditor() {
         }}
       />
 
-      {/* WAVE-25: P2P collaborate-via-link modal */}
-      <P2PShareModal
-        open={showP2PShare}
-        onClose={() => setShowP2PShare(false)}
-        links={p2p.links}
-        roomId={p2p.roomId}
-        onRotate={() => p2p.rotate()}
-        unavailable={p2p.peeringUnavailable}
-      />
+      {/* WAVE-25: P2P collaborate-via-link modal. Never reachable with co-editing
+          off (the entry point is withheld above), but keep the guard so no future
+          caller can open a share dialog that mints links which cannot sync. */}
+      {collabEnabled && (
+        <P2PShareModal
+          open={showP2PShare}
+          onClose={() => setShowP2PShare(false)}
+          links={p2p.links}
+          roomId={p2p.roomId}
+          onRotate={() => p2p.rotate()}
+          unavailable={p2p.peeringUnavailable}
+        />
+      )}
 
       {/* P4: equation editor (LaTeX input + live KaTeX preview) */}
       {equationEditor && (

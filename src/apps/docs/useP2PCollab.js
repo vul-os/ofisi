@@ -58,8 +58,12 @@ function getOrCreatePeerId() {
  * @param {string} opts.fileId
  * @param {(text: string) => void} opts.onRemoteText  apply converged text to editor
  * @param {boolean} [opts.autoJoinFromLink=true]
+ * @param {boolean} [opts.enabled=true]  master switch. When false the hook is
+ *   fully inert: no invite is joined, no room can be minted, no op is ever sent
+ *   or applied. `collabDisabled` is returned so the caller can say so honestly
+ *   instead of rendering a share affordance that silently does nothing.
  */
-export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true }) {
+export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true, enabled = true }) {
   const [active, setActive] = useState(false)
   const [cap, setCap] = useState(null)          // 'rw' | 'ro'
   const [roomId, setRoomId] = useState(null)
@@ -97,6 +101,7 @@ export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true }) 
 
   // ── auto-join when the URL carries an invite fragment ──────────────────────
   useEffect(() => {
+    if (!enabled) return          // co-editing disabled → never touch the fabric
     if (!autoJoinFromLink) return
     if (!hasInviteInLocation()) return
     let cancelled = false
@@ -135,10 +140,14 @@ export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true }) 
     })()
 
     return () => { cancelled = true }
-  }, [autoJoinFromLink, fileId, wireSession, teardown])
+  }, [enabled, autoJoinFromLink, fileId, wireSession, teardown])
 
   // ── SHARE: mint a fresh room and expose rw/ro links ────────────────────────
   const startShare = useCallback(async () => {
+    // Co-editing disabled for this deployment: refuse to mint a room rather than
+    // hand the user links that would look real and never sync anything.
+    if (!enabled) throw new Error('collab-disabled')
+
     // Probe BEFORE minting a room: on a standalone server the room's invite
     // links would look real but never connect anyone (no peering fabric to
     // rendezvous over). Reject up front so the caller's share modal can render
@@ -181,19 +190,21 @@ export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true }) 
     setActive(true)
     await session.join()
     return { rwLink, roLink, roomId: rid }
-  }, [fileId, wireSession])
+  }, [enabled, fileId, wireSession])
 
   // Rotate the room key (revoke old links) by minting a brand-new room.
   const rotate = useCallback(async () => {
     return startShare()
   }, [startShare])
 
-  // Push a local editor text change into the P2P CRDT (no-op for ro peers).
+  // Push a local editor text change into the P2P CRDT (no-op for ro peers, and
+  // no-op entirely when co-editing is disabled — nothing may leave this tab).
   const onLocalText = useCallback((prevText, nextText) => {
+    if (!enabled) return []
     const s = sessionRef.current
     if (!s) return []
     return s.applyLocal(prevText, nextText)
-  }, [])
+  }, [enabled])
 
   // Cleanup on unmount.
   useEffect(() => () => teardown(), [teardown])
@@ -203,6 +214,12 @@ export function useP2PCollab({ fileId, onRemoteText, autoJoinFromLink = true }) 
 
   return {
     active, cap, readOnly, roomId, peers, peerCount, links, peeringUnavailable,
+    // True when live co-editing is disabled for this build (VITE_DOCS_COLLAB=off).
+    // Callers MUST surface this rather than showing an inert share affordance.
+    collabDisabled: !enabled,
+    // True when someone opened an invite link but co-editing is disabled — the
+    // link cannot connect them and we owe them an explicit message.
+    inviteIgnored: !enabled && hasInviteInLocation(),
     startShare, rotate, leave: teardown, onLocalText,
     session: sessionRef,
   }

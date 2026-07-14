@@ -30,7 +30,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   UserPlus, Eye, MessageSquare, Pencil, Crown, Trash2, Loader2, Users, Link2,
-  Lock, Clock, Copy, Check, KeyRound, ArrowRightLeft,
+  Lock, Clock, Copy, Check, KeyRound, ArrowRightLeft, AlertTriangle,
 } from 'lucide-react'
 import { Modal, Button, Input, Avatar, hueFor, useToast } from './ui'
 import { api } from '../lib/api'
@@ -77,8 +77,14 @@ function roleMeta(role) {
  *                              detect ownership and prevent self-share.
  * @param {function} onSwitchToLink optional — invoked when the user chooses the
  *                              complementary "share via link" (P2P E2E) path.
+ * @param {string}   liveCollabNotice optional — when live co-editing is turned
+ *                              off for this deployment, the honest explanation to
+ *                              show here. Sharing still grants access; what it
+ *                              does NOT do is stream edits in real time, and this
+ *                              is the one dialog where a user would otherwise
+ *                              assume it does. Never omit it silently.
  */
-export default function AccountShareModal({ open, onClose, file, me = '', onSwitchToLink }) {
+export default function AccountShareModal({ open, onClose, file, me = '', onSwitchToLink, liveCollabNotice = null }) {
   const { showToast, toast } = useToast()
   const [loading, setLoading] = useState(false)
   const [collaborators, setCollaborators] = useState([]) // [{ account_id, role }]
@@ -190,6 +196,17 @@ export default function AccountShareModal({ open, onClose, file, me = '', onSwit
           Share this document with people by their Vulos account or email. They
           sign in with their own account and get exactly the access you grant.
         </p>
+
+        {/* Honesty: co-editing is off — say what sharing will and will not do. */}
+        {liveCollabNotice && (
+          <div
+            className="flex items-start gap-2 rounded-md border border-line bg-bg-elev2 px-3 py-2.5"
+            data-testid="live-collab-notice"
+          >
+            <AlertTriangle size={13} className="text-warning mt-0.5 flex-shrink-0" />
+            <p className="text-2xs text-ink-muted leading-relaxed">{liveCollabNotice}</p>
+          </div>
+        )}
 
         {/* Add a collaborator (owner only) */}
         {isOwner && (

@@ -7,7 +7,14 @@
 
 import { test, expect } from './fixtures.js'
 
+// The P2P invite-link flow is part of live co-editing, which is flag-gated OFF
+// in the default build (VITE_DOCS_COLLAB — see src/lib/flags.js) until the sync
+// transport is structure-aware. With the gate closed the app deliberately does
+// not offer a "Share via link (P2P)" button at all, because an invite link that
+// can never sync anyone is worse than no button. Re-enabled with the flag.
 test.describe('P2P "Collaborate via link" (E2E)', () => {
+  test.skip(true, 'live co-editing is gated off by default (VITE_DOCS_COLLAB)')
+
   test('opens the share modal and generates rw + ro invite links', async ({ officePage: page }) => {
     await page.goto('/docs/doc1')
     await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 15_000 })
