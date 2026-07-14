@@ -38,7 +38,9 @@ export default function ExportDialog({ data, format, onCancel, onConfirm }) {
   useDialogA11y(dialogRef, onCancel)
   useEffect(() => { confirmRef.current?.focus() }, [])
 
-  const hasLoss = report.lost.length > 0
+  const missing = report.missing
+  const hasMissing = !!missing && (missing.pivots > 0 || missing.charts.length > 0)
+  const hasLoss = report.lost.length > 0 || hasMissing
   const titleId = 'export-dialog-title'
   const descId = 'export-dialog-desc'
 
@@ -64,8 +66,50 @@ export default function ExportDialog({ data, format, onCancel, onConfirm }) {
         </div>
 
         <div id={descId} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 text-xs">
-          {/* What will NOT survive — stated first, never buried. */}
-          {hasLoss && (
+          {/* Content the IMPORT could never bring in. It is not in this workbook,
+              so nothing else here can see it — but the user is about to write a
+              file back over an original that still HAS it. Say so first. */}
+          {hasMissing && (
+            <div className="rounded-lg border border-line bg-warning-bg p-3 space-y-1.5" role="alert">
+              <p className="flex items-center gap-1.5 font-semibold text-ink">
+                <AlertTriangle size={13} className="text-warning" aria-hidden />
+                Not in this workbook — and not in the export
+              </p>
+              <p className="text-ink-muted">
+                {missing.filename ? <>“{missing.filename}” had content Vulos could not import.</>
+                  : <>The file this workbook came from had content Vulos could not import.</>}
+                {' '}Exporting will not put it back.
+              </p>
+              <ul className="space-y-0.5 text-ink-muted">
+                {missing.pivots > 0 && (
+                  <li className="flex gap-1.5">
+                    <span aria-hidden>•</span>
+                    <span>
+                      <span className="font-medium text-ink">
+                        {missing.pivots} pivot table{missing.pivots === 1 ? '' : 's'}
+                      </span>
+                      {' — '}imported as ordinary cells (the values are here; the live pivot is not)
+                    </span>
+                  </li>
+                )}
+                {missing.charts.slice(0, 5).map((c, i) => (
+                  <li key={i} className="flex gap-1.5">
+                    <span aria-hidden>•</span>
+                    <span>
+                      <span className="font-medium text-ink">{c.title || 'Untitled chart'}</span>
+                      {' — '}{c.reason}
+                    </span>
+                  </li>
+                ))}
+                {missing.charts.length > 5 && (
+                  <li className="text-ink-faint">…and {missing.charts.length - 5} more</li>
+                )}
+              </ul>
+            </div>
+          )}
+
+          {/* What will NOT survive this format — stated next, never buried. */}
+          {report.lost.length > 0 && (
             <div className="rounded-lg border border-line bg-warning-bg p-3 space-y-1.5" role="alert">
               <p className="flex items-center gap-1.5 font-semibold text-ink">
                 <AlertTriangle size={13} className="text-warning" aria-hidden />

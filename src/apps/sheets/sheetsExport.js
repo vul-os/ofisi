@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx'
 import { saveAs } from 'file-saver'
 import { escapeChartText } from './charts.js'
 import { injectChartsIntoXlsx, nativeXlsxSupport } from './xlsxCharts.js'
+import { getImportNotes } from './importNotes.js'
 
 /** The worksheet that carries our chart definitions (see chartsMetaSheet). */
 export const CHART_META_SHEET = 'Vulos Charts'
@@ -144,12 +145,23 @@ export function chartsMetaSheet(data) {
  * predicate the writer uses (nativeXlsxSupport) rather than from a hand-kept list
  * that could drift out of sync with it.
  *
- * Returns { format, charts, pivots, native, degraded[], lost[], notes[] }.
+ * Returns { format, charts, pivots, native, degraded[], lost[], notes[], missing }.
+ *
+ * `missing` is the OTHER half of honesty, and the easy one to forget: content the
+ * IMPORT could never bring in (see importNotes.js). By export time it is not in
+ * the workbook, so nothing here could detect it — yet this is the exact moment the
+ * user is about to write a file back over the original that still HAS it. So the
+ * import wrote down what it dropped, and we say it again here.
  */
 export function exportFidelity(data, format) {
   const charts = Array.isArray(data?.[0]?.charts) ? data[0].charts : []
   const pivots = Array.isArray(data?.[0]?.pivots) ? data[0].pivots : []
-  const report = { format, charts: charts.length, pivots: pivots.length, native: 0, degraded: [], lost: [], notes: [] }
+  const imported = getImportNotes(data)
+  const report = {
+    format, charts: charts.length, pivots: pivots.length, native: 0,
+    degraded: [], lost: [], notes: [],
+    missing: imported ? { pivots: imported.pivots, charts: imported.charts, filename: imported.filename || '' } : null,
+  }
 
   if (format === 'xlsx') {
     for (const c of charts) {
@@ -197,12 +209,15 @@ export function exportFidelity(data, format) {
 
 /**
  * exportNeedsConfirm — does this export have anything the user must be told
- * BEFORE it happens? A plain workbook (no charts, no live pivots) exports with
- * zero friction; anything that loses or degrades content goes through the dialog.
+ * BEFORE it happens? A plain workbook (no charts, no live pivots, nothing dropped
+ * at import) exports with zero friction; anything that loses or degrades content
+ * goes through the dialog.
  */
 export function exportNeedsConfirm(data, format) {
   const r = exportFidelity(data, format)
-  return r.lost.length > 0 || r.degraded.length > 0 || r.pivots > 0 || (r.charts > 0 && format !== 'xlsx')
+  const missing = !!r.missing && (r.missing.pivots > 0 || r.missing.charts.length > 0)
+  return r.lost.length > 0 || r.degraded.length > 0 || r.pivots > 0 || missing ||
+    (r.charts > 0 && format !== 'xlsx')
 }
 
 /**

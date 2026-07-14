@@ -3,7 +3,7 @@ import mammoth from 'mammoth'
 import { api } from './api'
 import { useFilesStore } from '../store/filesStore'
 import { assertFileSize, assertArchiveBounds, ImportError } from './importBounds'
-import { workbookToSheets } from '../apps/sheets/sheetsImport'
+import { importWorkbook } from '../apps/sheets/sheetsImport'
 import { csvToSheet } from '../apps/sheets/csvImport'
 import { odtToHtml } from '../apps/docs/odtImport'
 import { pptxToSlides, odpToSlides } from '../apps/slides/slidesImport'
@@ -142,11 +142,17 @@ export async function convertToSheetContent(file) {
   // zip-bomb pre-check before handing raw bytes to it (see assertArchiveBounds).
   // Legacy .xls is an OLE compound binary, not a zip, so it is not archive-checked
   // here (its SheetJS parse stays bounded by the file-size gate + cell caps in
-  // workbookToSheets).
+  // importWorkbook's cell reader).
   if (ext === 'xlsx' || ext === 'ods') {
     await assertArchiveBounds(buf, file.name)
   }
-  return workbookToSheets(buf, file.name)
+  // importWorkbook = cells + the parts SheetJS cannot see (real OOXML charts, and
+  // whether the file held pivot tables). A chart-bearing .xlsx opened here used to
+  // arrive with its charts silently gone; now they come in, and anything that
+  // genuinely could not be imported is recorded on the workbook (importNotes) so
+  // the export dialog can say so before the user writes over their original.
+  const { sheets } = await importWorkbook(buf, file.name)
+  return sheets
 }
 
 // ── Slides ────────────────────────────────────────────────────────────────────

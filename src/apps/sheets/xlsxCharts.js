@@ -41,9 +41,11 @@ import {
 } from './charts.js'
 import { parseRange } from './ConditionalFormatPanel.jsx'
 
-const EMU_PER_PX = 9525
-const DEFAULT_COL_PX = 64
-const DEFAULT_ROW_PX = 20
+// Exported so the READER (xlsxChartsRead.js) maps drawing anchors back to pixels
+// with exactly the same constants the writer used — one mapping, both directions.
+export const EMU_PER_PX = 9525
+export const DEFAULT_COL_PX = 64
+export const DEFAULT_ROW_PX = 20
 
 /** Chart types we can express faithfully as OOXML. */
 const NATIVE_TYPES = new Set([

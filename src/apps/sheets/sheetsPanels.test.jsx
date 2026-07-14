@@ -14,6 +14,7 @@ import ExportDialog from './ExportDialog.jsx'
 import { getCharts, CHART_TYPES } from './charts.js'
 import { getPivots } from './pivot.js'
 import { insertChart } from './charts.js'
+import { setImportNotes } from './importNotes.js'
 
 vi.mock('file-saver', () => ({ saveAs: vi.fn() }))
 
@@ -211,5 +212,46 @@ describe('ExportDialog — the honest warning', () => {
     render(<ExportDialog data={dataWithCharts()} format="ods" onCancel={onCancel} onConfirm={() => {}} />)
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onCancel).toHaveBeenCalled()
+  })
+
+  // What the IMPORT could not bring in. It is not in the workbook any more, so
+  // nothing at export time can detect it — but this is the moment the user writes
+  // a file back over an original that still HAS it. The import wrote it down
+  // (importNotes) precisely so the dialog can say it here.
+  describe('content the import could not bring in', () => {
+    const importedLossy = () => setImportNotes(wbFrom(GRID), {
+      pivots: 2,
+      charts: [{ title: 'Radar', reason: 'radar charts aren’t supported' }],
+      filename: 'budget.xlsx',
+    })
+
+    it('names the source file, the pivots and the charts that are NOT in the export', () => {
+      render(<ExportDialog data={importedLossy()} format="xlsx" onCancel={() => {}} onConfirm={() => {}} />)
+
+      const alert = screen.getByRole('alert')
+      expect(within(alert).getByText(/not in this workbook/i)).toBeTruthy()
+      expect(within(alert).getByText(/budget\.xlsx/)).toBeTruthy()
+      expect(within(alert).getByText(/2 pivot tables/i)).toBeTruthy()
+      expect(within(alert).getByText(/imported as ordinary cells/i)).toBeTruthy()
+      expect(within(alert).getByText('Radar')).toBeTruthy()
+      expect(within(alert).getByText(/radar charts aren’t supported/i)).toBeTruthy()
+      // A loss the user must acknowledge, even though this format itself is lossless.
+      expect(screen.getByRole('button', { name: /export anyway/i })).toBeTruthy()
+    })
+
+    it('says it for EVERY format — the content is gone regardless of what we write', () => {
+      for (const format of ['xlsx', 'ods', 'csv', 'xlsx-server']) {
+        const { unmount } = render(
+          <ExportDialog data={importedLossy()} format={format} onCancel={() => {}} onConfirm={() => {}} />
+        )
+        expect(screen.getByText(/not in this workbook/i)).toBeTruthy()
+        unmount()
+      }
+    })
+
+    it('stays silent for a workbook that lost nothing', () => {
+      render(<ExportDialog data={wbFrom(GRID)} format="xlsx" onCancel={() => {}} onConfirm={() => {}} />)
+      expect(screen.queryByText(/not in this workbook/i)).toBeNull()
+    })
   })
 })

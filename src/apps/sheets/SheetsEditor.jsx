@@ -12,7 +12,14 @@ import { api } from '../../lib/api'
 import { readDraft, clearDraft } from '../../lib/draftStore'
 import { exportSheetsToXlsx, exportSheetsToCsv, exportSheetsToOds, exportNeedsConfirm } from './sheetsExport'
 import { importCSVFile } from './csvImport'
-import { workbookToSheets } from './sheetsImport'
+import { importWorkbook } from './sheetsImport'
+// importNotes: what an import could NOT bring in (foreign pivot tables, charts our
+// model can't express). Kept on the workbook so the export dialog can warn before
+// the user writes a file back over the original that still has them.
+import {
+  makeImportNotes, combineImportNotes, getImportNotes, setImportNotes,
+  mergeImportNotes, importLossSummary,
+} from './importNotes.js'
 import { GridSession, getGridReplicaId } from '../../lib/crdt/grid.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
@@ -724,7 +731,11 @@ export default function SheetsEditor() {
       if (opts.overlaysAuthoritative) return newData
       const withCharts = opts.chartsAuthoritative ? newData : mergeCharts(newData, chartsBySheetId(prev))
       const withPivots = mergePivots(withCharts, pivotsBySheetId(prev))
-      return mergeColorScales(withPivots, colorScalesBySheetId(prev))
+      const withScales = mergeColorScales(withPivots, colorScalesBySheetId(prev))
+      // importNotes is a fourth app-owned overlay FortuneSheet's onChange drops.
+      // Without this merge it would evaporate on the first keystroke — i.e. on
+      // exactly the import → EDIT → export path it exists to warn about.
+      return mergeImportNotes(withScales, getImportNotes(prev))
     })
     markDirty(id)
     clearTimeout(saveTimer.current)
@@ -762,6 +773,7 @@ export default function SheetsEditor() {
       toSave = opts.chartsAuthoritative ? newData : mergeCharts(newData, chartsBySheetId(dataRef.current))
       toSave = mergePivots(toSave, pivotsBySheetId(dataRef.current))
       toSave = mergeColorScales(toSave, colorScalesBySheetId(dataRef.current))
+      toSave = mergeImportNotes(toSave, getImportNotes(dataRef.current))
     }
     saveTimer.current = setTimeout(() => doSave(toSave), AUTOSAVE_DELAY_MS)
   }
@@ -933,9 +945,10 @@ export default function SheetsEditor() {
   }
 
   // ── Import XLSX / XLS / ODS (client-side, bounded) ─────────────────────────
-  // Parsed via the shared bounded importer (workbookToSheets): size gate + cell/
-  // sheet caps + zip-bomb bounds (via SheetJS's own hardened parser), preserving
-  // values, formulas (as inert data), number formats, merges, and column widths.
+  // Parsed via the shared bounded importer (importWorkbook → workbookToSheets):
+  // size cap + cell/sheet caps + zip-bomb bounds (via SheetJS's own hardened
+  // parser), preserving values, formulas (as inert data), number formats, merges,
+  // and column widths — plus the real OOXML charts SheetJS cannot see.
   // Imported sheets are APPENDED (never destroy the open workbook); a name clash
   // is de-duplicated so Fortune-Sheet keeps distinct sheet ids.
   const handleImportXLSX = async (e) => {
@@ -943,7 +956,23 @@ export default function SheetsEditor() {
     if (!file) return
     try {
       const buf = await file.arrayBuffer()
-      const imported = workbookToSheets(buf, file.name)
+      // importWorkbook also reads the real OOXML charts SheetJS cannot see, and
+      // reports what it could not bring in (see sheetsImport.importWorkbook).
+      const { sheets: imported, notes } = await importWorkbook(buf, file.name)
+
+      // A chart belongs to the FIRST sheet and reads its cells (charts.js
+      // getCharts). Sheets imported HERE are appended after the open workbook's
+      // own, so a chart that came with them has no sheet it can legally attach to
+      // — and silently carrying it as dead data (invisible, and dropped again on
+      // export) is exactly the failure this whole change is about. So we say it:
+      // the charts did not come in, and opening the file on its own is how to
+      // keep them.
+      const orphaned = (imported[0]?.charts || []).map((c) => ({
+        title: c.title,
+        reason: 'a chart must sit on the first sheet — open this file on its own (Open, from the file list) to keep its charts',
+      }))
+      const lost = combineImportNotes(notes, makeImportNotes({ charts: orphaned, filename: file.name }))
+
       setData((prev) => {
         const used = new Set(prev.map((s) => s.name))
         const appended = imported.map((s) => {
@@ -951,15 +980,22 @@ export default function SheetsEditor() {
           let n = 1
           while (used.has(name)) name = `${s.name} (${++n})`
           used.add(name)
-          return { ...s, name }
+          // Strip the overlays that are only meaningful on sheet 0 — they would be
+          // invisible here and would quietly vanish on the next save.
+          const { charts: _c, importNotes: _n, ...sheet } = s
+          return { ...sheet, name }
         })
-        const next = [...prev, ...appended]
+        let next = [...prev, ...appended]
+        const merged = combineImportNotes(getImportNotes(prev), lost)
+        if (merged) next = setImportNotes(next, merged)
         markDirty(id)
         clearTimeout(saveTimer.current)
         saveTimer.current = setTimeout(() => doSave(next), AUTOSAVE_DELAY_MS)
         return next
       })
-      showToast(`Imported “${file.name}”`, 'success')
+      const summary = importLossSummary(lost)
+      if (summary) showToast(`Imported “${file.name}” — ${summary}`, 'info')
+      else showToast(`Imported “${file.name}”`, 'success')
     } catch (err) {
       console.error('Spreadsheet import failed:', err)
       showToast(`Could not import “${file.name}” — ${err.message}`, 'error')

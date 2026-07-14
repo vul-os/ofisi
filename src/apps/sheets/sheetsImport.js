@@ -27,6 +27,8 @@ import {
 } from '../../lib/importBounds.js'
 import { makeChart } from './charts.js'
 import { CHART_META_SHEET } from './sheetsExport.js'
+import { readXlsxCharts } from './xlsxChartsRead.js'
+import { makeImportNotes, setImportNotes } from './importNotes.js'
 
 // A chart-definition sheet holds at most this many rows; a file claiming more is
 // truncated rather than trusted (import trust boundary — the sheet is untrusted
@@ -217,4 +219,76 @@ export function workbookToSheets(arrayBuffer, filename = 'file') {
   if (!out.length) return [{ name: 'Sheet1', celldata: [], config: {}, row: 84, column: 60 }]
   if (charts.length) out[0] = { ...out[0], charts }
   return out
+}
+
+/** Display text of a cell in an already-parsed sheet (for resolving a chart title held in a cell). */
+function cellReader(sheet) {
+  const idx = new Map()
+  for (const cd of sheet?.celldata || []) idx.set(`${cd.r},${cd.c}`, cd.v)
+  return (r, c) => {
+    const v = idx.get(`${r},${c}`)
+    if (!v) return ''
+    return String(v.m ?? v.v ?? '')
+  }
+}
+
+/**
+ * importWorkbook — the FULL import: cells (workbookToSheets) PLUS the parts
+ * SheetJS cannot see — real OOXML charts, and the presence of pivot tables.
+ *
+ * THE BUG THIS FIXES (measured, not assumed). Before this existed, importing an
+ * .xlsx that Excel/Sheets/openpyxl had written with charts produced a workbook
+ * with the cells and NO charts — and re-exporting it wrote a file with no charts.
+ * Three charts in, zero out, no warning: silent data loss on the most ordinary
+ * possible round-trip (open a spreadsheet, change a number, save it back).
+ *
+ * Two carriers, in priority order:
+ *   1. The "Vulos Charts" definition sheet, if present. That is OUR OWN export,
+ *      and it is lossless (it holds the exact descriptor, geometry included), so
+ *      it always wins — there is nothing to gain from re-deriving it from XML.
+ *   2. Otherwise the real chart parts (xlsxChartsRead), for a FOREIGN file.
+ *
+ * Whatever cannot be represented faithfully is NOT approximated — it is recorded
+ * in importNotes and reported, so the user hears it from us instead of finding out
+ * when they reopen their file in Excel. Returns { sheets, notes }.
+ *
+ * Async because reading the package means re-opening the ZIP (JSZip).
+ */
+export async function importWorkbook(arrayBuffer, filename = 'file') {
+  const sheets = workbookToSheets(arrayBuffer, filename)
+
+  // Charts live on the first sheet and read its cells (charts.js getCharts), so
+  // that is the sheet a foreign chart must reference to be representable.
+  const first = sheets[0]
+  const isXlsx = /\.xlsx$/i.test(filename)
+  const alreadyHasCharts = Array.isArray(first?.charts) && first.charts.length > 0
+
+  if (!isXlsx) return { sheets, notes: null }
+
+  let found = { charts: [], unreadable: [], pivots: 0 }
+  try {
+    found = await readXlsxCharts(arrayBuffer, first?.name, cellReader(first))
+  } catch {
+    // A decorative part we cannot parse must never fail the whole import — the
+    // cells still arrive. (readXlsxCharts is already fail-soft; this is belt.)
+    return { sheets, notes: null }
+  }
+
+  let out = sheets
+  // Our own export (case 1): the definition sheet already restored the charts
+  // exactly. Do not double-import them from the XML we wrote alongside it.
+  if (!alreadyHasCharts && found.charts.length) {
+    out = out.map((s, i) => (i === 0 ? { ...s, charts: found.charts } : s))
+  }
+
+  const notes = makeImportNotes({
+    // A chart we could not read is only a LOSS if we did not already have it from
+    // the definition sheet (our own export writes a histogram's values into the
+    // chart part, which the XML reader rightly declines to re-derive).
+    charts: alreadyHasCharts ? [] : found.unreadable,
+    pivots: found.pivots,
+    filename,
+  })
+  if (notes) out = setImportNotes(out, notes)
+  return { sheets: out, notes }
 }
