@@ -326,13 +326,13 @@ export default function AppHome({ type }) {
 
         {view === 'browse' && folderId && (
           <nav className="flex items-center gap-1 text-2xs text-ink-faint ml-1" aria-label="Folder path">
-            <button className="hover:text-ink-muted flex items-center gap-1" onClick={() => setFolderId('')}>
+            <button className="hover:text-ink-muted flex items-center gap-1 rounded-sm px-1 -mx-1 focus:outline-none focus-visible:shadow-focus focus-visible:text-ink-muted" onClick={() => setFolderId('')}>
               <Home size={11} /> Home
             </button>
             {crumbs.map((c) => (
               <span key={c.id} className="flex items-center gap-1">
                 <ChevronRight size={11} />
-                <button className="hover:text-ink-muted truncate max-w-[10rem]" onClick={() => setFolderId(c.id)}>
+                <button className="hover:text-ink-muted truncate max-w-[10rem] rounded-sm px-1 -mx-1 focus:outline-none focus-visible:shadow-focus focus-visible:text-ink-muted" onClick={() => setFolderId(c.id)}>
                   {c.name}
                 </button>
               </span>
@@ -503,6 +503,7 @@ export default function AppHome({ type }) {
                   className={[
                     'w-full flex items-center gap-3 px-4 py-2.5 text-left group',
                     'hover:bg-accent-tint transition-colors duration-fast ease-out',
+                    'focus:outline-none focus-visible:shadow-focus focus-visible:bg-accent-tint',
                     i < sharedFiles.length - 1 ? 'border-b border-line' : '',
                   ].join(' ')}
                 >
@@ -540,7 +541,7 @@ export default function AppHome({ type }) {
                   {myLocalFiles.length}
                 </span>
               </div>
-              <button onClick={() => scan()} className="flex items-center gap-1.5 text-2xs text-ink-faint hover:text-ink-muted transition-colors">
+              <button onClick={() => scan()} className="flex items-center gap-1.5 text-2xs text-ink-faint hover:text-ink-muted transition-colors rounded-sm px-1 -mx-1 focus:outline-none focus-visible:shadow-focus focus-visible:text-ink-muted">
                 <RefreshCw size={11} className={localLoading ? 'animate-spin' : ''} />
                 Rescan
               </button>
@@ -554,6 +555,7 @@ export default function AppHome({ type }) {
                   className={[
                     'w-full flex items-center gap-3 px-4 py-2.5 text-left group',
                     'hover:bg-accent-tint transition-colors duration-fast ease-out',
+                    'focus:outline-none focus-visible:shadow-focus focus-visible:bg-accent-tint',
                     'disabled:opacity-60',
                     i < myLocalFiles.length - 1 ? 'border-b border-line' : '',
                   ].join(' ')}
@@ -614,6 +616,7 @@ function ViewTab({ active, onClick, children }) {
       onClick={onClick}
       className={[
         'flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-2xs font-semibold tracking-tightish transition-colors',
+        'focus:outline-none focus-visible:shadow-focus',
         active ? 'bg-paper text-ink shadow-e1' : 'text-ink-faint hover:text-ink-muted',
       ].join(' ')}
     >

@@ -92,6 +92,7 @@ export default function Home() {
                     'bg-paper hover:bg-bg-elev2 hover:border-line-strong',
                     'transition-colors duration-fast ease-out',
                     'text-left cursor-pointer overflow-hidden',
+                    'focus-visible:outline-none focus-visible:shadow-focus focus-visible:border-accent',
                   ].join(' ')}
                 >
                   <div className={`w-10 h-10 rounded-lg ${info.bgCn} border border-line flex items-center justify-center flex-shrink-0`}>
@@ -142,6 +143,7 @@ export default function Home() {
                     className={[
                       'w-full flex items-center gap-3 px-4 py-2.5 text-left group',
                       'hover:bg-bg-hover transition-colors duration-fast ease-out',
+                      'focus:outline-none focus-visible:shadow-focus focus-visible:bg-bg-hover',
                       i < recentFiles.length - 1 ? 'border-b border-line' : '',
                     ].join(' ')}
                   >
@@ -205,7 +207,7 @@ export default function Home() {
             <Tooltip label={localLoading ? 'Scanning…' : 'Rescan files'} side="left">
               <button
                 onClick={() => scan()}
-                className="flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wide text-ink-faint hover:text-ink-muted transition-colors"
+                className="flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wide text-ink-faint hover:text-ink-muted transition-colors rounded-sm px-1 -mx-1 focus:outline-none focus-visible:shadow-focus focus-visible:text-ink-muted"
               >
                 <RefreshCw size={12} className={localLoading ? 'animate-spin' : ''} />
                 {localLoading ? 'Scanning…' : 'Rescan'}
@@ -242,6 +244,7 @@ export default function Home() {
                       className={[
                         'w-full flex items-center gap-3 px-4 py-2.5 text-left group',
                         'hover:bg-bg-hover transition-colors duration-fast ease-out',
+                        'focus:outline-none focus-visible:shadow-focus focus-visible:bg-bg-hover',
                         'disabled:opacity-60',
                         i < visibleLocal.length - 1 ? 'border-b border-line' : '',
                       ].join(' ')}
@@ -274,7 +277,7 @@ export default function Home() {
               {localFiles.length > 8 && (
                 <button
                   onClick={() => setShowLocalAll(v => !v)}
-                  className="mt-3 w-full py-2 text-2xs text-ink-faint hover:text-ink-muted bg-paper border border-line rounded-md hover:bg-bg-elev2 transition-colors tracking-tightish"
+                  className="mt-3 w-full py-2 text-2xs text-ink-faint hover:text-ink-muted bg-paper border border-line rounded-md hover:bg-bg-elev2 transition-colors tracking-tightish focus:outline-none focus-visible:shadow-focus focus-visible:border-accent"
                 >
                   {showLocalAll ? 'Show less' : `Show all ${localFiles.length} files`}
                 </button>

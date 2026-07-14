@@ -56,12 +56,13 @@ export default function LoginScreen() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-ink-muted mb-1.5 tracking-tightish">
+              <label htmlFor="login-password" className="block text-xs font-medium text-ink-muted mb-1.5 tracking-tightish">
                 Password
               </label>
               <div className="relative">
                 <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" />
                 <input
+                  id="login-password"
                   type={show ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -72,7 +73,7 @@ export default function LoginScreen() {
                 <button
                   type="button"
                   onClick={() => setShow(!show)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-faint hover:text-ink transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-faint hover:text-ink transition-colors rounded-sm focus:outline-none focus-visible:shadow-focus focus-visible:text-ink"
                   aria-label={show ? 'Hide password' : 'Show password'}
                 >
                   {show ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -97,7 +98,7 @@ export default function LoginScreen() {
             <button
               type="submit"
               disabled={!password || loading}
-              className="w-full h-10 bg-accent text-white rounded-md text-sm font-semibold hover:bg-accent-hover active:bg-accent-press disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-e1 tracking-tightish"
+              className="w-full h-10 bg-accent text-white rounded-md text-sm font-semibold hover:bg-accent-hover active:bg-accent-press disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-e1 tracking-tightish focus:outline-none focus-visible:shadow-focus"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
