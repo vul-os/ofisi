@@ -50,6 +50,11 @@ import { makePivot, getPivots, clampPivots, pivotsBySheetId, mergePivots } from 
 // ingress clamp (allow-listed kind, hex-validated colours) for a peer-supplied
 // rule; clampColorScales re-clamps on load; merge preserves the overlay.
 import { makeColorScale, clampColorScales, colorScalesBySheetId, mergeColorScales, buildNativeConditionFormat } from './colorScales.js'
+// WAVE-64: data-validation rules (sheet.dataVerification) get the same treatment
+// — clampDataValidation rebuilds every stored regulation through the fail-closed
+// builder on load, so an unknown type / junk condition / unbounded hint from a
+// corrupt or hostile file is dropped before Fortune-Sheet's validator sees it.
+import { clampDataValidation } from './dataValidation.js'
 import { parseRange as parseRangeFS } from './ConditionalFormatPanel.jsx'
 
 // Side panels — lazily loaded so they don't bloat the initial bundle.
@@ -95,7 +100,7 @@ function normalizeSheets(sheets) {
 // pivots through their fail-closed clamps so a corrupt/legacy/poisoned record
 // can never reach render with an unsafe descriptor (WAVE-61/63 defence-in-depth).
 function loadContent(content) {
-  return clampColorScales(clampPivots(clampCharts(normalizeSheets(content))))
+  return clampDataValidation(clampColorScales(clampPivots(clampCharts(normalizeSheets(content)))))
 }
 
 // Shared trigger styling for the Import / Export menus.

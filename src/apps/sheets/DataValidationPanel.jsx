@@ -1,11 +1,13 @@
 /**
  * src/apps/sheets/DataValidationPanel.jsx
  *
- * Data-validation side panel: per-cell dropdown lists and number-range rules.
+ * Data-validation side panel: dropdown lists (literal or from a range, including
+ * another sheet), checkboxes, number ranges, dates, and text content/length.
  * Rules are written to Fortune Sheet's native `sheet.dataVerification` map, so
  * the grid renders the dropdown chevron + enforces invalid-entry rejection with
  * no extra wiring. Pure rule logic lives in ./dataValidation.js (unit-tested);
- * this file is just the form.
+ * this file is just the form — and it can only save what buildRegulation accepts,
+ * so a half-formed rule surfaces an error instead of writing junk.
  *
  * Props:
  *   data       {Sheet[]}   — workbook data
@@ -14,13 +16,16 @@
  *   onChange   {fn(data)}  — called with the updated workbook after a change
  */
 import { useMemo, useState } from 'react'
-import { X, Plus, Trash2, ListChecks } from 'lucide-react'
+import { X, Plus, Trash2, ListChecks, AlertCircle } from 'lucide-react'
 import { Button, IconButton } from '../../components/ui'
 import { parseRange } from './ConditionalFormatPanel.jsx'
 import {
   VALIDATION_KINDS,
   NUMBER_CONDITIONS,
+  DATE_CONDITIONS,
+  TEXT_CONDITIONS,
   numberConditionArity,
+  dateConditionArity,
   buildRegulation,
   applyValidation,
   listValidationRules,
@@ -37,12 +42,34 @@ function cellA1(row, col) { return `${colLetter(col)}${row + 1}` }
 const EMPTY_FORM = {
   kind: 'dropdown',
   items: '',
+  sourceRange: '',
   allowMulti: false,
+  checkedValue: 'TRUE',
+  uncheckedValue: 'FALSE',
   condition: 'between',
   value1: '',
   value2: '',
   rejectInvalid: true,
   hint: '',
+}
+
+// The condition list + arity for each kind that has one.
+const CONDITIONS = {
+  number:     { list: NUMBER_CONDITIONS, arity: numberConditionArity, input: 'decimal', default: 'between' },
+  textLength: { list: NUMBER_CONDITIONS, arity: numberConditionArity, input: 'numeric', default: 'between' },
+  date:       { list: DATE_CONDITIONS,   arity: dateConditionArity,   input: 'date',    default: 'between' },
+  text:       { list: TEXT_CONDITIONS,   arity: () => 1,              input: 'text',    default: 'include' },
+}
+
+// The message shown when buildRegulation refuses the form.
+const KIND_ERROR = {
+  dropdown:      'Add at least one dropdown item (comma-separated).',
+  dropdownRange: 'Enter a valid source range, e.g. Sheet2!A1:A10.',
+  checkbox:      'Give the checkbox two different values.',
+  number:        'Enter valid numeric value(s) for the condition.',
+  date:          'Enter valid date(s), e.g. 2026-07-14.',
+  text:          'Enter the text to match.',
+  textLength:    'Enter a whole-number length for the condition.',
 }
 
 export default function DataValidationPanel({ data, activeCell, onClose, onChange }) {
@@ -60,6 +87,9 @@ export default function DataValidationPanel({ data, activeCell, onClose, onChang
   const inputCls = 'w-full rounded border border-line bg-bg px-2 py-1.5 text-xs text-ink focus:outline-none focus:border-line-strong'
   const selCls   = inputCls
 
+  const cond  = CONDITIONS[form.kind]
+  const arity = cond ? cond.arity(form.condition) : 0
+
   function startNew() {
     setForm(EMPTY_FORM)
     setRange(defaultRange)
@@ -67,12 +97,19 @@ export default function DataValidationPanel({ data, activeCell, onClose, onChang
     setEditing(true)
   }
 
+  function patch(p) { setForm((f) => ({ ...f, ...p })); setError('') }
+
+  // Switching criteria resets the condition to one the new kind actually has
+  // (a `date` rule must never carry over a `moreThanThe` from the number list).
+  function changeKind(kind) {
+    const next = CONDITIONS[kind]
+    patch({ kind, condition: next ? next.default : EMPTY_FORM.condition, value1: '', value2: '' })
+  }
+
   function save() {
     const reg = buildRegulation(form)
     if (!reg) {
-      setError(form.kind === 'dropdown'
-        ? 'Add at least one dropdown item (comma-separated).'
-        : 'Enter valid numeric value(s) for the condition.')
+      setError(KIND_ERROR[form.kind] || 'Complete the rule before saving.')
       return
     }
     const parsed = parseRange(range)?.[0]
@@ -92,8 +129,6 @@ export default function DataValidationPanel({ data, activeCell, onClose, onChang
     onChange?.(next)
   }
 
-  const arity = numberConditionArity(form.condition)
-
   return (
     <div className="flex flex-col w-full sm:w-80 flex-shrink-0 h-full border-l border-line bg-paper overflow-y-auto">
       <div className="flex items-center justify-between px-3 py-2 border-b border-line">
@@ -108,7 +143,8 @@ export default function DataValidationPanel({ data, activeCell, onClose, onChang
           <>
             {rules.length === 0 && (
               <p className="text-ink-faint">
-                No validation rules. Add one to give cells a dropdown list or restrict them to a number range.
+                No validation rules. Add one to give cells a dropdown list, a checkbox,
+                or to restrict them to a number, a date, or text of a given shape.
               </p>
             )}
 
@@ -118,6 +154,7 @@ export default function DataValidationPanel({ data, activeCell, onClose, onChang
                   <p className="font-semibold text-ink truncate">{rule.summary}</p>
                   <p className="text-ink-faint text-[10px]">
                     {rule.count} cell{rule.count === 1 ? '' : 's'}
+                    {rule.reg?.prohibitInput ? ' · rejects invalid input' : ''}
                   </p>
                 </div>
                 <button
@@ -155,7 +192,7 @@ export default function DataValidationPanel({ data, activeCell, onClose, onChang
               <select
                 id="dv-kind"
                 value={form.kind}
-                onChange={(e) => { setForm((f) => ({ ...f, kind: e.target.value })); setError('') }}
+                onChange={(e) => changeKind(e.target.value)}
                 className={selCls}
               >
                 {VALIDATION_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
@@ -169,7 +206,7 @@ export default function DataValidationPanel({ data, activeCell, onClose, onChang
                   <input
                     id="dv-items"
                     value={form.items}
-                    onChange={(e) => { setForm((f) => ({ ...f, items: e.target.value })); setError('') }}
+                    onChange={(e) => patch({ items: e.target.value })}
                     className={inputCls}
                     placeholder="e.g. Low, Medium, High"
                   />
@@ -178,43 +215,94 @@ export default function DataValidationPanel({ data, activeCell, onClose, onChang
                   <input
                     type="checkbox"
                     checked={form.allowMulti}
-                    onChange={(e) => setForm((f) => ({ ...f, allowMulti: e.target.checked }))}
+                    onChange={(e) => patch({ allowMulti: e.target.checked })}
                   />
                   <span className="text-ink-muted">Allow multiple selection</span>
                 </label>
               </>
             )}
 
-            {form.kind === 'number' && (
+            {form.kind === 'dropdownRange' && (
+              <>
+                <div className="space-y-1">
+                  <label className="block text-ink-muted font-medium" htmlFor="dv-source">List source range</label>
+                  <input
+                    id="dv-source"
+                    value={form.sourceRange}
+                    onChange={(e) => patch({ sourceRange: e.target.value })}
+                    className={inputCls}
+                    placeholder="e.g. Sheet2!A1:A10"
+                  />
+                  <p className="text-ink-faint text-[10px]">
+                    The list follows the cells — edit the source and every dropdown updates.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.allowMulti}
+                    onChange={(e) => patch({ allowMulti: e.target.checked })}
+                  />
+                  <span className="text-ink-muted">Allow multiple selection</span>
+                </label>
+              </>
+            )}
+
+            {form.kind === 'checkbox' && (
+              <div className="flex gap-2">
+                <div className="flex-1 space-y-1">
+                  <label className="block text-ink-muted font-medium" htmlFor="dv-checked">Checked value</label>
+                  <input
+                    id="dv-checked"
+                    value={form.checkedValue}
+                    onChange={(e) => patch({ checkedValue: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <label className="block text-ink-muted font-medium" htmlFor="dv-unchecked">Unchecked value</label>
+                  <input
+                    id="dv-unchecked"
+                    value={form.uncheckedValue}
+                    onChange={(e) => patch({ uncheckedValue: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+            )}
+
+            {cond && (
               <>
                 <div className="space-y-1">
                   <label className="block text-ink-muted font-medium" htmlFor="dv-cond">Condition</label>
                   <select
                     id="dv-cond"
                     value={form.condition}
-                    onChange={(e) => { setForm((f) => ({ ...f, condition: e.target.value })); setError('') }}
+                    onChange={(e) => patch({ condition: e.target.value })}
                     className={selCls}
                   >
-                    {NUMBER_CONDITIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    {cond.list.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
                 </div>
                 <div className="flex gap-2">
                   <input
                     aria-label="Value"
+                    type={cond.input === 'date' ? 'date' : 'text'}
+                    inputMode={cond.input === 'date' || cond.input === 'text' ? undefined : cond.input}
                     value={form.value1}
-                    onChange={(e) => { setForm((f) => ({ ...f, value1: e.target.value })); setError('') }}
+                    onChange={(e) => patch({ value1: e.target.value })}
                     className={inputCls}
-                    placeholder="Value"
-                    inputMode="decimal"
+                    placeholder={form.kind === 'textLength' ? 'Length' : 'Value'}
                   />
                   {arity === 2 && (
                     <input
                       aria-label="Upper value"
+                      type={cond.input === 'date' ? 'date' : 'text'}
+                      inputMode={cond.input === 'date' || cond.input === 'text' ? undefined : cond.input}
                       value={form.value2}
-                      onChange={(e) => { setForm((f) => ({ ...f, value2: e.target.value })); setError('') }}
+                      onChange={(e) => patch({ value2: e.target.value })}
                       className={inputCls}
                       placeholder="and"
-                      inputMode="decimal"
                     />
                   )}
                 </div>
@@ -225,12 +313,17 @@ export default function DataValidationPanel({ data, activeCell, onClose, onChang
               <input
                 type="checkbox"
                 checked={form.rejectInvalid}
-                onChange={(e) => setForm((f) => ({ ...f, rejectInvalid: e.target.checked }))}
+                onChange={(e) => patch({ rejectInvalid: e.target.checked })}
+                disabled={form.kind === 'checkbox'}
               />
               <span className="text-ink-muted">Reject invalid input</span>
             </label>
 
-            {error && <p className="text-danger text-[11px]" role="alert">{error}</p>}
+            {error && (
+              <p className="flex items-start gap-1 text-danger text-[11px]" role="alert">
+                <AlertCircle size={12} className="mt-px flex-shrink-0" aria-hidden /> {error}
+              </p>
+            )}
 
             <div className="flex gap-2">
               <Button variant="primary"   size="sm" onClick={save}                 className="flex-1">Save</Button>

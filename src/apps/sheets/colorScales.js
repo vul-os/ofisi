@@ -1,14 +1,18 @@
 /**
- * src/apps/sheets/colorScales.js  (WAVE-63 — CF color scales + data bars)
+ * src/apps/sheets/colorScales.js  (WAVE-63 — CF color scales + data bars,
+ *                                  WAVE-64 — single-colour cell/text/date rules)
  *
- * Conditional-formatting COLOR SCALES and DATA BARS as a reactive, plain-data
- * overlay — the same discipline as the WAVE-54 charts and WAVE-63 pivots.
+ * Conditional-formatting COLOR SCALES, DATA BARS and SINGLE-COLOUR RULES as a
+ * reactive, plain-data overlay — the same discipline as the WAVE-54 charts and
+ * WAVE-63 pivots.
  *
- * Fortune-Sheet ships a native `dataBar`/`colorGradation` code path, but it is
- * buggy (its min/max scan requires the cell value to be nil; its gradient reads
- * `format` as both an object and an array) and hard to drive safely. So we
- * compute these ourselves from the current cell values and render them as an
- * overlay we control — giving us correct output AND full ownership of the CRDT
+ * Fortune-Sheet ships native `dataBar`/`colorGradation`/`greaterThan`/… code
+ * paths, but they are buggy (the gradient scan requires the cell value to be
+ * nil; `greaterThan` compares with a raw JS `>` so "9" beats 10; `occurrenceDate`
+ * indexes a trimmed char; the `formula` rule pushes the CF cell into the sheet's
+ * calcChain, corrupting the saved model) and hard to drive safely. So we compute
+ * EVERY rule ourselves from the current cell values and hand Fortune-Sheet only
+ * a paint instruction — giving us correct output AND full ownership of the CRDT
  * ingress validation.
  *
  * A rule is PLAIN STRUCTURED DATA stored on the first sheet as
@@ -16,39 +20,115 @@
  *
  *   {
  *     id:    string,
- *     kind:  'colorScale2' | 'colorScale3' | 'dataBar',
+ *     kind:  'colorScale2' | 'colorScale3' | 'dataBar'   // gradient family
+ *          | 'greaterThan' | 'lessThan' | … | 'formula', // single-colour family
  *     range: 'A1:A10',                 // A1 source range (untrusted text)
- *     min:   '#f8696b',                // hex colours (validated)
+ *     min:   '#f8696b',                // gradient hex colours (validated)
  *     mid:   '#ffeb84',                // colorScale3 only
  *     max:   '#63be7b',
  *     barColor: '#638ec6',             // dataBar only
+ *     fill:  '#fce8e6',                // single-colour fill (validated)
+ *     textColor: '#b71c1c',            // single-colour text colour ('' = keep)
+ *     value1: '10', value2: '20',      // condition operands (untrusted text)
+ *     formula: '=$A1>10',              // custom-formula rule only
  *   }
  *
- * computeColorScale reads the range's numeric values every time they change and
- * returns a plain `{ "r_c": { bg } | { bar: { pct, color, negative } } }` map
- * the overlay paints. Reactive: the overlay memoises on a values signature so a
- * rule only recomputes when ITS cells change.
+ * computeColorScale reads the range's values every time they change and returns
+ * a plain `{ "r_c": { bg } | { bar: { pct, color, negative } } }` map the overlay
+ * paints. Reactive: the overlay memoises on a values signature so a rule only
+ * recomputes when ITS cells change.
  *
  * SECURITY: every colour is validated to a strict `#rgb`/`#rrggbb` hex (an
  * unknown/hostile value is dropped to a safe default) so a rule can never inject
- * a `url(...)`/`expression(...)`/`javascript:` value into a style. Ranges are
- * bounded. Nothing here evals, builds HTML, or fetches. The overlay paints
- * background colours / bar widths only — never cell text — so untrusted cell
- * content is never rendered by this path at all.
+ * a `url(...)`/`expression(...)`/`javascript:` value into a style. Kinds are
+ * allow-listed; operand/formula text is coerced to a control-char-free, length-
+ * capped string and is only ever COMPARED against, never emitted into a style, a
+ * DOM sink, or Fortune-Sheet's own model. Ranges are bounded (MAX_CELLS) and
+ * clamped to the grid extent. The custom-formula rule is evaluated by OUR OWN
+ * parser instance (bounded cell count, errors returned not thrown, no eval, no
+ * DOM, no fetch) — the untrusted formula string never reaches Fortune-Sheet's
+ * execfunction, so it cannot pollute the calcChain or crash the canvas. The
+ * overlay paints background colours / bar widths only — never cell text — so
+ * untrusted cell content is never rendered by this path at all.
  */
+import { Parser } from '@fortune-sheet/formula-parser'
 
-export const CS_KINDS = ['colorScale2', 'colorScale3', 'dataBar']
+// Gradient family (own compute → banded native rules).
+export const CS_SCALE_KINDS = ['colorScale2', 'colorScale3', 'dataBar']
+
+// Single-colour family (own compute → per-cell native paint instruction).
+export const CS_SINGLE_KINDS = [
+  // numeric / cell-value
+  'greaterThan', 'lessThan', 'greaterOrEqual', 'lessOrEqual',
+  'between', 'notBetween', 'equalTo', 'notEqualTo',
+  // text
+  'textContains', 'textNotContains', 'textStartsWith', 'textEndsWith', 'textExactly',
+  // date
+  'dateBefore', 'dateAfter', 'dateToday', 'dateThisWeek', 'dateThisMonth',
+  // presence / duplicates / custom
+  'isEmpty', 'isNotEmpty', 'duplicate', 'formula',
+]
+
+export const CS_KINDS = [...CS_SCALE_KINDS, ...CS_SINGLE_KINDS]
 const CS_KIND_SET = new Set(CS_KINDS)
+const CS_SINGLE_SET = new Set(CS_SINGLE_KINDS)
 
-// Safe defaults (Excel-ish).
+/** True when the rule paints ONE colour over the cells it matches. */
+export function isSingleKind(kind) { return CS_SINGLE_SET.has(kind) }
+
+/**
+ * CS_KIND_META — per-kind label + operand arity + operand input type, so the
+ * panel renders exactly the inputs a kind needs (and the tests can enumerate).
+ *   args: how many of value1/value2 the kind reads (0, 1 or 2)
+ *   input: 'number' | 'text' | 'date' | 'formula' | null
+ */
+export const CS_KIND_META = {
+  colorScale2:     { label: '2-color scale',        args: 0, input: null,      group: 'scale' },
+  colorScale3:     { label: '3-color scale',        args: 0, input: null,      group: 'scale' },
+  dataBar:         { label: 'Data bar',             args: 0, input: null,      group: 'scale' },
+  greaterThan:     { label: 'Greater than',         args: 1, input: 'number',  group: 'value' },
+  lessThan:        { label: 'Less than',            args: 1, input: 'number',  group: 'value' },
+  greaterOrEqual:  { label: 'Greater than or equal to', args: 1, input: 'number', group: 'value' },
+  lessOrEqual:     { label: 'Less than or equal to',    args: 1, input: 'number', group: 'value' },
+  between:         { label: 'Is between',           args: 2, input: 'number',  group: 'value' },
+  notBetween:      { label: 'Is not between',       args: 2, input: 'number',  group: 'value' },
+  equalTo:         { label: 'Is equal to',          args: 1, input: 'text',    group: 'value' },
+  notEqualTo:      { label: 'Is not equal to',      args: 1, input: 'text',    group: 'value' },
+  textContains:    { label: 'Text contains',        args: 1, input: 'text',    group: 'text' },
+  textNotContains: { label: 'Text does not contain', args: 1, input: 'text',   group: 'text' },
+  textStartsWith:  { label: 'Text starts with',     args: 1, input: 'text',    group: 'text' },
+  textEndsWith:    { label: 'Text ends with',       args: 1, input: 'text',    group: 'text' },
+  textExactly:     { label: 'Text is exactly',      args: 1, input: 'text',    group: 'text' },
+  dateBefore:      { label: 'Date is before',       args: 1, input: 'date',    group: 'date' },
+  dateAfter:       { label: 'Date is after',        args: 1, input: 'date',    group: 'date' },
+  dateToday:       { label: 'Date is today',        args: 0, input: null,      group: 'date' },
+  dateThisWeek:    { label: 'Date is this week',    args: 0, input: null,      group: 'date' },
+  dateThisMonth:   { label: 'Date is this month',   args: 0, input: null,      group: 'date' },
+  isEmpty:         { label: 'Cell is empty',        args: 0, input: null,      group: 'other' },
+  isNotEmpty:      { label: 'Cell is not empty',    args: 0, input: null,      group: 'other' },
+  duplicate:       { label: 'Duplicate values',     args: 0, input: null,      group: 'other' },
+  formula:         { label: 'Custom formula is',    args: 0, input: 'formula', group: 'other' },
+}
+
+// Safe defaults (Excel-ish gradients; Google-ish single-colour highlight).
 const DEF = {
   min: '#f8696b',   // red
   mid: '#ffeb84',   // yellow
   max: '#63be7b',   // green
   barColor: '#638ec6',
+  fill: '#fce8e6',      // light red
+  textColor: '#b71c1c', // dark red
 }
 
 const MAX_CELLS = 100000 // hard ceiling on a rule's scanned area
+// A single-colour rule paints cell-by-cell, so its scan/paint/eval budgets are
+// tighter than a gradient's (which collapses to 12 band rules whatever the size).
+const MAX_MATCH_CELLS   = 20000 // cells a single-colour rule may test
+const MAX_PAINT_CELLS   = 5000  // cells a single-colour rule may paint natively
+const MAX_FORMULA_CELLS = 2000  // per-cell formula evaluations a rule may run
+
+const MAX_VALUE_LEN   = 120 // condition operand text
+const MAX_FORMULA_LEN = 300 // custom-formula text
 
 const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
@@ -56,6 +136,29 @@ const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 export function safeColor(v, fallback = '#000000') {
   if (typeof v === 'string' && HEX_RE.test(v.trim())) return v.trim().toLowerCase()
   return fallback
+}
+
+/**
+ * safeOptionalColor — like safeColor but "unset" is a first-class value: an
+ * absent OR hostile colour collapses to '' (= leave the cell's own colour), so a
+ * poisoned descriptor can never smuggle a non-hex string into a style.
+ */
+export function safeOptionalColor(v) {
+  if (v === '' || v === null || v === undefined) return ''
+  return safeColor(v, '')
+}
+
+/**
+ * safeText — coerce an untrusted operand to a plain, control-char-free, length-
+ * capped string. Objects/arrays/functions (a hostile descriptor's favourite way
+ * to smuggle a toString/valueOf side effect) collapse to ''.
+ */
+export function safeText(v, max = MAX_VALUE_LEN) {
+  if (typeof v === 'number' && isFinite(v)) return String(v).slice(0, max)
+  if (typeof v === 'boolean') return String(v)
+  if (typeof v !== 'string') return ''
+  // eslint-disable-next-line no-control-regex
+  return v.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, max)
 }
 
 let _seq = 0
@@ -66,20 +169,66 @@ export function newColorScaleId() {
 
 /**
  * makeColorScale — construct a well-formed rule with defaults, clamping every
- * field. Unknown kind → 'colorScale2'. Colours forced to valid hex. This is the
- * fail-closed ingress clamp: run it on any peer-supplied rule.
+ * field. Unknown kind → 'colorScale2'. Colours forced to valid hex. Operand and
+ * formula text coerced to a bounded plain string. This is the fail-closed
+ * ingress clamp: run it on any peer-supplied rule.
  */
 export function makeColorScale(partial = {}) {
   const kind = CS_KIND_SET.has(partial.kind) ? partial.kind : 'colorScale2'
   return {
-    id:       typeof partial.id === 'string' && partial.id ? partial.id : newColorScaleId(),
+    id:        typeof partial.id === 'string' && partial.id ? partial.id : newColorScaleId(),
     kind,
-    range:    typeof partial.range === 'string' ? partial.range.trim().toUpperCase().slice(0, 40) : '',
-    min:      safeColor(partial.min, DEF.min),
-    mid:      safeColor(partial.mid, DEF.mid),
-    max:      safeColor(partial.max, DEF.max),
-    barColor: safeColor(partial.barColor, DEF.barColor),
+    range:     typeof partial.range === 'string' ? partial.range.trim().toUpperCase().slice(0, 40) : '',
+    min:       safeColor(partial.min, DEF.min),
+    mid:       safeColor(partial.mid, DEF.mid),
+    max:       safeColor(partial.max, DEF.max),
+    barColor:  safeColor(partial.barColor, DEF.barColor),
+    fill:      safeColor(partial.fill, DEF.fill),
+    textColor: safeOptionalColor(partial.textColor),
+    value1:    safeText(partial.value1),
+    value2:    safeText(partial.value2),
+    formula:   safeText(partial.formula, MAX_FORMULA_LEN),
   }
+}
+
+/**
+ * colorScaleError — the reason a rule can't be saved, or null when it is usable.
+ * The panel's user-facing gate; matchCells enforces the same conditions silently
+ * (a rule that can't match paints nothing), so the two can never diverge.
+ */
+export function colorScaleError(rule) {
+  const meta = CS_KIND_META[rule?.kind]
+  if (!meta) return 'Pick a condition.'
+  if (!parseBounds(rule.range)) return 'Enter a valid range, e.g. A1:A10.'
+  if (meta.input === 'formula') {
+    return String(rule.formula || '').trim() ? null : 'Enter a formula, e.g. =$A1>10.'
+  }
+  if (meta.input === 'number') {
+    const n1 = Number(String(rule.value1).trim())
+    if (String(rule.value1).trim() === '' || !isFinite(n1)) return 'Enter a number for the condition.'
+    if (meta.args === 2) {
+      const n2 = Number(String(rule.value2).trim())
+      if (String(rule.value2).trim() === '' || !isFinite(n2)) return 'Enter both numbers for the range.'
+    }
+    return null
+  }
+  if (meta.input === 'text') {
+    return String(rule.value1).trim() ? null : 'Enter the text to match.'
+  }
+  if (meta.input === 'date') {
+    return Number.isNaN(parseDay(rule.value1)) ? 'Enter a date, e.g. 2026-07-14.' : null
+  }
+  return null
+}
+
+/** colorScaleSummary — one-line human description of a rule, for the rule list. */
+export function colorScaleSummary(rule) {
+  const meta = CS_KIND_META[rule?.kind]
+  if (!meta) return 'Rule'
+  if (rule.kind === 'formula') return `Custom formula ${rule.formula || ''}`.trim()
+  if (meta.args === 2) return `${meta.label} ${rule.value1} and ${rule.value2}`
+  if (meta.args === 1) return `${meta.label} ${rule.value1}`
+  return meta.label
 }
 
 export function getColorScales(data) {
@@ -176,6 +325,309 @@ function cellNumber(cell) {
   return NaN
 }
 
+// ── single-colour rule evaluation (WAVE-64) ─────────────────────────────────
+// All of it is OURS: Fortune-Sheet's own greaterThan/textContains/occurrenceDate/
+// duplicateValue/formula evaluation is either wrong (string `>` comparison, a
+// mis-indexed date split) or unsafe (its `formula` rule writes the CF cell into
+// the sheet's calcChain). We match cells here and hand FS a paint instruction.
+
+/** Raw underlying value of a cell (number | string | null). */
+function cellRaw(cell) {
+  const v = cell?.v
+  if (v === null || v === undefined) return null
+  if (typeof v === 'object') {
+    const d = v.v !== undefined && v.v !== null ? v.v : v.m
+    return d === undefined || d === null || typeof d === 'object' ? null : d
+  }
+  return typeof v === 'object' ? null : v
+}
+
+/** Cell value as plain display text ('' when the cell is empty). */
+export function cellString(cell) {
+  const v = cell?.v
+  // A date cell carries an Excel serial in `v` and the readable date in `m`.
+  if (typeof v === 'object' && v?.ct?.t === 'd' && typeof v.m === 'string') return v.m
+  const raw = cellRaw(cell)
+  return raw === null ? '' : String(raw)
+}
+
+function isBlankCell(cell) { return cellString(cell).trim() === '' }
+
+// Dates live on the Excel serial-day axis (1899-12-30 = day 0) so a numeric date
+// cell and a parsed 'YYYY-MM-DD' string compare on ONE scale, TZ-independently.
+const EXCEL_EPOCH_UTC = Date.UTC(1899, 11, 30)
+const DAY_MS = 86400000
+
+function dayFromYMD(y, m, d) {
+  if (!(y >= 1000 && y <= 9999) || !(m >= 1 && m <= 12) || !(d >= 1 && d <= 31)) return NaN
+  const t = Date.UTC(y, m - 1, d)
+  const back = new Date(t)
+  // Reject impossible dates (2024-02-31 rolls over → not the day we asked for).
+  if (back.getUTCMonth() !== m - 1 || back.getUTCDate() !== d) return NaN
+  return Math.round((t - EXCEL_EPOCH_UTC) / DAY_MS)
+}
+
+/** parseDay — 'YYYY-MM-DD' | 'YYYY/M/D' | 'M/D/YYYY' → Excel serial day, else NaN. */
+export function parseDay(text) {
+  const s = String(text ?? '').trim()
+  if (!s) return NaN
+  let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/)
+  if (m) return dayFromYMD(+m[1], +m[2], +m[3])
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  if (m) return dayFromYMD(+m[3], +m[1], +m[2])
+  return NaN
+}
+
+/** Cell value as an Excel serial day, or NaN when it isn't a date. */
+export function cellDay(cell) {
+  const v = cell?.v
+  const raw = cellRaw(cell)
+  if (typeof v === 'object' && v?.ct?.t === 'd' && typeof raw === 'number') return Math.floor(raw)
+  if (typeof raw === 'string') return parseDay(raw)
+  if (typeof v === 'object' && typeof v?.m === 'string') return parseDay(v.m)
+  return NaN
+}
+
+/** todayDay — `now` as an Excel serial day, on the user's LOCAL calendar. */
+export function todayDay(now = new Date()) {
+  return dayFromYMD(now.getFullYear(), now.getMonth() + 1, now.getDate())
+}
+
+/** dateWindow — inclusive [from, to] serial-day window for a relative date kind. */
+export function dateWindow(kind, now = new Date()) {
+  const today = todayDay(now)
+  if (kind === 'dateToday') return [today, today]
+  if (kind === 'dateThisWeek') {
+    const start = today - now.getDay() // week starts Sunday, as in Sheets
+    return [start, start + 6]
+  }
+  if (kind === 'dateThisMonth') {
+    const y = now.getFullYear(), m = now.getMonth() + 1
+    const first = dayFromYMD(y, m, 1)
+    const days = new Date(Date.UTC(y, m, 0)).getUTCDate()
+    return [first, dayFromYMD(y, m, days)]
+  }
+  return null
+}
+
+const norm = (s) => String(s ?? '').trim().toLowerCase()
+
+/**
+ * ruleOperands — the rule's own operands, parsed + validated for its kind.
+ * Returns null when the rule can never match (missing/invalid operand) — the
+ * fail-closed "match nothing" path, so a half-filled or hostile rule paints
+ * NOTHING rather than painting everything.
+ */
+function ruleOperands(rule) {
+  const meta = CS_KIND_META[rule?.kind]
+  if (!meta) return null
+  const { kind } = rule
+  if (meta.input === 'number' || kind === 'equalTo' || kind === 'notEqualTo') {
+    const n1 = Number(String(rule.value1).trim())
+    const n2 = Number(String(rule.value2).trim())
+    const numeric1 = String(rule.value1).trim() !== '' && isFinite(n1)
+    const numeric2 = String(rule.value2).trim() !== '' && isFinite(n2)
+    if (meta.input === 'number') {
+      if (!numeric1) return null
+      if (meta.args === 2 && !numeric2) return null
+      return { n1, n2 }
+    }
+    // equalTo / notEqualTo compare numerically when BOTH sides are numbers,
+    // else case-insensitively as text (Sheets semantics).
+    if (String(rule.value1).trim() === '') return null
+    return { n1: numeric1 ? n1 : NaN, t1: norm(rule.value1) }
+  }
+  if (meta.input === 'text') {
+    const t1 = norm(rule.value1)
+    if (t1 === '') return null
+    return { t1 }
+  }
+  if (meta.input === 'date') {
+    const d1 = parseDay(rule.value1)
+    if (Number.isNaN(d1)) return null
+    return { d1 }
+  }
+  if (meta.input === 'formula') {
+    const f = String(rule.formula || '').trim()
+    if (!f) return null
+    return { formula: f }
+  }
+  return {}
+}
+
+/**
+ * evalFormulaRule — evaluate a custom-formula rule ('=$A1>10') once per cell in
+ * the range and return the matching keys.
+ *
+ * SAFETY: we run OUR OWN `@fortune-sheet/formula-parser` instance — the same
+ * engine the grid already uses for cell formulas, which PARSES (never evals) and
+ * returns `{ error, result }` instead of throwing. Relative/absolute references
+ * are resolved by us against the range's top-left anchor (Sheets semantics), so
+ * the untrusted string is never handed to Fortune-Sheet's `execfunction` — which
+ * would push the CF cell into the sheet's calcChain and corrupt the saved model.
+ * Bounded by MAX_FORMULA_CELLS; any throw → no matches (fail-closed).
+ */
+function evalFormulaRule(formula, cells, idx, b, limit) {
+  const out = []
+  try {
+    const parser = new Parser()
+    let cur = { r: b.r0, c: b.c0 }
+    const resolve = (coord) => ({
+      r: coord.row.isAbsolute    ? coord.row.index    : coord.row.index    + (cur.r - b.r0),
+      c: coord.column.isAbsolute ? coord.column.index : coord.column.index + (cur.c - b.c0),
+    })
+    const valueAt = (r, c) => {
+      if (r < 0 || c < 0) return null
+      return cellRaw(idx.get(r + ',' + c))
+    }
+    // NOTE the arity: this parser fork emits (coord, options, done) — a 2-arg
+    // handler silently binds `done` to the options object and every reference
+    // resolves to #ERROR!.
+    parser.on('callCellValue', (coord, _options, done) => {
+      const { r, c } = resolve(coord)
+      done(valueAt(r, c))
+    })
+    parser.on('callRangeValue', (start, end, _options, done) => {
+      const s = resolve(start), e = resolve(end)
+      const grid = []
+      const rows = Math.min(e.r, s.r + MAX_MATCH_CELLS)
+      for (let r = s.r; r <= rows; r++) {
+        const row = []
+        for (let c = s.c; c <= e.c; c++) row.push(valueAt(r, c))
+        grid.push(row)
+      }
+      done(grid)
+    })
+    const text = formula.replace(/^\s*=/, '')
+    if (!text) return out
+    let evals = 0
+    for (const cell of cells) {
+      if (++evals > limit) break
+      cur = cell
+      const res = parser.parse(text)
+      if (res?.error) continue
+      if (truthy(res?.result)) out.push(cell)
+    }
+  } catch {
+    return [] // a parser blow-up must never take the grid down
+  }
+  return out
+}
+
+/** Spreadsheet truthiness of a formula result. */
+function truthy(v) {
+  if (v === true) return true
+  if (typeof v === 'number') return v !== 0
+  if (typeof v === 'string') return v.trim().toUpperCase() === 'TRUE'
+  return false
+}
+
+/** gridExtent — the rows/cols Fortune-Sheet actually materialises for a sheet. */
+function gridExtent(sheet) {
+  let usedR = -1, usedC = -1
+  for (const cell of sheet?.celldata || []) {
+    if (cell.r > usedR) usedR = cell.r
+    if (cell.c > usedC) usedC = cell.c
+  }
+  const rows = Math.max(Number.isFinite(sheet?.row) ? sheet.row : 100, usedR + 1)
+  const cols = Math.max(Number.isFinite(sheet?.column) ? sheet.column : 26, usedC + 1)
+  return { rows, cols, usedR, usedC }
+}
+
+/**
+ * matchCells — the cells a SINGLE-COLOUR rule paints, as [{ r, c }].
+ * Bounded to the grid extent (a rule may not address a row/col Fortune-Sheet has
+ * not materialised — its own duplicateValue compute would dereference it and
+ * throw) and to MAX_MATCH_CELLS. Returns [] for a rule that cannot match.
+ */
+export function matchCells(rule, sheet, now = new Date()) {
+  if (!isSingleKind(rule?.kind)) return []
+  const b = parseBounds(rule.range)
+  if (!b) return []
+  const ops = ruleOperands(rule)
+  if (!ops) return []
+
+  const { rows, cols } = gridExtent(sheet)
+  const r1 = Math.min(b.r1, rows - 1)
+  const c1 = Math.min(b.c1, cols - 1)
+  if (b.r0 > r1 || b.c0 > c1) return []
+  if ((r1 - b.r0 + 1) * (c1 - b.c0 + 1) > MAX_MATCH_CELLS) return []
+
+  const idx = new Map()
+  for (const cell of sheet?.celldata || []) idx.set(cell.r + ',' + cell.c, cell)
+
+  const cells = []
+  for (let r = b.r0; r <= r1; r++) for (let c = b.c0; c <= c1; c++) cells.push({ r, c })
+
+  const { kind } = rule
+
+  if (kind === 'formula') {
+    return evalFormulaRule(ops.formula, cells, idx, b, MAX_FORMULA_CELLS)
+  }
+
+  if (kind === 'duplicate') {
+    const counts = new Map()
+    for (const { r, c } of cells) {
+      const t = norm(cellString(idx.get(r + ',' + c)))
+      if (t === '') continue
+      counts.set(t, (counts.get(t) || 0) + 1)
+    }
+    return cells.filter(({ r, c }) => {
+      const t = norm(cellString(idx.get(r + ',' + c)))
+      return t !== '' && counts.get(t) > 1
+    })
+  }
+
+  const window = dateWindow(kind, now)
+
+  return cells.filter(({ r, c }) => {
+    const cell = idx.get(r + ',' + c)
+    const blank = isBlankCell(cell)
+    if (kind === 'isEmpty') return blank
+    if (kind === 'isNotEmpty') return !blank
+    // Every remaining kind is a predicate over a cell that HAS content: an empty
+    // cell is never highlighted (Sheets does the same — an empty cell is not
+    // "not equal to 5", it is simply blank).
+    if (blank) return false
+
+    switch (kind) {
+      case 'greaterThan':    { const n = cellNumber(cell); return !Number.isNaN(n) && n >  ops.n1 }
+      case 'lessThan':       { const n = cellNumber(cell); return !Number.isNaN(n) && n <  ops.n1 }
+      case 'greaterOrEqual': { const n = cellNumber(cell); return !Number.isNaN(n) && n >= ops.n1 }
+      case 'lessOrEqual':    { const n = cellNumber(cell); return !Number.isNaN(n) && n <= ops.n1 }
+      case 'between': {
+        const n = cellNumber(cell)
+        const lo = Math.min(ops.n1, ops.n2), hi = Math.max(ops.n1, ops.n2)
+        return !Number.isNaN(n) && n >= lo && n <= hi
+      }
+      case 'notBetween': {
+        const n = cellNumber(cell)
+        const lo = Math.min(ops.n1, ops.n2), hi = Math.max(ops.n1, ops.n2)
+        return !Number.isNaN(n) && (n < lo || n > hi)
+      }
+      case 'equalTo':
+      case 'notEqualTo': {
+        const n = cellNumber(cell)
+        const eq = !Number.isNaN(ops.n1) && !Number.isNaN(n)
+          ? n === ops.n1
+          : norm(cellString(cell)) === ops.t1
+        return kind === 'equalTo' ? eq : !eq
+      }
+      case 'textContains':    return norm(cellString(cell)).includes(ops.t1)
+      case 'textNotContains': return !norm(cellString(cell)).includes(ops.t1)
+      case 'textStartsWith':  return norm(cellString(cell)).startsWith(ops.t1)
+      case 'textEndsWith':    return norm(cellString(cell)).endsWith(ops.t1)
+      case 'textExactly':     return norm(cellString(cell)) === ops.t1
+      case 'dateBefore':      { const d = cellDay(cell); return !Number.isNaN(d) && d <  ops.d1 }
+      case 'dateAfter':       { const d = cellDay(cell); return !Number.isNaN(d) && d >  ops.d1 }
+      case 'dateToday':
+      case 'dateThisWeek':
+      case 'dateThisMonth':   { const d = cellDay(cell); return !Number.isNaN(d) && !!window && d >= window[0] && d <= window[1] }
+      default: return false
+    }
+  })
+}
+
 // Linear interpolate two hex colours; t in [0,1].
 function lerpHex(a, b, t) {
   const pa = hexToRgb(a), pb = hexToRgb(b)
@@ -193,12 +645,20 @@ function hexToRgb(hex) {
 /**
  * computeColorScale — turn a rule + the current sheet cells into a plain map
  * keyed `"r_c"` describing what to paint for each cell in the range:
- *   colorScale → { bg: 'rgb(...)' }
- *   dataBar    → { bar: { pct: 0..1, color, negative: bool } }
+ *   colorScale   → { bg: 'rgb(...)' }
+ *   dataBar      → { bar: { pct: 0..1, color, negative: bool } }
+ *   single-colour → { bg: '#hex', fg: '#hex' | '' }   (only the MATCHED cells)
  * Reactive core: recompute whenever the range's values change. Bounded by
- * MAX_CELLS. Returns {} when the range is invalid or has no numeric values.
+ * MAX_CELLS. Returns {} when the range is invalid or nothing matches.
  */
-export function computeColorScale(rule, sheet) {
+export function computeColorScale(rule, sheet, now = new Date()) {
+  if (isSingleKind(rule?.kind)) {
+    const out = {}
+    const bg = safeColor(rule.fill, DEF.fill)
+    const fg = safeOptionalColor(rule.textColor)
+    for (const { r, c } of matchCells(rule, sheet, now)) out[r + '_' + c] = { bg, fg }
+    return out
+  }
   const b = parseBounds(rule?.range)
   if (!b) return {}
   const idx = new Map()
@@ -268,21 +728,34 @@ export function computeColorScale(rule, sheet) {
 export function colorScaleSignature(rule, sheet) {
   const b = parseBounds(rule?.range)
   if (!b) return rule.id + '|invalid'
+  // A custom-formula rule may read ANY cell (=$Z$1>0), so its fingerprint spans
+  // the whole sheet; every other kind depends only on its own range.
+  const wide = rule.kind === 'formula'
   const parts = []
   for (const cell of sheet?.celldata || []) {
-    if (cell.r < b.r0 || cell.r > b.r1 || cell.c < b.c0 || cell.c > b.c1) continue
-    const n = cellNumber(cell)
-    if (!Number.isNaN(n)) parts.push(cell.r + ':' + cell.c + '=' + n)
+    if (!wide && (cell.r < b.r0 || cell.r > b.r1 || cell.c < b.c0 || cell.c > b.c1)) continue
+    // Single-colour rules match on TEXT and DATES too, so fingerprint the string
+    // form — a numeric-only signature would miss "abc" → "abd" and never repaint.
+    const v = isSingleKind(rule.kind) || wide ? cellString(cell) : cellNumber(cell)
+    if (typeof v === 'string' ? v !== '' : !Number.isNaN(v)) parts.push(cell.r + ':' + cell.c + '=' + v)
   }
   parts.sort()
-  return [rule.kind, rule.range, rule.min, rule.mid, rule.max, rule.barColor, parts.join(',')].join('|')
+  return [
+    rule.kind, rule.range, rule.min, rule.mid, rule.max, rule.barColor,
+    rule.fill, rule.textColor, rule.value1, rule.value2, rule.formula,
+    parts.join(','),
+  ].join('|')
 }
 
-/** Merge all rules' compute maps into one paint map (later rules win on overlap). */
-export function computeAllColorScales(rules, sheet) {
+/**
+ * Merge all rules' compute maps into one paint map (later rules win on overlap).
+ * Every rule is re-clamped (makeColorScale) on the way in — the DOM overlay is a
+ * render path, and no render path may ever read an unclamped descriptor.
+ */
+export function computeAllColorScales(rules, sheet, now = new Date()) {
   const merged = {}
   for (const rule of rules || []) {
-    const m = computeColorScale(rule, sheet)
+    const m = computeColorScale(makeColorScale(rule), sheet, now)
     for (const k in m) merged[k] = m[k]
   }
   return merged
@@ -299,21 +772,69 @@ function rgbToHex(rgb) {
 const NATIVE_BANDS = 12 // gradient resolution for the native banded rendering
 
 /**
- * toNativeConditionFormat — convert ONE color-scale/data-bar rule into a set of
- * FortuneSheet-native `between` conditionformat rules (conditionName 'between',
- * format.cellColor) that render on the FS CANVAS. This is how color scales are
- * actually painted in the grid: FS renders on a canvas (no DOM cells to overlay),
- * and its built-in `colorGradation`/`dataBar` compute is buggy — but its
- * `between` cell-colour path is sound. We slice the rule's value domain into
- * NATIVE_BANDS buckets, colour each bucket with the interpolated gradient colour
- * (data bars → an intensity ramp of the bar colour), and emit a `between` rule
- * per bucket over the same range. Returns [] when the range has no numeric data.
+ * toNativeSingleColor — render ONE single-colour rule (greater-than / text /
+ * date / empty / duplicate / custom-formula) on the FS canvas.
+ *
+ * We do NOT use Fortune-Sheet's own greaterThan/textContains/occurrenceDate/
+ * duplicateValue/formula evaluation: it is wrong on several kinds (a raw JS `>`
+ * makes the string "9" beat 10), missing on others (no empty / starts-with /
+ * relative-date rule at all), and its `formula` rule pushes each CF cell into
+ * the sheet's calcChain — corrupting the model we then save.
+ *
+ * Instead WE decide which cells match (matchCells) and hand FS a pure PAINT
+ * INSTRUCTION: one rule whose `cellrange` is the list of matched cells as 1×1
+ * rects, with `duplicateValue` + conditionValue ['1'] ("colour the values that
+ * occur once in this range") — over a 1×1 range that is unconditionally the one
+ * cell in it, whatever it contains. It is the only native condition that paints
+ * a cell without inspecting it, and — unlike every other branch — it also paints
+ * EMPTY cells, which is what makes an "is empty" rule renderable at all.
+ *
+ * SECURITY: nothing user-supplied crosses into FS here. conditionValue is our
+ * own constant '1', the colours are validated hex from our palette, and the
+ * cellrange indices are integers clamped to the grid extent (FS's duplicateValue
+ * compute dereferences `data[r][c]` with no bounds check — an out-of-extent rect
+ * would throw inside the canvas draw and take the grid down). Bounded by
+ * MAX_PAINT_CELLS.
+ */
+export function toNativeSingleColor(rule, sheet, now = new Date()) {
+  const matched = matchCells(rule, sheet, now)
+  if (matched.length === 0) return []
+  const cellrange = matched.slice(0, MAX_PAINT_CELLS).map(({ r, c }) => ({
+    row: [r, r], column: [c, c],
+  }))
+  return [{
+    type: 'default',
+    conditionName: 'duplicateValue',
+    cellrange,
+    conditionRange: cellrange,
+    conditionValue: ['1'],
+    format: {
+      cellColor: safeColor(rule.fill, DEF.fill),
+      textColor: safeOptionalColor(rule.textColor),
+    },
+  }]
+}
+
+/**
+ * toNativeConditionFormat — convert ONE app rule into the FortuneSheet-native
+ * conditionformat rules that render it on the FS CANVAS (FS renders on a canvas,
+ * so there are no DOM cells to overlay).
+ *
+ * Single-colour rules → one paint instruction (see toNativeSingleColor).
+ *
+ * Color scales / data bars → a set of native `between` rules: FS's built-in
+ * `colorGradation`/`dataBar` compute is buggy, but its `between` cell-colour path
+ * is sound. We slice the rule's value domain into NATIVE_BANDS buckets, colour
+ * each bucket with the interpolated gradient colour (data bars → an intensity
+ * ramp of the bar colour), and emit a `between` rule per bucket over the same
+ * range. Returns [] when the range has no numeric data.
  *
  * SECURITY: the emitted cellColor is always a `#rrggbb` derived from our own
  * validated palette (never a cell-derived string), and conditionValue is numeric
  * — so a rule can't inject a hostile colour or value into FS's model.
  */
-export function toNativeConditionFormat(rule, sheet, parseRangeFS) {
+export function toNativeConditionFormat(rule, sheet, parseRangeFS, now = new Date()) {
+  if (isSingleKind(rule?.kind)) return toNativeSingleColor(rule, sheet, now)
   const b = parseBounds(rule?.range)
   if (!b) return []
   const idx = new Map()
@@ -373,19 +894,26 @@ export function toNativeConditionFormat(rule, sheet, parseRangeFS) {
 }
 
 /**
- * buildNativeConditionFormat — merge the app's native CF rules
- * (luckysheet_conditionformat_save the user set) with the banded rules derived
- * from every color-scale/data-bar rule, so both render on the canvas together.
- * The color-scale bands go FIRST so an explicit user rule (added later) wins.
+ * buildNativeConditionFormat — merge the app's legacy native CF rules
+ * (luckysheet_conditionformat_save from an older file) with the rules derived
+ * from every app rule (single-colour paints + color-scale bands), so both render
+ * on the canvas together. Derived rules go FIRST, in rule order, so a later rule
+ * wins on overlap — the same precedence computeAllColorScales gives the overlay.
+ *
+ * SECURITY: every rule is re-clamped through makeColorScale here. This is the
+ * LAST gate before render: a descriptor that reached `sheet.colorScales` by any
+ * path (a corrupt file, a legacy record, a hostile peer op, a future code path
+ * that forgets the ingress clamp) is normalised — allow-listed kind, hex-only
+ * colours, bounded operand text — before a single pixel is derived from it.
  */
-export function buildNativeConditionFormat(sheet, parseRangeFS) {
+export function buildNativeConditionFormat(sheet, parseRangeFS, now = new Date()) {
   const userRules = Array.isArray(sheet?.luckysheet_conditionformat_save)
     ? sheet.luckysheet_conditionformat_save.filter((r) => !r?.__fromColorScale)
     : []
   const scales = Array.isArray(sheet?.colorScales) ? sheet.colorScales : []
   const derived = []
   for (const rule of scales) {
-    for (const nat of toNativeConditionFormat(rule, sheet, parseRangeFS)) {
+    for (const nat of toNativeConditionFormat(makeColorScale(rule), sheet, parseRangeFS, now)) {
       derived.push({ ...nat, __fromColorScale: true })
     }
   }

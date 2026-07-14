@@ -21,7 +21,7 @@ import userEvent from '@testing-library/user-event'
 import * as XLSX from 'xlsx'
 import DataValidationPanel from '../../apps/sheets/DataValidationPanel.jsx'
 import NumberFormatMenu from '../../apps/sheets/NumberFormatMenu.jsx'
-import { listValidationRules } from '../../apps/sheets/dataValidation.js'
+import { listValidationRules, clampDataValidation } from '../../apps/sheets/dataValidation.js'
 import { detectPresetId } from '../../apps/sheets/numberFormats.js'
 import { exportSheetsToXlsx } from '../../apps/sheets/sheetsExport.js'
 import { api } from '../../lib/api.js'
@@ -122,6 +122,119 @@ describe('WAVE41 data validation panel (real component + model)', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/at least one dropdown item/i)
     expect(data[0].dataVerification).toBeUndefined()
+  })
+})
+
+// ── WAVE-64: the rest of the validation kinds, through the same real panel ────
+
+describe('WAVE64 data validation kinds (real component + model)', () => {
+  function panel() {
+    let data = makeWorkbook()
+    const view = render(
+      <DataValidationPanel
+        data={data}
+        activeCell={{ row: 0, col: 0 }}
+        onClose={() => {}}
+        onChange={(next) => { data = next }}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Add rule/i }))
+    return { view, get: () => data }
+  }
+
+  it('offers every advertised kind in the criteria menu', () => {
+    panel()
+    const values = Array.from(screen.getByLabelText('Criteria').options).map((o) => o.value)
+    expect(values).toEqual(['dropdown', 'dropdownRange', 'checkbox', 'number', 'date', 'text', 'textLength'])
+  })
+
+  it('dropdown from a RANGE (cross-sheet) → a native dropdown whose list source is the range', () => {
+    const { get } = panel()
+    fireEvent.change(screen.getByLabelText('Criteria'), { target: { value: 'dropdownRange' } })
+    fireEvent.change(screen.getByLabelText('List source range'), { target: { value: 'Sheet2!A1:A5' } })
+    fireEvent.change(screen.getByLabelText('Apply to range'), { target: { value: 'A1:A2' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+
+    const rules = listValidationRules(get()[0])
+    expect(rules).toHaveLength(1)
+    expect(rules[0].summary).toBe('Dropdown · from Sheet2!A1:A5')
+    expect(get()[0].dataVerification['0_0']).toMatchObject({ type: 'dropdown', value1: 'Sheet2!A1:A5' })
+    // Cell values are untouched (CRDT-sync safe), as with every other rule.
+    expect(get()[0].celldata).toEqual(makeWorkbook()[0].celldata)
+  })
+
+  it('checkbox → a two-value rule that rejects anything else', () => {
+    const { get } = panel()
+    fireEvent.change(screen.getByLabelText('Criteria'), { target: { value: 'checkbox' } })
+    fireEvent.change(screen.getByLabelText('Checked value'), { target: { value: 'Yes' } })
+    fireEvent.change(screen.getByLabelText('Unchecked value'), { target: { value: 'No' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+
+    expect(listValidationRules(get()[0])[0].summary).toBe('Checkbox · Yes / No')
+    expect(get()[0].dataVerification['0_0']).toMatchObject({ value1: 'Yes,No', prohibitInput: true, checkbox: true })
+  })
+
+  it('date between → a native date rule with both operands', () => {
+    const { get } = panel()
+    fireEvent.change(screen.getByLabelText('Criteria'), { target: { value: 'date' } })
+    fireEvent.change(screen.getByLabelText('Value'), { target: { value: '2026-01-01' } })
+    fireEvent.change(screen.getByLabelText('Upper value'), { target: { value: '2026-12-31' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+
+    expect(get()[0].dataVerification['0_0']).toMatchObject({
+      type: 'date', type2: 'between', value1: '2026-01-01', value2: '2026-12-31',
+    })
+    expect(listValidationRules(get()[0])[0].summary).toBe('Date between 2026-01-01 and 2026-12-31')
+  })
+
+  it('text contains → a native text_content rule', () => {
+    const { get } = panel()
+    fireEvent.change(screen.getByLabelText('Criteria'), { target: { value: 'text' } })
+    fireEvent.change(screen.getByLabelText('Value'), { target: { value: 'INV-' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(get()[0].dataVerification['0_0']).toMatchObject({ type: 'text_content', type2: 'include', value1: 'INV-' })
+  })
+
+  it('text length → a native text_length rule, and switching criteria resets the condition', () => {
+    const { get } = panel()
+    fireEvent.change(screen.getByLabelText('Criteria'), { target: { value: 'text' } })
+    expect(screen.getByLabelText('Condition')).toHaveValue('include')
+    // Switching to a kind with a different condition vocabulary must not carry the
+    // old token over (a `text_length` rule with type2 'include' would never match).
+    fireEvent.change(screen.getByLabelText('Criteria'), { target: { value: 'textLength' } })
+    expect(screen.getByLabelText('Condition')).toHaveValue('between')
+    fireEvent.change(screen.getByLabelText('Condition'), { target: { value: 'lessThanOrEqualTo' } })
+    fireEvent.change(screen.getByLabelText('Value'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(get()[0].dataVerification['0_0']).toMatchObject({ type: 'text_length', type2: 'lessThanOrEqualTo', value1: '10' })
+  })
+
+  it('a hostile/unusable operand surfaces an error and writes NOTHING', async () => {
+    const { get } = panel()
+    fireEvent.change(screen.getByLabelText('Criteria'), { target: { value: 'dropdownRange' } })
+    fireEvent.change(screen.getByLabelText('List source range'), { target: { value: 'javascript:alert(1)' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/valid source range/i)
+    expect(get()[0].dataVerification).toBeUndefined()
+
+    fireEvent.change(screen.getByLabelText('Criteria'), { target: { value: 'date' } })
+    fireEvent.change(screen.getByLabelText('Value'), { target: { value: '2026-99-99' } })
+    fireEvent.change(screen.getByLabelText('Upper value'), { target: { value: 'whenever' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/valid date/i)
+    expect(get()[0].dataVerification).toBeUndefined()
+  })
+
+  it('a poisoned dataVerification map from a loaded file is clamped away', () => {
+    const wb = makeWorkbook()
+    wb[0].dataVerification = {
+      '0_0': { type: 'dropdown', type2: '', value1: 'a,b', value2: '', prohibitInput: true, hintShow: false, hintValue: '', validity: '', rangeTxt: '', remote: false },
+      '0_1': { type: 'validity', type2: 'identificationNumber', value1: '', value2: '' },
+      '0_2': { type: 'number', type2: 'evil', value1: '1', value2: '' },
+    }
+    const clamped = clampDataValidation(wb)
+    expect(Object.keys(clamped[0].dataVerification)).toEqual(['0_0'])
+    expect(listValidationRules(clamped[0])[0].summary).toBe('Dropdown · 2 items')
   })
 })
 

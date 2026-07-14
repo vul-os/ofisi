@@ -1,11 +1,13 @@
 /**
- * src/apps/sheets/ColorScaleLayer.jsx  (WAVE-63)
+ * src/apps/sheets/ColorScaleLayer.jsx  (WAVE-63, WAVE-64)
  *
- * Reactive overlay that paints conditional-formatting COLOR SCALES and DATA BARS
- * into the grid. It computes a paint map from the current cell values
- * (computeAllColorScales) and positions a coloured background / proportional bar
- * over each affected cell using the SAME getCellRect(row,col) that the live
- * cursor layer uses — so it tracks scroll/resize like the rest of the overlays.
+ * Reactive overlay that paints conditional formatting into the grid: COLOR
+ * SCALES, DATA BARS and the WAVE-64 SINGLE-COLOUR rules (greater-than / text /
+ * date / empty / duplicate / custom formula) — all of which computeAllColorScales
+ * resolves to the same `{ bg } | { bar }` paint map, so this layer needs no
+ * per-kind knowledge. It positions a coloured background / proportional bar over
+ * each affected cell using the SAME getCellRect(row,col) that the live cursor
+ * layer uses — so it tracks scroll/resize like the rest of the overlays.
  *
  * REACTIVITY: memoised on a signature of exactly the cells the rules read plus
  * the rule configs, so painting recomputes only when a source value or a rule

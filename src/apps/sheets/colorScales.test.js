@@ -2,6 +2,8 @@
  * colorScales.test.js  (WAVE-63)
  * CF color scales + data bars: ingress clamp (hex/kind validation), correct
  * gradient/bar computation, reactivity signature, and CRDT-safety.
+ * The WAVE-64 single-colour rules (value/text/date/empty/duplicate/formula) are
+ * covered in colorScaleRules.test.js.
  */
 import { describe, it, expect } from 'vitest'
 import {
