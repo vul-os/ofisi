@@ -28,6 +28,7 @@ import {
 import { makeChart } from './charts.js'
 import { CHART_META_SHEET } from './sheetsExport.js'
 import { readXlsxCharts } from './xlsxChartsRead.js'
+import { readOdsObjects } from './odsChartsRead.js'
 import { makeImportNotes, setImportNotes } from './importNotes.js'
 
 // A chart-definition sheet holds at most this many rows; a file claiming more is
@@ -261,7 +262,33 @@ export async function importWorkbook(arrayBuffer, filename = 'file') {
   // that is the sheet a foreign chart must reference to be representable.
   const first = sheets[0]
   const isXlsx = /\.xlsx$/i.test(filename)
+  const isOds = /\.ods$/i.test(filename)
   const alreadyHasCharts = Array.isArray(first?.charts) && first.charts.length > 0
+
+  // .ods honesty (mirrors the .xlsx importNotes pattern). SheetJS brings in .ods
+  // CELLS but nothing about .ods charts/pivots, and Vulos has no .ods chart
+  // reader — so every chart in an .ods is a LOSS. Detect and report it (never drop
+  // it silently); we do NOT approximate the charts, we count them so the user is
+  // told, at import and again at export.
+  if (isOds) {
+    let found = { charts: 0, pivots: 0 }
+    try {
+      found = await readOdsObjects(arrayBuffer)
+    } catch {
+      return { sheets, notes: null } // detection failure must not fail the import
+    }
+    const notes = makeImportNotes({
+      charts: Array.from({ length: found.charts }, () => ({
+        title: '',
+        reason: 'Vulos can’t import charts from an .ods (OpenDocument) file',
+      })),
+      pivots: found.pivots,
+      filename,
+    })
+    let out = sheets
+    if (notes) out = setImportNotes(out, notes)
+    return { sheets: out, notes }
+  }
 
   if (!isXlsx) return { sheets, notes: null }
 

@@ -3,7 +3,9 @@
  */
 import { describe, it, expect } from 'vitest'
 import * as XLSX from 'xlsx'
-import { workbookToSheets } from '../sheetsImport.js'
+import JSZip from 'jszip'
+import { workbookToSheets, importWorkbook } from '../sheetsImport.js'
+import { getImportNotes, hasImportLoss } from '../importNotes.js'
 import { buildCsv } from '../sheetsExport.js'
 import { convertToSheetContent } from '../../../lib/importFile.js'
 import { ImportError, MAX_SINGLE_ENTRY } from '../../../lib/importBounds.js'
@@ -65,6 +67,41 @@ describe('workbookToSheets — fidelity', () => {
     const sheets = workbookToSheets(buf, 't.ods')
     expect(findCell(sheets[0], 0, 0).v.m).toBe('Name')
     expect(findCell(sheets[0], 1, 1).v.v).toBe(5)
+  })
+})
+
+// Take a real SheetJS-written .ods and INJECT a chart object into its package
+// (a manifest chart file-entry + an Object dir) so it is a genuine, SheetJS-
+// readable .ods that ALSO carries a chart — the exact case that used to lose the
+// chart silently.
+async function odsWithChart() {
+  const base = buildBook(() => {}, 'ods')
+  const zip = await JSZip.loadAsync(base)
+  const manifest = await zip.file('META-INF/manifest.xml').async('string')
+  const injected = manifest.replace('</manifest:manifest>',
+    '<manifest:file-entry manifest:full-path="Object 1/" manifest:media-type="application/vnd.oasis.opendocument.chart"/></manifest:manifest>')
+  zip.file('META-INF/manifest.xml', injected)
+  zip.file('Object 1/content.xml', '<?xml version="1.0"?><office:document-content><chart:chart/></office:document-content>')
+  return zip.generateAsync({ type: 'arraybuffer' })
+}
+
+describe('importWorkbook — .ods honesty (no silent chart loss)', () => {
+  it('cells still import AND the dropped chart is reported in importNotes', async () => {
+    const buf = await odsWithChart()
+    const { sheets, notes } = await importWorkbook(buf, 'budget.ods')
+    // Cells arrived (nothing about the chart failed the import).
+    expect(findCell(sheets[0], 0, 0).v.m).toBe('Name')
+    // The chart loss is recorded — and restated on the workbook for the export dialog.
+    expect(hasImportLoss(notes)).toBe(true)
+    expect(notes.charts).toHaveLength(1)
+    expect(notes.charts[0].reason).toMatch(/\.ods/i)
+    expect(getImportNotes(sheets)).not.toBeNull()
+  })
+
+  it('a clean .ods (no chart) imports with NO import-loss note', async () => {
+    const buf = buildBook(() => {}, 'ods')
+    const { notes } = await importWorkbook(buf, 'clean.ods')
+    expect(hasImportLoss(notes)).toBe(false)
   })
 })
 
