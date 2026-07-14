@@ -216,6 +216,20 @@ func (h *FileHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// SHEETS PROTECTED RANGES (fail-closed): enforce against the PREVIOUSLY STORED
+	// content so a caller cannot strip a restricted range and then write it. Only
+	// runs in multi-tenant mode for sheet content that already carries a restricted
+	// range (see enforceProtectedRanges). A blocked write is a 403; nothing is
+	// persisted.
+	if req.Content != nil {
+		if prev, gerr := h.store.GetFile(id); gerr == nil && prev != nil {
+			if ok, code, reason := h.authz.enforceProtectedRanges(c, id, prev.Content, req.Content); !ok {
+				c.JSON(code, gin.H{"error": reason})
+				return
+			}
+		}
+	}
+
 	file := &models.File{
 		ID:      id,
 		Name:    req.Name,

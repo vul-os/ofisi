@@ -254,6 +254,17 @@ func (h *V1Handler) PatchDocument(c *gin.Context) {
 		return
 	}
 
+	// SHEETS PROTECTED RANGES (fail-closed): gate the content replace against the
+	// currently-stored content BEFORE overwriting `existing.Content`, so a caller
+	// cannot remove a restricted range and edit its cells in one PATCH. No-op in
+	// single-user mode / for non-sheet content / when no restricted range exists.
+	if req.Content != nil {
+		if ok, code, reason := h.authz.enforceProtectedRanges(c, id, existing.Content, req.Content); !ok {
+			v1err(c, code, reason)
+			return
+		}
+	}
+
 	if req.Name != nil {
 		existing.Name = *req.Name
 	}

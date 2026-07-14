@@ -5,7 +5,7 @@ import '@fortune-sheet/react/dist/index.css'
 import {
   ArrowLeft, Save, Loader2, Download, Upload, AlertCircle, MessageSquare,
   ChevronDown, BarChart2, Filter, Table2, Tag, Sliders, Keyboard, Search,
-  Lock, MessageSquarePlus, X, MoreHorizontal, ListChecks, Share2,
+  Lock, MessageSquarePlus, X, MoreHorizontal, ListChecks, Share2, Shield,
 } from 'lucide-react'
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
@@ -20,6 +20,9 @@ import {
   makeImportNotes, combineImportNotes, getImportNotes, setImportNotes,
   mergeImportNotes, importLossSummary,
 } from './importNotes.js'
+import {
+  clampProtectedRanges, getProtectedRanges, mergeProtectedRanges,
+} from './protectedRanges.js'
 import { GridSession, getGridReplicaId } from '../../lib/crdt/grid.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
@@ -73,6 +76,7 @@ const ChartLayer              = lazy(() => import('./ChartLayer.jsx'))
 const PivotLayer              = lazy(() => import('./PivotLayer.jsx'))
 const ColorScaleLayer         = lazy(() => import('./ColorScaleLayer.jsx'))
 const NamedRangesPanel        = lazy(() => import('./NamedRangesPanel.jsx'))
+const ProtectedRangesPanel    = lazy(() => import('./ProtectedRangesPanel.jsx'))
 const DataValidationPanel     = lazy(() => import('./DataValidationPanel.jsx'))
 const ExportDialog            = lazy(() => import('./ExportDialog.jsx'))
 
@@ -116,7 +120,7 @@ function normalizeSheets(sheets) {
 // pivots through their fail-closed clamps so a corrupt/legacy/poisoned record
 // can never reach render with an unsafe descriptor (WAVE-61/63 defence-in-depth).
 function loadContent(content) {
-  return clampDataValidation(clampColorScales(clampPivots(clampCharts(normalizeSheets(content)))))
+  return clampProtectedRanges(clampDataValidation(clampColorScales(clampPivots(clampCharts(normalizeSheets(content))))))
 }
 
 // Shared trigger styling for the Import / Export menus.
@@ -405,6 +409,7 @@ export default function SheetsEditor() {
   const [showFilter,        setShowFilter]        = useState(false)
   const [showCondFormat,    setShowCondFormat]    = useState(false)
   const [showNamedRanges,   setShowNamedRanges]   = useState(false)
+  const [showProtectedRanges, setShowProtectedRanges] = useState(false)
   const [showChartWizard,   setShowChartWizard]   = useState(false)
   const [editingChartId,    setEditingChartId]    = useState(null)   // WAVE-54: chart being edited (null = insert)
   const [selectedChartId,   setSelectedChartId]   = useState(null)   // WAVE-54: floating chart selection
@@ -683,7 +688,15 @@ export default function SheetsEditor() {
     try {
       await saveFileWithDraft(id, titleRef.current, content)
       setRetryCount(0)
-    } catch {
+    } catch (err) {
+      // A 403 is the SERVER refusing an edit to a PROTECTED RANGE (or a role that
+      // may not write). Retrying cannot succeed and would silently spin, so we
+      // surface the server's own message and stop — the write is genuinely denied.
+      if (err?.status === 403) {
+        setRetryCount(0)
+        showToast(err?.error || err?.message || 'This range is protected — your change was not saved.', 'error')
+        return
+      }
       if (retryNum < 3) {
         const delay = RETRY_DELAY_MS * (retryNum + 1)
         retryTimer.current = setTimeout(() => {
@@ -692,7 +705,7 @@ export default function SheetsEditor() {
         }, delay)
       }
     }
-  }, [id, saveFileWithDraft])
+  }, [id, saveFileWithDraft, showToast])
 
   const handleChange = (newData, opts = {}) => {
     // WAVE-63: the Workbook is fed `renderData`, which injects derived
@@ -735,7 +748,11 @@ export default function SheetsEditor() {
       // importNotes is a fourth app-owned overlay FortuneSheet's onChange drops.
       // Without this merge it would evaporate on the first keystroke — i.e. on
       // exactly the import → EDIT → export path it exists to warn about.
-      return mergeImportNotes(withScales, getImportNotes(prev))
+      const withNotes = mergeImportNotes(withScales, getImportNotes(prev))
+      // protectedRanges is a fifth app-owned overlay onChange drops — re-attach it
+      // so a plain cell edit never silently clears a range's protection (which the
+      // server would then no longer see either).
+      return mergeProtectedRanges(withNotes, getProtectedRanges(prev))
     })
     markDirty(id)
     clearTimeout(saveTimer.current)
@@ -774,6 +791,7 @@ export default function SheetsEditor() {
       toSave = mergePivots(toSave, pivotsBySheetId(dataRef.current))
       toSave = mergeColorScales(toSave, colorScalesBySheetId(dataRef.current))
       toSave = mergeImportNotes(toSave, getImportNotes(dataRef.current))
+      toSave = mergeProtectedRanges(toSave, getProtectedRanges(dataRef.current))
     }
     saveTimer.current = setTimeout(() => doSave(toSave), AUTOSAVE_DELAY_MS)
   }
@@ -1045,7 +1063,7 @@ export default function SheetsEditor() {
     })
   }, [data])
 
-  const panelSetters = [setShowPivot, setShowFilter, setShowCondFormat, setShowNamedRanges, setShowDataValidation]
+  const panelSetters = [setShowPivot, setShowFilter, setShowCondFormat, setShowNamedRanges, setShowProtectedRanges, setShowDataValidation]
   const closeAllPanels = () => { for (const s of panelSetters) s(false) }
   const togglePanel = (setter) => () => {
     setter((v) => {
@@ -1168,6 +1186,11 @@ export default function SheetsEditor() {
                   <Tag size={14} />
                 </IconButton>
               </Tooltip>
+              <Tooltip label="Protected ranges (Data → Protect range)">
+                <IconButton size="sm" active={showProtectedRanges} onClick={togglePanel(setShowProtectedRanges)}>
+                  <Shield size={14} />
+                </IconButton>
+              </Tooltip>
               <Tooltip label="Insert chart">
                 <IconButton size="sm" onClick={() => { setEditingChartId(null); setShowChartWizard(true) }}>
                   <BarChart2 size={14} />
@@ -1213,6 +1236,9 @@ export default function SheetsEditor() {
                 </Menu.Item>
                 <Menu.Item active={showNamedRanges} onClick={togglePanel(setShowNamedRanges)}>
                   <Tag size={14} /> Named ranges
+                </Menu.Item>
+                <Menu.Item active={showProtectedRanges} onClick={togglePanel(setShowProtectedRanges)}>
+                  <Shield size={14} /> Protected ranges
                 </Menu.Item>
                 <Menu.Item onClick={() => { setEditingChartId(null); setShowChartWizard(true) }}>
                   <BarChart2 size={14} /> Insert chart
@@ -1405,6 +1431,16 @@ export default function SheetsEditor() {
               data={data}
               onClose={() => setShowNamedRanges(false)}
               onChange={(next) => { handleChange(next) }}
+            />
+          )}
+          {showProtectedRanges && (
+            <ProtectedRangesPanel
+              data={data}
+              fileId={id}
+              me={myAccountId}
+              selectionRect={selectionRect}
+              onClose={() => setShowProtectedRanges(false)}
+              onChange={(next) => { handleChange(next, { overlaysAuthoritative: true }) }}
             />
           )}
           {showDataValidation && (
