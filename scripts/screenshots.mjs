@@ -57,7 +57,13 @@ const ROUTES = [
     name: 'sheets-editor',
     path: '/sheets/demo-sheet',
     description: 'Spreadsheets editor — Revenue Tracker',
-    waitFor: '.fortune-sheet-container, [data-testid="sheets-editor"], canvas',
+    // Wait for the SEEDED sheet's tab, not the grid chrome: the grid mounts
+    // immediately with an empty fallback "Sheet1" while the document is still
+    // loading, so waiting on .fortune-sheet-container photographed a blank
+    // spreadsheet. Cells are painted to canvas (no DOM to wait on), which makes
+    // the tab label the only signal that the content actually arrived. Exact
+    // text — the doc title "Revenue Tracker H1 2026" also contains "Revenue".
+    waitFor: 'text="Revenue"',
   },
   {
     name: 'slides-editor',
