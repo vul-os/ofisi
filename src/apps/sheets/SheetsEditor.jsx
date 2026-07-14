@@ -92,6 +92,14 @@ function normalizeSheets(sheets) {
     status: typeof sh.status === 'number' ? sh.status : (i === 0 ? 1 : 0),
     row: sh.row || 100,
     column: sh.column || 26,
+    // A well-formed A1 selection. FortuneSheet builds the name-box label from
+    // the last saved selection, and its label builder does
+    // `columnChar(column[1]) + (row[1] + 1)` with no guard — so a selection that
+    // lacks its END indices renders the literal "A1:NaN" in the name box (the
+    // string users have been seeing on every sheet). Both ends, explicitly.
+    luckysheet_select_save: Array.isArray(sh.luckysheet_select_save) && sh.luckysheet_select_save.length
+      ? sh.luckysheet_select_save
+      : [{ row: [0, 0], column: [0, 0], row_focus: 0, column_focus: 0 }],
   }))
 }
 
@@ -365,6 +373,24 @@ export default function SheetsEditor() {
   const [retryCount, setRetryCount] = useState(0)
   const { showToast, toast } = useToast()
 
+  // FortuneSheet's <Workbook> is UNCONTROLLED: it reads `data` once, at mount,
+  // and ignores every later change to the prop. Cell edits are fine (they
+  // originate inside the grid), but replacing the WHOLE document from outside it
+  // — the deep-link/refresh fetch below, and restoring a local draft — silently
+  // never reached the grid: the workbook had already mounted on the empty
+  // fallback sheet, so opening a bookmarked spreadsheet or simply reloading the
+  // page showed an empty grid, as though the data were gone.
+  //
+  // loadDocument is the single seam for those wholesale loads: it swaps the data
+  // AND bumps loadKey, which is part of the Workbook's React key, forcing a
+  // remount on the new document. It must NOT be used for cell edits — remounting
+  // on every keystroke would throw away the grid's own state.
+  const [loadKey, setLoadKey] = useState(0)
+  const loadDocument = useCallback((next) => {
+    setData(next)
+    setLoadKey((k) => k + 1)
+  }, [])
+
   // Panel visibility state
   const [showComments,      setShowComments]      = useState(false)
   const [showPivot,         setShowPivot]         = useState(false)
@@ -578,7 +604,7 @@ export default function SheetsEditor() {
       api.getFile(id).then((f) => {
         setFile(f)
         setTitle(f.name)
-        setData(loadContent(f.content))
+        loadDocument(loadContent(f.content))
       }).catch(() => {
         showToast('Could not open this spreadsheet.', 'error')
         navigate('/sheets')
@@ -839,7 +865,7 @@ export default function SheetsEditor() {
   // path (initial useState, api.getFile, XLSX import) runs clampCharts →
   // makeChart; the restore path must too, or it reopens the wave-55 render-DoS
   // through the load door. Normalise + clamp fail-closed before it reaches data.
-  const handleRestoreDraft  = () => { if (!draft) return; setData(loadContent(draft.content)); if (draft.name) setTitle(draft.name); setDraft(null); markDirty(id) }
+  const handleRestoreDraft  = () => { if (!draft) return; loadDocument(loadContent(draft.content)); if (draft.name) setTitle(draft.name); setDraft(null); markDirty(id) }
   const handleDiscardDraft  = () => { clearDraft(id); setDraft(null) }
 
   // ── Import CSV ──────────────────────────────────────────────────────────────
@@ -1203,6 +1229,10 @@ export default function SheetsEditor() {
           ref={workbookWrapRef}
         >
           <Workbook
+            // Remount on a wholesale document load (see loadDocument): the grid
+            // is uncontrolled and would otherwise keep showing the sheet it
+            // first mounted with.
+            key={`${id}:${loadKey}`}
             ref={workbookRef}
             data={renderData}
             onChange={handleChange}
