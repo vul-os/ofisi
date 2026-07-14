@@ -26,7 +26,12 @@ func NewSheetsHandler(store storage.Storage) *SheetsHandler {
 // Parses the XLSX and writes the resulting Fortune Sheet JSON into the file's Content.
 func (h *SheetsHandler) Import(c *gin.Context) {
 	fileID := c.Param("id")
-	if !h.authz.require(c, fileID) {
+	// SECURITY FIX: this endpoint OVERWRITES the file's content, so it must require
+	// EDITOR — not merely read access. Previously it called require() (read), which
+	// let a read-only VIEWER (or a commenter) replace the entire spreadsheet by
+	// uploading an .xlsx: a straight ACL bypass / privilege escalation. Viewers and
+	// commenters are now refused (403), matching PUT /files/:id.
+	if !h.authz.requireEditor(c, fileID) {
 		return
 	}
 
@@ -60,6 +65,14 @@ func (h *SheetsHandler) Import(c *gin.Context) {
 	var content any
 	if err := json.Unmarshal(jsonData, &content); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "marshal content: " + err.Error()})
+		return
+	}
+
+	// PROTECTED RANGES (fail-closed): an import that would overwrite a restricted
+	// range the caller may not edit — including stripping the protection an .xlsx
+	// naturally lacks — is refused, exactly like the PATCH/PUT content path.
+	if ok, code, reason := h.authz.enforceProtectedRanges(c, fileID, existing.Content, content); !ok {
+		c.JSON(code, gin.H{"error": reason})
 		return
 	}
 	existing.Content = content
