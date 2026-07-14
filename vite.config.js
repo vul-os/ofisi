@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { stripExternalCssImports } from './vite.strip-external-css-imports.js'
+import { licensesTxt } from './vite-plugin-licenses.js'
 
 // emptyOutDir wipes dist/ on every build, including the dist/.gitkeep
 // placeholder that lets `go build` (//go:embed all:dist) compile before any
@@ -69,7 +70,7 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom'],
   },
-  plugins: [react(), keepGitkeep, stripExternalCssImports()],
+  plugins: [react(), keepGitkeep, stripExternalCssImports(), licensesTxt()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,
@@ -77,6 +78,14 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks,
+        // Keep upstream @license / @preserve banners in the bundled JS. MIT,
+        // BSD and ISC all require the copyright notice to travel with every
+        // copy, and a bundle served to a browser IS a copy. Vite 8 bundles JS
+        // with rolldown, whose minifier drops every comment unless this is set.
+        // (esbuild.legalComments does NOT do this under Vite 8 — those options
+        // only reach the CSS pipeline, which is exactly why CSS banners survived
+        // while every JS banner was being stripped.)
+        comments: { legal: true },
       },
     },
   },

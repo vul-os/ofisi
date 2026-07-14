@@ -49,6 +49,8 @@ export default defineConfig({
         /^@vulos\/relay-client/,
       ],
       output: {
+        // Preserve upstream @license banners in the bundle — see vite.config.js.
+        comments: { legal: true },
         exports: 'named',
         globals: {
           react: 'React',

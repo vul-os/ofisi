@@ -518,6 +518,15 @@ export default function Settings() {
 
         <p className="text-center text-2xs text-ink-faint tracking-eyebrow uppercase pb-4">
           Vulos Office — open-source, self-hostable office suite
+          {' · '}
+          <a
+            href="/licenses.txt"
+            target="_blank"
+            rel="noreferrer"
+            className="underline hover:text-ink-muted"
+          >
+            Third-party licenses
+          </a>
         </p>
       </div>
 

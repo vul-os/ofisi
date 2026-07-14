@@ -16,6 +16,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import { stripExternalCssImports } from './vite.strip-external-css-imports.js'
+import { licensesTxt } from './vite-plugin-licenses.js'
 
 const dir = import.meta.dirname
 
@@ -57,7 +58,7 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom'],
   },
-  plugins: [react(), stripExternalCssImports()],
+  plugins: [react(), stripExternalCssImports(), licensesTxt({ root: dir })],
   root: dir,
   define: {
     'import.meta.env.VITE_BUILD_TARGET': JSON.stringify('web'),
@@ -70,6 +71,8 @@ export default defineConfig({
       input: resolve(dir, 'index.office.html'),
       output: {
         manualChunks,
+        // Preserve upstream @license banners in the bundle — see vite.config.js.
+        comments: { legal: true },
       },
     },
   },
