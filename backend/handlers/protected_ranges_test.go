@@ -33,9 +33,9 @@ func sheetWith(a1, b2 string, ranges []map[string]interface{}) []map[string]inte
 // restrictedRange covers B2 (row 1, col 1) and permits only `editors`.
 func restrictedRange(editors ...string) []map[string]interface{} {
 	return []map[string]interface{}{{
-		"id":         "pr1",
-		"sheetIndex": 0,
-		"range":      map[string]interface{}{"startRow": 1, "startCol": 1, "endRow": 1, "endCol": 1},
+		"id":          "pr1",
+		"sheetIndex":  0,
+		"range":       map[string]interface{}{"startRow": 1, "startCol": 1, "endRow": 1, "endCol": 1},
 		"warningOnly": false,
 		"editors":     editors,
 	}}
