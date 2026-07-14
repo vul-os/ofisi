@@ -17,7 +17,7 @@ import {
   Bold, Italic, Underline as UnderlineIcon, Strikethrough, Link as LinkIcon,
   AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Image as ImageIcon,
   StickyNote, Palette, Layout, Highlighter, RemoveFormatting,
-  Copy, FileText, GripVertical, Monitor, Zap, Undo, Redo,
+  Copy, FileText, GripVertical, Monitor, Zap, Undo, Redo, AlertCircle,
   ChevronDown as ChevronDownIcon, Type as TypeIcon, LayoutGrid, X, Square, Share2,
 } from 'lucide-react'
 import { sanitizeSlideHtml as sanitize } from '../../lib/sanitize'
@@ -25,6 +25,7 @@ import { useFilesStore } from '../../store/filesStore'
 import { api } from '../../lib/api'
 import SlidePreview from './SlidePreview'
 import { exportSlidesToPdf, exportSlidesToPptx } from './slidesExport'
+import { slideImportLossItems } from './importNotes.js'
 import SlideCanvas from './SlideCanvas.jsx'
 import ObjectTextEditor from './ObjectTextEditor.jsx'
 import ArrangeToolbar from './ArrangeToolbar.jsx'
@@ -239,6 +240,11 @@ export default function SlidesEditor() {
   const [saved, setSaved] = useState(true)
   const [presenting, setPresenting] = useState(false)
   const [showComments, setShowComments] = useState(false)
+  // Import-honesty: the itemised list of native pptx constructs (tables/charts/
+  // SmartArt/…) that this deck's import could NOT bring in. Surfaced as a
+  // dismissible banner and restated in the export menu so a lossy round-trip is
+  // never a silent surprise (see importNotes.js).
+  const [importLossDismissed, setImportLossDismissed] = useState(false)
   // Account-based sharing (named users, role-scoped, ACL-enforced).
   const [showShare, setShowShare] = useState(false)
   const myAccountId = useAuthStore((s) => s.accountId)
@@ -826,6 +832,8 @@ export default function SlidesEditor() {
     ? { ...getTheme(slidesData.themeId || 'obsidian'), ...slidesData.customTheme }
     : getTheme(slidesData.themeId || 'obsidian')
 
+  const importLoss = slideImportLossItems(slidesData?.importNotes)
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg">
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
@@ -944,6 +952,18 @@ export default function SlidesEditor() {
                 <span className="text-2xs font-bold tracking-eyebrow text-accent w-10">PPTX</span>
                 Export as PowerPoint
               </Menu.Item>
+              {/* Restate the import loss right where it matters: before a PPTX
+                  export overwrites the user's original and quietly ships a deck
+                  missing the tables/charts/etc. that never imported. */}
+              {importLoss.length > 0 && (
+                <div
+                  className="px-3 py-1.5 text-2xs text-warning leading-snug"
+                  data-testid="slide-export-loss-note"
+                >
+                  <AlertCircle size={11} className="inline mr-1 -mt-0.5" />
+                  This export will not contain {importLoss.join(', ')} — they never imported.
+                </div>
+              )}
               <Menu.Sep />
               <Menu.Item onClick={handlePrintNotes}>
                 <span className="text-2xs font-bold tracking-eyebrow text-warning w-10">NOTE</span>
@@ -962,6 +982,33 @@ export default function SlidesEditor() {
           </>
         }
       />
+
+      {/* Import-honesty banner — this deck was imported from a .pptx/.odp that
+          carried constructs our model can't represent. Say exactly what did not
+          come in, and warn that exporting will not restore them. Dismissible,
+          but restated in the export menu every time (the moment it matters). */}
+      {importLoss.length > 0 && !importLossDismissed && (
+        <div
+          className="flex items-start gap-3 px-4 py-2 bg-warning-bg border-b border-line text-xs text-warning animate-fade-in"
+          role="alert"
+          data-testid="slide-import-loss-banner"
+        >
+          <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+          <span className="flex-1 text-ink-muted">
+            This presentation was imported, but {importLoss.join(', ')} could not be
+            brought in — our slides can't represent them. They are <strong>not</strong> in
+            this deck, and exporting to PowerPoint will not restore them.
+          </span>
+          <button
+            type="button"
+            onClick={() => setImportLossDismissed(true)}
+            className="flex-shrink-0 text-ink-faint hover:text-ink"
+            aria-label="Dismiss import notice"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
 
       {/* ── Presentation preview ──────────────────────────────────────────── */}
       {presenting ? (

@@ -20,6 +20,16 @@ export function makeBackend({ role = 'owner' } = {}) {
     role,
     files: {
       doc1: { id: 'doc1', name: 'Design Notes', type: 'doc', content: { _html: '<p>Hello world</p>' } },
+      // A deck imported from a lossy .pptx: importNotes on the content drives the
+      // import-honesty banner + export-menu restatement (see slides/importNotes.js).
+      deck1: {
+        id: 'deck1', name: 'Imported Deck', type: 'slide',
+        content: {
+          themeId: 'obsidian', theme: 'black', transition: 'slide', masters: null, customTheme: null,
+          importNotes: { tables: 2, charts: 1, filename: 'quarterly.pptx' },
+          slides: [{ id: 's1', title: '', content: '<p></p>', notes: '', background: '', master: 'content', transition: 'none', animations: [], objects: [] }],
+        },
+      },
     },
     versions: {
       doc1: [

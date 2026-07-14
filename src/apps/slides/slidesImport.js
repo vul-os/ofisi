@@ -26,6 +26,7 @@ import {
   safeLoadZip, entryText, entryDataUri, parseXmlSafe, MAX_SLIDES, ImportError,
 } from '../../lib/importBounds.js'
 import { newObjectId } from './slideObjects.js'
+import { makeSlideImportNotes } from './importNotes.js'
 
 const EMU_PER_SLIDE_DEFAULT_W = 12192000   // 16:9 wide default (EMU)
 const EMU_PER_SLIDE_DEFAULT_H = 6858000
@@ -121,12 +122,35 @@ function geomFromXfrm(el, slideW, slideH) {
   }
 }
 
-async function pptxSlideToObjects(xmlText, relsXml, zip, slideW, slideH) {
+async function pptxSlideToObjects(xmlText, relsXml, zip, slideW, slideH, loss) {
   const doc = parseXmlSafe(xmlText, 'slide')
   const rels = parseRels(relsXml)
   const objects = []
   let z = 1
   const spTree = doc.getElementsByTagName('p:spTree')[0] || doc
+
+  // ── Import-honesty accounting (see importNotes.js) ─────────────────────────
+  // Detect the native pptx constructs our positioned-object model CANNOT
+  // represent, so the user is told — at import, and again before an export
+  // overwrites their original — exactly what did not come in. Counting only;
+  // the elements themselves are not imported.
+  if (loss) {
+    // p:graphicFrame carries tables (a:tbl), charts (graphicData uri …/chart),
+    // and SmartArt diagrams (…/diagram) — none of which we can import.
+    for (const gf of Array.from(doc.getElementsByTagName('p:graphicFrame'))) {
+      if (gf.getElementsByTagName('a:tbl').length) { loss.tables++; continue }
+      const gd = gf.getElementsByTagName('a:graphicData')[0]
+      const uri = gd?.getAttribute('uri') || ''
+      if (/chart/i.test(uri)) loss.charts++
+      else if (/diagram/i.test(uri)) loss.diagrams++
+      else loss.charts++ // OLE/other embedded object — closest honest bucket
+    }
+    // Grouped shapes: geometry of the group is not preserved.
+    loss.groups += doc.getElementsByTagName('p:grpSp').length
+    // Per-slide transition + animation timeline are dropped.
+    if (doc.getElementsByTagName('p:transition').length) loss.transitions++
+    if (doc.getElementsByTagName('p:timing').length) loss.animations++
+  }
 
   // Text shapes (p:sp).
   for (const sp of Array.from(spTree.getElementsByTagName('p:sp'))) {
@@ -153,7 +177,7 @@ async function pptxSlideToObjects(xmlText, relsXml, zip, slideW, slideH) {
     if (!path) continue
     const ext = (path.split('.').pop() || '').toLowerCase()
     const mime = RASTER_MIME[ext]
-    if (!mime) continue                     // skip emf/wmf/tiff/other non-raster
+    if (!mime) { if (loss) loss.vectorImages++; continue } // emf/wmf/tiff/other non-raster — can't embed
     if (!zip.files[path]) continue
     let src = ''
     try { src = await entryDataUri(zip, path, mime) } catch { continue }
@@ -198,12 +222,15 @@ export async function pptxToSlides(arrayBuffer, filename = 'file.pptx') {
     .sort((a, b) => parseInt(a.match(/slide(\d+)/)[1], 10) - parseInt(b.match(/slide(\d+)/)[1], 10))
     .slice(0, MAX_SLIDES)
 
+  // Aggregate import losses across all slides (see importNotes.js).
+  const loss = { tables: 0, charts: 0, diagrams: 0, groups: 0, vectorImages: 0, animations: 0, transitions: 0 }
+
   const slides = []
   for (const entry of slideEntries) {
     const num = parseInt(entry.match(/slide(\d+)/)[1], 10)
     const xmlText = await entryText(zip, entry)
     const relsXml = await entryText(zip, `ppt/slides/_rels/slide${num}.xml.rels`)
-    const objects = await pptxSlideToObjects(xmlText, relsXml, zip, slideW, slideH)
+    const objects = await pptxSlideToObjects(xmlText, relsXml, zip, slideW, slideH, loss)
     const notes = await readNotes(zip, num)
     slides.push({
       id: newObjectId(), title: '', content: '<p></p>', notes,
@@ -217,7 +244,10 @@ export async function pptxToSlides(arrayBuffer, filename = 'file.pptx') {
       background: '', master: 'content', transition: 'none', animations: [], objects: [],
     })
   }
-  return { themeId: 'obsidian', theme: 'black', transition: 'slide', slides, masters: null, customTheme: null }
+  const deck = { themeId: 'obsidian', theme: 'black', transition: 'slide', slides, masters: null, customTheme: null }
+  const importNotes = makeSlideImportNotes({ ...loss, filename })
+  if (importNotes) deck.importNotes = importNotes
+  return deck
 }
 
 // ── ODP ──────────────────────────────────────────────────────────────────────
