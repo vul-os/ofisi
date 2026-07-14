@@ -20,7 +20,25 @@
 import { useRef, useState } from 'react'
 import { X, BarChart2 } from 'lucide-react'
 import { Button, IconButton, useDialogA11y } from '../../components/ui'
-import { CHART_TYPES, makeChart, insertChart, updateChart } from './charts.js'
+import {
+  CHART_TYPE_GROUPS, makeChart, insertChart, updateChart, stackModeOf,
+  HISTOGRAM_BINS_MIN, HISTOGRAM_BINS_MAX, HISTOGRAM_BINS_DEFAULT,
+} from './charts.js'
+
+// Per-type guidance shown under the picker. A chart type that reads its range in
+// a non-obvious way (scatter/bubble/histogram) MUST say so, or the user just
+// sees a wrong-looking chart and no explanation.
+const TYPE_HINT = {
+  scatter:   'Scatter plots the 1st column as X and the 2nd as Y. Turn off “First column = labels”.',
+  bubble:    'Bubble plots three numeric columns as X, Y and bubble size. Turn off “First column = labels”.',
+  histogram: 'Histogram bins the FIRST numeric column into buckets and plots how often values fall in each.',
+  combo:     'Combo draws the 1st series as columns and every other series as a line.',
+  'column-stacked': 'Series stack on top of each other; the axis shows the category total.',
+  'bar-stacked':    'Series stack end to end; the axis shows the category total.',
+  'column-100':     'Each category is normalised to 100% — compares composition, not magnitude.',
+  'bar-100':        'Each category is normalised to 100% — compares composition, not magnitude.',
+  donut:     'Donut plots the first series as a share of the total, with the total in the middle.',
+}
 
 /**
  * selectionToRange — turn the editor's tracked selection rect (0-indexed
@@ -48,15 +66,33 @@ export default function ChartWizard({ data, chart, selectionRect, onClose, onCha
   const [title,     setTitle]     = useState(chart?.title || '')
   const [xLabel,    setXLabel]    = useState(chart?.options?.xAxisLabel || '')
   const [yLabel,    setYLabel]    = useState(chart?.options?.yAxisLabel || '')
+  const [y2Label,   setY2Label]   = useState(chart?.options?.y2AxisLabel || '')
   const [legend,    setLegend]    = useState(chart?.options?.legend !== false)
   const [headerRow, setHeaderRow] = useState(chart?.options?.headerRow !== false)
   const [headerCol, setHeaderCol] = useState(chart?.options?.headerCol !== false)
+  const [secondary, setSecondary] = useState(chart?.options?.secondaryAxis === true)
+  const [bins,      setBins]      = useState(chart?.options?.bins || HISTOGRAM_BINS_DEFAULT)
   const dialogRef = useRef(null)
   useDialogA11y(dialogRef, onClose)
+
+  const isCombo     = chartType === 'combo'
+  const isHistogram = chartType === 'histogram'
+  const isStacked   = stackModeOf(chartType) !== 'none'
 
   function useSelection() {
     const r = selectionToRange(selectionRect)
     if (r) setRange(r)
+  }
+
+  // Picking COMBO turns the secondary axis on: a combo whose line series shares
+  // the columns' scale is usually unreadable, which is the whole reason to reach
+  // for a combo. Only on the TRANSITION into combo, and never against an existing
+  // chart's saved choice — otherwise re-clicking the already-selected Combo tile
+  // would silently re-check a box the user just cleared.
+  function pickType(value) {
+    if (value === chartType) return
+    if (value === 'combo' && chart?.options?.secondaryAxis === undefined) setSecondary(true)
+    setChartType(value)
   }
 
   function handleSubmit() {
@@ -65,7 +101,12 @@ export default function ChartWizard({ data, chart, selectionRect, onClose, onCha
       type: chartType,
       range,
       title,
-      options: { xAxisLabel: xLabel, yAxisLabel: yLabel, legend, headerRow, headerCol },
+      options: {
+        xAxisLabel: xLabel, yAxisLabel: yLabel, y2AxisLabel: y2Label,
+        legend, headerRow, headerCol,
+        secondaryAxis: isCombo ? secondary : false,
+        bins: Number(bins) || HISTOGRAM_BINS_DEFAULT,
+      },
     })
     const next = editing
       ? updateChart(data, chart.id, built)
@@ -98,31 +139,37 @@ export default function ChartWizard({ data, chart, selectionRect, onClose, onCha
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 text-xs">
           <div className="space-y-2">
             <p className="text-ink-muted font-medium">Chart type</p>
-            <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Chart type">
-              {CHART_TYPES.map((ct) => (
-                <button
-                  key={ct.value}
-                  role="radio"
-                  aria-checked={chartType === ct.value}
-                  onClick={() => setChartType(ct.value)}
-                  className={[
-                    'flex flex-col items-center gap-1 py-2 rounded-lg border transition-colors duration-fast',
-                    chartType === ct.value
-                      ? 'border-accent bg-accent-tint text-accent font-semibold'
-                      : 'border-line text-ink-muted hover:border-line-strong hover:text-ink',
-                  ].join(' ')}
-                >
-                  <span className="text-lg leading-none" aria-hidden>{ct.icon}</span>
-                  {ct.label}
-                </button>
+            <div role="radiogroup" aria-label="Chart type" className="space-y-2">
+              {CHART_TYPE_GROUPS.map((g) => (
+                <div key={g.group} className="space-y-1">
+                  <p className="text-2xs uppercase tracking-eyebrow text-ink-faint">{g.group}</p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {g.types.map((ct) => (
+                      <button
+                        key={ct.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={chartType === ct.value}
+                        onClick={() => pickType(ct.value)}
+                        className={[
+                          'flex flex-col items-center gap-1 py-2 px-1 rounded-lg border transition-colors duration-fast',
+                          'text-[10px] leading-tight text-center',
+                          'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50',
+                          chartType === ct.value
+                            ? 'border-accent bg-accent-tint text-accent font-semibold'
+                            : 'border-line text-ink-muted hover:border-line-strong hover:text-ink',
+                        ].join(' ')}
+                      >
+                        <span className="text-base leading-none" aria-hidden>{ct.icon}</span>
+                        {ct.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
-            {(chartType === 'scatter' || chartType === 'bubble') && (
-              <p className="text-2xs text-ink-faint">
-                {chartType === 'scatter'
-                  ? 'Scatter plots the 1st column as X and the 2nd as Y.'
-                  : 'Bubble plots columns as X, Y and bubble size.'} Turn off “First column is labels” below.
-              </p>
+            {TYPE_HINT[chartType] && (
+              <p className="text-2xs text-ink-faint" role="note">{TYPE_HINT[chartType]}</p>
             )}
           </div>
 
@@ -159,13 +206,53 @@ export default function ChartWizard({ data, chart, selectionRect, onClose, onCha
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="block text-ink-muted font-medium" htmlFor="chart-x">X-axis label</label>
-              <input id="chart-x" value={xLabel} onChange={(e) => setXLabel(e.target.value)} className={inputCls} placeholder="X axis" />
+              <input id="chart-x" value={xLabel} onChange={(e) => setXLabel(e.target.value)} className={inputCls}
+                     placeholder={isHistogram ? 'Value' : 'X axis'} />
             </div>
             <div className="space-y-1">
               <label className="block text-ink-muted font-medium" htmlFor="chart-y">Y-axis label</label>
-              <input id="chart-y" value={yLabel} onChange={(e) => setYLabel(e.target.value)} className={inputCls} placeholder="Y axis" />
+              <input id="chart-y" value={yLabel} onChange={(e) => setYLabel(e.target.value)} className={inputCls}
+                     placeholder={isHistogram ? 'Frequency' : 'Y axis'} />
             </div>
           </div>
+
+          {/* Histogram: bucket count. */}
+          {isHistogram && (
+            <div className="space-y-1">
+              <label className="block text-ink-muted font-medium" htmlFor="chart-bins">
+                Buckets <span className="text-ink-faint font-normal">({HISTOGRAM_BINS_MIN}–{HISTOGRAM_BINS_MAX})</span>
+              </label>
+              <input
+                id="chart-bins" type="number" inputMode="numeric"
+                min={HISTOGRAM_BINS_MIN} max={HISTOGRAM_BINS_MAX}
+                value={bins}
+                onChange={(e) => setBins(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+          )}
+
+          {/* Combo: secondary axis for the line series. */}
+          {isCombo && (
+            <div className="space-y-2 rounded-lg border border-line p-2.5">
+              <label className="flex items-center gap-2 text-ink-muted">
+                <input type="checkbox" checked={secondary} onChange={(e) => setSecondary(e.target.checked)} />
+                Plot line series on a secondary (right) axis
+              </label>
+              {secondary && (
+                <div className="space-y-1">
+                  <label className="block text-ink-muted font-medium" htmlFor="chart-y2">Secondary axis label</label>
+                  <input id="chart-y2" value={y2Label} onChange={(e) => setY2Label(e.target.value)} className={inputCls} placeholder="e.g. Margin %" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {isStacked && (
+            <p className="text-2xs text-ink-faint" role="note">
+              Negative values stack below the zero line — they are never dropped.
+            </p>
+          )}
 
           <label className="flex items-center gap-2 text-ink-muted">
             <input type="checkbox" checked={legend} onChange={(e) => setLegend(e.target.checked)} />

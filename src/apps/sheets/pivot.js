@@ -16,9 +16,15 @@
  *     title:     string,              // untrusted
  *     rowField:  string,              // header name to group rows by
  *     colField:  string,              // header name to group cols by ('' = none)
- *     valueField:string,              // header name to aggregate
- *     agg:       'SUM'|'AVG'|'COUNT'|'COUNTA'|'MAX'|'MIN',
+ *     rowGroup:  'none'|'day'|'month'|'quarter'|'year',   // date bucketing (WAVE-64)
+ *     colGroup:  'none'|'day'|'month'|'quarter'|'year',
+ *     values:    [{ field, agg, display }],               // MULTIPLE value fields (WAVE-64)
+ *     valueField:string,              // legacy mirror of values[0].field
+ *     agg:       PIVOT_AGGS[number],  // legacy mirror of values[0].agg
  *   }
+ *
+ * agg     ∈ SUM AVG COUNT COUNTA MAX MIN MEDIAN STDDEV PRODUCT COUNTUNIQUE
+ * display ∈ raw | pct_total | pct_row | pct_col   (percentages on a 0–100 scale)
  *
  * SECURITY (WAVE-55 posture, reused): the descriptor rides the CRDT fabric as a
  * `pivot_op`, so it arrives from UNTRUSTED peers. `makePivot` is the fail-closed
@@ -29,8 +35,36 @@
  * the DOM is React-escaped text — nothing here builds HTML or evals.
  */
 
-export const PIVOT_AGGS = ['SUM', 'AVG', 'COUNT', 'COUNTA', 'MAX', 'MIN']
+export const PIVOT_AGGS = [
+  'SUM', 'AVG', 'COUNT', 'COUNTA', 'MAX', 'MIN',
+  // WAVE-64 additions.
+  'MEDIAN', 'STDDEV', 'PRODUCT', 'COUNTUNIQUE',
+]
 const PIVOT_AGG_SET = new Set(PIVOT_AGGS)
+
+/**
+ * Display modes (WAVE-64) — how an aggregated cell is PRESENTED. 'raw' is the
+ * aggregate itself; the pct_* modes divide it by the same aggregate taken over a
+ * wider set (the whole table / the cell's row / the cell's column) and render it
+ * on a 0–100 scale. Percentages are computed by RE-AGGREGATING the raw source
+ * rows of the denominator set — never by summing sub-aggregates, which would be
+ * nonsense for AVG/MAX/MEDIAN.
+ */
+export const PIVOT_DISPLAYS = ['raw', 'pct_total', 'pct_row', 'pct_col']
+const PIVOT_DISPLAY_SET = new Set(PIVOT_DISPLAYS)
+export const PIVOT_DISPLAY_LABEL = {
+  raw:       'Value',
+  pct_total: '% of total',
+  pct_row:   '% of row',
+  pct_col:   '% of column',
+}
+
+/** Date-grouping buckets (WAVE-64) for a row/column field holding dates. */
+export const PIVOT_GROUPINGS = ['none', 'day', 'month', 'quarter', 'year']
+const PIVOT_GROUPING_SET = new Set(PIVOT_GROUPINGS)
+export const PIVOT_GROUPING_LABEL = {
+  none: 'No grouping', day: 'By day', month: 'By month', quarter: 'By quarter', year: 'By year',
+}
 
 // Only-numeric view of a group's values (blank/text rows are ignored, matching
 // spreadsheet SUM/AVERAGE/MAX/MIN semantics — a blank cell is NOT counted as 0).
@@ -52,12 +86,45 @@ const AGG_FN = {
   COUNTA: (vals) => vals.filter((v) => v !== '' && v !== null && v !== undefined).length,
   MAX:    (vals) => { const n = numeric(vals); return n.length ? Math.max(...n) : 0 },
   MIN:    (vals) => { const n = numeric(vals); return n.length ? Math.min(...n) : 0 },
+  // MEDIAN — middle of the sorted NUMERIC values (mean of the middle two when
+  // the count is even), matching spreadsheet MEDIAN.
+  MEDIAN: (vals) => {
+    const n = numeric(vals).sort((a, b) => a - b)
+    if (!n.length) return 0
+    const mid = n.length >> 1
+    return n.length % 2 ? n[mid] : (n[mid - 1] + n[mid]) / 2
+  },
+  // STDDEV — SAMPLE standard deviation (n-1 denominator), matching spreadsheet
+  // STDEV. A single sample has no spread to estimate → 0 (not NaN/Infinity).
+  STDDEV: (vals) => {
+    const n = numeric(vals)
+    if (n.length < 2) return 0
+    const mean = n.reduce((a, b) => a + b, 0) / n.length
+    const ss = n.reduce((a, b) => a + (b - mean) * (b - mean), 0)
+    return Math.sqrt(ss / (n.length - 1))
+  },
+  // PRODUCT — product of the numeric values; an empty group is 0 (not 1), so an
+  // empty cell never claims a neutral multiplicative identity it hasn't earned.
+  PRODUCT: (vals) => { const n = numeric(vals); return n.length ? n.reduce((a, b) => a * b, 1) : 0 },
+  // COUNTUNIQUE — distinct non-blank values (text or number), compared by their
+  // string form so 1 and '1' are the same label, as in a spreadsheet.
+  COUNTUNIQUE: (vals) => {
+    const seen = new Set()
+    for (const v of vals) {
+      if (v === '' || v === null || v === undefined) continue
+      seen.add(String(v))
+    }
+    return seen.size
+  },
 }
 
 // Bounds so a hostile/corrupt config can never drive an unbounded aggregation.
 const MAX_SOURCE_ROWS = 50000
 const MAX_SOURCE_COLS = 200
 const MAX_GROUPS = 2000
+// A pivot may aggregate several value fields at once; cap the list so a hostile
+// descriptor can't multiply the group work by an unbounded factor.
+const MAX_VALUES = 8
 
 let _seq = 0
 export function newPivotId() {
@@ -86,14 +153,42 @@ export function makePivot(partial = {}) {
   // Card position over the grid — finite + bounded (same clamp discipline as
   // makeChart geometry), so a corrupt/hostile descriptor can't drive NaN layout.
   const num = (v, d, lo, hi) => { const n = Number(v); return isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d }
+  const grouping = (v) => (PIVOT_GROUPING_SET.has(v) ? v : 'none')
+
+  // WAVE-64 VALUE FIELDS. The descriptor now carries a LIST of value fields
+  // (field + aggregation + display mode). The legacy single `valueField`/`agg`
+  // pair is still accepted (old saved docs, old peers) and is projected into the
+  // list; values[0] is mirrored back onto valueField/agg so an OLD peer reading a
+  // NEW descriptor still sees a coherent single-value pivot instead of nothing.
+  // Every entry is allow-listed + length-capped: this is the CRDT ingress clamp.
+  const valueField = s(partial.valueField)
+  let values = []
+  if (Array.isArray(partial.values)) {
+    for (const v of partial.values.slice(0, MAX_VALUES)) {
+      const field = s(v?.field)
+      if (!field) continue                       // a value with no field is dropped
+      values.push({
+        field,
+        agg:     PIVOT_AGG_SET.has(v?.agg) ? v.agg : 'SUM',
+        display: PIVOT_DISPLAY_SET.has(v?.display) ? v.display : 'raw',
+      })
+    }
+  }
+  if (!values.length && valueField) values = [{ field: valueField, agg, display: 'raw' }]
+
   return {
     id:         typeof partial.id === 'string' && partial.id ? partial.id : newPivotId(),
     range:      typeof partial.range === 'string' ? partial.range.trim().toUpperCase().slice(0, 40) : '',
     title:      typeof partial.title === 'string' ? partial.title.slice(0, 200) : '',
     rowField:   s(partial.rowField),
     colField:   s(partial.colField),
-    valueField: s(partial.valueField),
-    agg,
+    // Legacy mirror (see above) — kept in sync with values[0].
+    valueField: values.length ? values[0].field : valueField,
+    agg:        values.length ? values[0].agg : agg,
+    values,
+    // Date bucketing for the row / column grouping fields.
+    rowGroup:   grouping(partial.rowGroup),
+    colGroup:   grouping(partial.colGroup),
     x:          num(partial.x, 40, 0, 100000),
     y:          num(partial.y, 40, 0, 100000),
   }
@@ -117,11 +212,22 @@ export function insertPivot(data, pivot) {
   return setPivots(data, [...getPivots(data), makePivot(pivot)])
 }
 
-/** Update a pivot by id with a partial patch (immutably). */
+/**
+ * Update a pivot by id with a partial patch (immutably).
+ *
+ * A LEGACY single-value patch ({ agg } / { valueField }) must win over the
+ * descriptor's existing `values` list — otherwise makePivot would re-mirror the
+ * stale list back over the patch and the update would silently do nothing.
+ */
 export function updatePivot(data, id, patch) {
-  const next = getPivots(data).map((p) =>
-    p.id === id ? makePivot({ ...p, ...patch }) : p
-  )
+  const next = getPivots(data).map((p) => {
+    if (p.id !== id) return p
+    const merged = { ...p, ...patch }
+    if (!patch?.values && (patch?.agg !== undefined || patch?.valueField !== undefined)) {
+      delete merged.values
+    }
+    return makePivot(merged)
+  })
   return setPivots(data, next)
 }
 
@@ -250,72 +356,233 @@ export function sourceTable(pivot, sheet) {
 // reads), so 'row<SEP>col' keys never collide with real category values.
 const SEP = '\u001f'
 
-export function computePivot(pivot, sheet) {
+/**
+ * dateBucket — bucket an untrusted cell value into a day/month/quarter/year key.
+ *
+ * Accepts a Date, an Excel/Fortune-Sheet DATE SERIAL (days since 1899-12-30 —
+ * what a date-formatted cell actually stores in `v.v`), or a parseable date
+ * string. Everything is read in UTC so a bucket never shifts with the viewer's
+ * timezone. A value that is NOT a date is returned UNCHANGED (as its own group),
+ * so a text row can never be silently swallowed into a wrong date bucket.
+ */
+export function dateBucket(value, mode) {
+  if (mode === 'none' || !PIVOT_GROUPING_SET.has(mode)) return String(value ?? '')
+  const d = toDate(value)
+  if (!d) return String(value ?? '')
+  const y = d.getUTCFullYear()
+  const m = d.getUTCMonth() + 1
+  const pad = (n) => String(n).padStart(2, '0')
+  switch (mode) {
+    case 'year':    return String(y)
+    case 'quarter': return `${y}-Q${Math.floor((m - 1) / 3) + 1}`
+    case 'month':   return `${y}-${pad(m)}`
+    case 'day':     return `${y}-${pad(m)}-${pad(d.getUTCDate())}`
+    default:        return String(value ?? '')
+  }
+}
+
+// Excel's serial epoch (1899-12-30 UTC) — the base Fortune-Sheet stores too.
+const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30)
+const DAY_MS = 86400000
+
+function toDate(value) {
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value
+  if (typeof value === 'number' && isFinite(value)) {
+    // Serial dates only: 1 (1900-01-01) … ~2958465 (9999-12-31). A number outside
+    // that window is not a date, it is just a number.
+    if (value < 1 || value > 2958465) return null
+    return new Date(EXCEL_EPOCH_MS + Math.round(value) * DAY_MS)
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const t = Date.parse(value.trim())
+    if (!isNaN(t)) return new Date(t)
+  }
+  return null
+}
+
+/** Column label for a value field: "Sales", "Sales (AVG)", "Sales (% of row)"… */
+function valueLabel(v, multi) {
+  const bits = []
+  if (multi) bits.push(v.agg)
+  if (v.display !== 'raw') bits.push(PIVOT_DISPLAY_LABEL[v.display])
+  const base = pivotText(v.field)
+  return bits.length ? `${base} (${bits.join(', ')})` : base
+}
+
+/**
+ * computePivotModel — the structured pivot result.
+ *
+ * Returns { header: string[], displays: (string|null)[], table: any[][] } where
+ * `displays[i]` names the display mode of column i ('raw' | 'pct_*' | null for
+ * the row-label column) so a renderer can format a percentage as a percentage.
+ * `table` is header + data rows + the grand-total row.
+ *
+ * Multiple value fields expand into multiple columns per column-group; the row
+ * TOTAL column is emitted per value field. Percentages divide the cell's
+ * aggregate by the SAME aggregate re-taken over the denominator set (whole
+ * table / the cell's row / the cell's column) — never by summing sub-aggregates.
+ */
+export function computePivotModel(pivot, sheet) {
   const table = sourceTable(pivot, sheet)
   if (!table || table.length < 2) return null
   const headers = table[0].map((h) => String(h ?? ''))
   const rowIdx = headers.indexOf(pivot.rowField)
-  const valIdx = headers.indexOf(pivot.valueField)
   const colIdx = pivot.colField ? headers.indexOf(pivot.colField) : -1
-  if (rowIdx < 0 || valIdx < 0) return null
+  if (rowIdx < 0) return null
+
+  // Resolve the value fields to source column indexes; a value naming a header
+  // that does not exist is dropped (fail-closed) rather than aggregating junk.
+  const legacy = pivot.valueField ? [{ field: pivot.valueField, agg: pivot.agg || 'SUM', display: 'raw' }] : []
+  const specs = []
+  for (const v of (Array.isArray(pivot.values) && pivot.values.length ? pivot.values : legacy)) {
+    const idx = headers.indexOf(v.field)
+    if (idx < 0) continue
+    specs.push({ ...v, idx, fn: AGG_FN[v.agg] || AGG_FN.SUM })
+  }
+  if (!specs.length) return null
+
+  const rowGroup = pivot.rowGroup || 'none'
+  const colGroup = pivot.colGroup || 'none'
 
   const rows = new Set()
   const cols = new Set()
-  const groups = new Map()
+  const groups = new Map()          // key → the raw SOURCE ROWS in that cell
   for (let i = 1; i < table.length; i++) {
     if (groups.size > MAX_GROUPS) break // bound group explosion
     const row = table[i]
-    const rv = String(row[rowIdx] ?? '')
-    const cv = colIdx >= 0 ? String(row[colIdx] ?? '') : '__value__'
+    const rv = dateBucket(row[rowIdx], rowGroup)
+    const cv = colIdx >= 0 ? dateBucket(row[colIdx], colGroup) : '__value__'
     rows.add(rv)
     cols.add(cv)
     const key = rv + SEP + cv
     if (!groups.has(key)) groups.set(key, [])
-    groups.get(key).push(row[valIdx])
+    groups.get(key).push(row)
   }
 
-  const aggFn = AGG_FN[pivot.agg] || AGG_FN.SUM
   const rowArr = [...rows].sort()
   const colArr = [...cols].sort()
   const showCols = colIdx >= 0
-
-  // Header row: rowField, then each column value (or a single value col), Total.
-  const header = [pivotText(pivot.rowField)]
-  if (showCols) for (const cv of colArr) header.push(pivotText(cv))
-  else header.push(pivotText(pivot.valueField))
-  header.push('Total')
-
-  // Totals RE-AGGREGATE the underlying raw values (not sum the sub-cell
-  // aggregates), so the "Total" is correct for EVERY aggregation — an AVG/MAX/MIN
-  // total is otherwise a nonsense sum-of-averages / sum-of-maxes.
   const allCvs = showCols ? colArr : ['__value__']
-  const rawFor = (rv, cvs) => {
-    const vals = []
-    for (const cv of cvs) { const g = groups.get(rv + SEP + cv); if (g) vals.push(...g) }
-    return vals
+  const multi = specs.length > 1
+
+  // Raw source rows for a set of (row, column) cells.
+  const rowsFor = (rvs, cvs) => {
+    const out = []
+    for (const rv of rvs) for (const cv of cvs) {
+      const g = groups.get(rv + SEP + cv)
+      if (g) out.push(...g)
+    }
+    return out
+  }
+  const aggOf = (srcRows, spec) => spec.fn(srcRows.map((r) => r[spec.idx]))
+
+  // Percent denominators, computed ONCE per spec / row / column — and only when a
+  // spec actually asks for a percentage (the common all-'raw' pivot pays nothing).
+  const needsPct = specs.some((s) => s.display !== 'raw')
+  const grand = new Map()   // spec → agg over every row
+  const rowDen = new Map()  // `${si}|${rv}`
+  const colDen = new Map()  // `${si}|${cv}`
+  if (needsPct) {
+    specs.forEach((spec, si) => {
+      grand.set(si, aggOf(rowsFor(rowArr, allCvs), spec))
+      for (const rv of rowArr) rowDen.set(si + '|' + rv, aggOf(rowsFor([rv], allCvs), spec))
+      for (const cv of allCvs) colDen.set(si + '|' + cv, aggOf(rowsFor(rowArr, [cv]), spec))
+    })
   }
 
-  const result = [header]
+  // present — apply the display mode. In a TOTAL cell the natural denominator of
+  // the mode does not exist (a row-total has no single column), so it widens to
+  // the grand total: the total column under "% of column" is that row's share of
+  // everything, which is the only reading that stays additive.
+  const present = (value, spec, si, rv, cv) => {
+    if (spec.display === 'raw') return round(value)
+    const den = spec.display === 'pct_total' ? grand.get(si)
+      : spec.display === 'pct_row' ? (rv != null ? rowDen.get(si + '|' + rv) : grand.get(si))
+      : (cv != null ? colDen.get(si + '|' + cv) : grand.get(si))
+    if (!den) return 0                            // 0 / undefined denominator → 0%, never NaN/∞
+    return round((value / den) * 100)
+  }
+
+  // ── Header + per-column display map ──────────────────────────────────────
+  const header = [pivotText(pivot.rowField)]
+  const displays = [null]
+  if (showCols) {
+    for (const cv of colArr) {
+      for (const spec of specs) {
+        header.push(multi ? `${pivotText(cv)} · ${valueLabel(spec, true)}` : pivotText(cv))
+        displays.push(spec.display)
+      }
+    }
+  } else {
+    for (const spec of specs) {
+      header.push(valueLabel(spec, multi))
+      displays.push(spec.display)
+    }
+  }
+  for (const spec of specs) {
+    header.push(multi ? `Total · ${valueLabel(spec, true)}` : 'Total')
+    displays.push(spec.display)
+  }
+
+  // ── Data rows ─────────────────────────────────────────────────────────────
+  const out = [header]
   for (const rv of rowArr) {
     const dataRow = [pivotText(rv)]
-    for (const cv of allCvs) dataRow.push(round(aggFn(groups.get(rv + SEP + cv) || [])))
-    dataRow.push(round(aggFn(rawFor(rv, allCvs)))) // row total = agg over the row's raw values
-    result.push(dataRow)
+    for (const cv of allCvs) {
+      specs.forEach((spec, si) => {
+        const cellRows = groups.get(rv + SEP + cv) || []
+        dataRow.push(present(aggOf(cellRows, spec), spec, si, rv, cv))
+      })
+    }
+    // Row total: RE-AGGREGATE the row's raw values (not a sum of sub-aggregates),
+    // so an AVG/MAX/MEDIAN total is the real thing and not a sum-of-averages.
+    specs.forEach((spec, si) => {
+      const raw = aggOf(rowsFor([rv], allCvs), spec)
+      // A row's total under "% of row" is by definition the whole row = 100%.
+      dataRow.push(spec.display === 'pct_row' ? round(raw ? 100 : 0)
+        : spec.display === 'raw' ? round(raw)
+        : present(raw, spec, si, rv, null))
+    })
+    out.push(dataRow)
   }
 
-  // Grand-total row: per-column total = agg over that column's raw values;
-  // grand total = agg over EVERY raw value.
+  // ── Grand-total row ───────────────────────────────────────────────────────
   const totRow = ['Total']
-  const allRaw = []
   for (const cv of allCvs) {
-    const colVals = []
-    for (const rv of rowArr) { const g = groups.get(rv + SEP + cv); if (g) { colVals.push(...g); allRaw.push(...g) } }
-    totRow.push(round(aggFn(colVals)))
+    specs.forEach((spec, si) => {
+      const raw = aggOf(rowsFor(rowArr, [cv]), spec)
+      totRow.push(spec.display === 'pct_col' ? round(raw ? 100 : 0)
+        : spec.display === 'raw' ? round(raw)
+        : present(raw, spec, si, null, cv))
+    })
   }
-  totRow.push(round(aggFn(allRaw)))
-  result.push(totRow)
+  specs.forEach((spec, si) => {
+    const raw = aggOf(rowsFor(rowArr, allCvs), spec)
+    totRow.push(spec.display === 'raw' ? round(raw) : round(raw ? 100 : 0))
+  })
+  out.push(totRow)
 
-  return result
+  return { header, displays, table: out }
+}
+
+/**
+ * computePivot — the plain 2-D result array (header + data rows + grand total).
+ * Thin wrapper over computePivotModel, kept as the stable shape used by the
+ * renderers, the static-sheet materialiser and the CRDT-era callers.
+ */
+export function computePivot(pivot, sheet) {
+  const model = computePivotModel(pivot, sheet)
+  return model ? model.table : null
+}
+
+/**
+ * pivotPercentColumns — the set of column indexes whose values are percentages,
+ * so a renderer can suffix '%' instead of showing a bare 33.33.
+ */
+export function pivotPercentColumns(model) {
+  const set = new Set()
+  ;(model?.displays || []).forEach((d, i) => { if (d && d !== 'raw') set.add(i) })
+  return set
 }
 
 function round(v) {
@@ -333,19 +600,25 @@ function round(v) {
  * bolded. Values are already safe (pivotText for labels; numbers for aggregates).
  */
 export function pivotToSheet(pivot, sheet, name) {
-  const result = computePivot(pivot, sheet)
-  if (!result) return null
+  const model = computePivotModel(pivot, sheet)
+  if (!model) return null
+  const result = model.table
+  // A percentage column must EXPORT as a percentage: the values are on a 0–100
+  // scale, so the format code appends a literal % rather than multiplying by 100
+  // again (which `0.00%` would do, showing 3333% for a third).
+  const pctCols = pivotPercentColumns(model)
   const celldata = []
   for (let r = 0; r < result.length; r++) {
     for (let c = 0; c < result[r].length; c++) {
       const val = result[r][c]
       if (val === '' || val === null || val === undefined) continue
       const isNum = typeof val === 'number'
+      const fa = isNum && r > 0 && pctCols.has(c) ? '0.00"%"' : 'General'
       celldata.push({
         r, c,
         v: {
           v: val, m: String(val),
-          ct: { fa: 'General', t: isNum ? 'n' : 's' },
+          ct: { fa, t: isNum ? 'n' : 's' },
           ...(r === 0 || c === 0 ? { bl: 1 } : {}),
         },
       })
@@ -382,6 +655,10 @@ export function pivotValuesSignature(pivot, sheet) {
   parts.sort()
   return [
     pivot.range, pivot.rowField, pivot.colField, pivot.valueField, pivot.agg,
+    // WAVE-64 config that changes the RESULT must be in the memo key too, or a
+    // pivot would keep showing a stale table after its values / grouping change.
+    (pivot.values || []).map((v) => `${v.field}:${v.agg}:${v.display}`).join('+'),
+    pivot.rowGroup, pivot.colGroup,
     parts.join(','),
   ].join('|')
 }

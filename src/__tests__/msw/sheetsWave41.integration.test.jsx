@@ -307,7 +307,9 @@ describe('WAVE41 XLSX export carries the number format', () => {
     // An unformatted numeric cell must NOT carry a `z` (General is the default).
     // (B2 keeps its raw 0.25 with no ct.)
 
-    exportSheetsToXlsx(wb, 'Budget')
+    // WAVE-64: the exporter is async — it re-opens the ZIP SheetJS produced to
+    // inject the real OOXML chart parts before handing the Blob to saveAs.
+    await exportSheetsToXlsx(wb, 'Budget')
     expect(saveAs).toHaveBeenCalledTimes(1)
 
     // Parse the ACTUAL Blob the real exporter handed to saveAs, so this asserts

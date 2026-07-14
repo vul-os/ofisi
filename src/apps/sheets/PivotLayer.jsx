@@ -17,15 +17,21 @@
  */
 import { memo, useMemo, useCallback, useRef, useState, useEffect } from 'react'
 import { Trash2, Table2, Pencil, GripVertical } from 'lucide-react'
-import { getPivots, computePivot, pivotValuesSignature, deletePivot, updatePivot } from './pivot.js'
+import {
+  getPivots, computePivotModel, pivotPercentColumns, pivotValuesSignature, deletePivot, updatePivot,
+} from './pivot.js'
 
 const PivotCard = memo(function PivotCard({ pivot, sheet, onDelete, onEdit, onCommitPos }) {
   const signature = pivotValuesSignature(pivot, sheet)
-  const result = useMemo(
-    () => computePivot(pivot, sheet),
+  const model = useMemo(
+    () => computePivotModel(pivot, sheet),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [signature]
   )
+  const result = model?.table || null
+  // WAVE-64: a "% of total/row/column" column holds numbers on a 0–100 scale —
+  // rendering a bare 33.33 next to raw sums would read as a value, not a share.
+  const pctCols = useMemo(() => pivotPercentColumns(model), [model])
 
   // Draggable position (like charts) so multiple pivots don't pile up at origin
   // and can be moved off the source data. Commits on pointer-up only.
@@ -122,7 +128,7 @@ const PivotCard = memo(function PivotCard({ pivot, sheet, onDelete, onEdit, onCo
                         className="px-2 py-0.5 border border-slate-200 text-slate-700 whitespace-nowrap"
                       >
                         {typeof cell === 'number'
-                          ? cell.toLocaleString(undefined, { maximumFractionDigits: 4 })
+                          ? cell.toLocaleString(undefined, { maximumFractionDigits: 4 }) + (pctCols.has(ci) ? '%' : '')
                           : String(cell)}
                       </td>
                     ))}

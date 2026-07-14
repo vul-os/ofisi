@@ -120,3 +120,190 @@ describe('ChartSvg escaping', () => {
     expect(window.__pwned).toBeUndefined()
   })
 })
+
+// ── WAVE-64: stacked / 100% / donut / histogram / combo secondary axis ───────
+
+/** A 2-series categorical sheet: Cat | A | B. */
+function stackSheet(rows = [['a', 3, 7], ['b', 6, 2]]) {
+  const cells = { '0_0': 'Cat', '0_1': 'A', '0_2': 'B' }
+  rows.forEach(([cat, a, b], i) => {
+    cells[`${i + 1}_0`] = cat
+    cells[`${i + 1}_1`] = a
+    cells[`${i + 1}_2`] = b
+  })
+  return sheetWith(cells)
+}
+
+describe('WAVE-64 chart types render', () => {
+  it('renders EVERY new type without error, as SVG and never as markup', () => {
+    const sheet = stackSheet()
+    for (const type of ['column-stacked', 'bar-stacked', 'column-100', 'bar-100', 'donut', 'histogram']) {
+      const chart = makeChart({ type, range: 'A1:C3', options: { headerRow: true, headerCol: true } })
+      const { container, unmount } = render(<ChartSvg chart={chart} sheet={sheet} width={400} height={280} />)
+      expect(container.querySelector('svg')).toBeTruthy()
+      expect(container.querySelector('script')).toBeNull()
+      expect(container.innerHTML).not.toContain('<foreignObject')
+      unmount()
+    }
+  })
+
+  it('stacked column: segments accumulate — the tallest total, not the tallest value, sets the axis', () => {
+    const sheet = stackSheet([['a', 3, 7], ['b', 6, 2]])
+    const chart = makeChart({ type: 'column-stacked', range: 'A1:C3', options: { headerRow: true, headerCol: true } })
+    const { container } = render(<ChartSvg chart={chart} sheet={sheet} width={400} height={280} />)
+    expect(container.querySelector('[data-testid="stacked-stacked"]')).toBeTruthy()
+    // Both categories total 10 → the two stacks have equal total height, and each
+    // category has one rect per series. (Scope to the PLOT: legend chips are
+    // <rect>s too.)
+    const rects = [...container.querySelectorAll('[data-testid="stacked-stacked"] rect')]
+    expect(rects).toHaveLength(4)
+    const cat0 = rects.filter((r) => Math.abs(Number(r.getAttribute('x')) - Number(rects[0].getAttribute('x'))) < 0.01)
+    const totalH = cat0.reduce((a, r) => a + Number(r.getAttribute('height')), 0)
+    expect(totalH).toBeGreaterThan(0)
+    // Tooltips carry the raw value, not the stacked offset.
+    expect(container.textContent).toContain('A · a: 3')
+  })
+
+  it('100% stacked: every category fills the axis and the ticks read as percentages', () => {
+    const sheet = stackSheet([['a', 1, 3], ['b', 30, 10]])   // wildly different magnitudes
+    const chart = makeChart({ type: 'column-100', range: 'A1:C3', options: { headerRow: true, headerCol: true } })
+    const { container } = render(<ChartSvg chart={chart} sheet={sheet} width={400} height={280} />)
+    expect(container.querySelector('[data-testid="stacked-percent"]')).toBeTruthy()
+    expect(container.textContent).toContain('100%')          // axis is a percentage axis
+    // Each category's segments sum to the SAME height despite 4 vs 40 raw totals.
+    const rects = [...container.querySelectorAll('[data-testid="stacked-percent"] rect')]
+    const byX = new Map()
+    for (const r of rects) {
+      const x = Number(r.getAttribute('x')).toFixed(1)
+      byX.set(x, (byX.get(x) || 0) + Number(r.getAttribute('height')))
+    }
+    const totals = [...byX.values()]
+    expect(totals).toHaveLength(2)
+    expect(Math.abs(totals[0] - totals[1])).toBeLessThan(0.01)
+    // The tooltip shows the share AND the underlying number (no silent rescaling).
+    expect(container.textContent).toContain('A · a: 1 (25.0%)')
+  })
+
+  it('stacked: a NEGATIVE value stacks below the zero line instead of being dropped', () => {
+    const sheet = stackSheet([['a', 5, -3], ['b', 4, 2]])
+    const chart = makeChart({ type: 'column-stacked', range: 'A1:C3', options: { headerRow: true, headerCol: true } })
+    const { container } = render(<ChartSvg chart={chart} sheet={sheet} width={400} height={280} />)
+    // The negative segment exists (4 rects for 2×2 non-zero values) and the axis
+    // extends below zero (a negative tick label is rendered).
+    expect(container.querySelectorAll('[data-testid="stacked-stacked"] rect')).toHaveLength(4)
+    expect(container.textContent).toContain('B · a: -3')
+    expect(container.textContent).toMatch(/-\d/)   // a negative axis tick
+  })
+
+  it('horizontal stacked bars use the x axis for the value', () => {
+    const sheet = stackSheet()
+    const chart = makeChart({ type: 'bar-stacked', range: 'A1:C3', options: { headerRow: true, headerCol: true } })
+    const { container } = render(<ChartSvg chart={chart} sheet={sheet} width={400} height={280} />)
+    const rects = [...container.querySelectorAll('[data-testid="stacked-stacked"] rect')]
+    // Two categories → two distinct y bands; segments differ in x, not y.
+    const ys = new Set(rects.map((r) => r.getAttribute('y')))
+    expect(ys.size).toBe(2)
+    expect(new Set(rects.map((r) => r.getAttribute('x'))).size).toBeGreaterThan(1)
+  })
+
+  it('donut: draws a hole (arc paths, no wedge apex) and prints the total in the middle', () => {
+    const sheet = stackSheet([['a', 3, 0], ['b', 7, 0]])
+    const chart = makeChart({ type: 'donut', range: 'A1:B3', options: { headerRow: true, headerCol: true } })
+    const { container } = render(<ChartSvg chart={chart} sheet={sheet} width={400} height={280} />)
+    expect(container.querySelector('[data-testid="donut"]')).toBeTruthy()
+    const paths = [...container.querySelectorAll('path')]
+    expect(paths.length).toBeGreaterThan(0)
+    // A donut slice is an annulus: two arcs, and it never starts at the centre
+    // with a straight line to the rim (which is what a pie wedge does).
+    expect(paths.every((p) => (p.getAttribute('d').match(/A /g) || []).length === 2)).toBe(true)
+    expect(container.textContent).toContain('10')    // the total, in the hole
+  })
+
+  it('pie honours legend:false (the slice legend is not unconditional)', () => {
+    const sheet = stackSheet()
+    const on = render(<ChartSvg chart={makeChart({ type: 'pie', range: 'A1:B3' })} sheet={sheet} width={360} height={240} />)
+    expect(on.container.querySelector('[data-testid="chart-legend"]')).toBeTruthy()
+    on.unmount()
+    const off = render(
+      <ChartSvg chart={makeChart({ type: 'pie', range: 'A1:B3', options: { legend: false } })} sheet={sheet} width={360} height={240} />
+    )
+    expect(off.container.querySelector('[data-testid="chart-legend"]')).toBeNull()
+  })
+
+  it('histogram: bins the first numeric column into adjacent bars with a frequency axis', () => {
+    const cells = { '0_0': 'V' }
+    ;[1, 2, 2, 3, 8, 9, 9, 10].forEach((v, i) => { cells[`${i + 1}_0`] = v })
+    const sheet = sheetWith(cells)
+    const chart = makeChart({ type: 'histogram', range: 'A1:A9', options: { headerRow: true, headerCol: false, bins: 3 } })
+    const { container } = render(<ChartSvg chart={chart} sheet={sheet} width={420} height={280} />)
+    expect(container.querySelector('[data-testid="histogram"]')).toBeTruthy()
+    expect(container.querySelectorAll('[data-testid="histogram"] rect')).toHaveLength(3)  // one bar per bin
+    expect(container.textContent).toContain('Frequency')                // default y label
+    // Bars are adjacent (bin i+1 starts where bin i ends, within the 1px gutter).
+    const rects = [...container.querySelectorAll('[data-testid="histogram"] rect')]
+    const x0 = Number(rects[0].getAttribute('x')), w0 = Number(rects[0].getAttribute('width'))
+    expect(Number(rects[1].getAttribute('x')) - (x0 + w0)).toBeLessThan(2)
+  })
+
+  it('histogram with no numeric values says so instead of drawing an empty frame', () => {
+    const sheet = sheetWith({ '0_0': 'V', '1_0': 'x', '2_0': 'y' })
+    const chart = makeChart({ type: 'histogram', range: 'A1:A3', options: { headerRow: true, headerCol: false } })
+    const { container } = render(<ChartSvg chart={chart} sheet={sheet} width={360} height={240} />)
+    expect(container.textContent).toMatch(/No (numeric values|data)/i)
+  })
+
+  it('combo secondary axis: a small-magnitude line series is not flattened by the columns', () => {
+    // Revenue in the hundreds, margin in single digits: on ONE axis the margin
+    // line would sit on the floor. The secondary axis rescales it.
+    const sheet = sheetWith({
+      '0_0': 'Q', '0_1': 'Revenue', '0_2': 'Margin',
+      '1_0': 'Q1', '1_1': 500, '1_2': 4,
+      '2_0': 'Q2', '2_1': 900, '2_2': 9,
+    })
+    const shared = makeChart({ type: 'combo', range: 'A1:C3', options: { headerRow: true, headerCol: true } })
+    const dual = makeChart({ type: 'combo', range: 'A1:C3', options: { headerRow: true, headerCol: true, secondaryAxis: true, y2AxisLabel: 'Margin %' } })
+
+    const a = render(<ChartSvg chart={shared} sheet={sheet} width={420} height={280} />)
+    expect(a.container.querySelector('[data-testid="secondary-axis"]')).toBeNull()
+    const sharedLineY = a.container.querySelector('path[fill="none"]')?.getAttribute('d')
+    a.unmount()
+
+    const b = render(<ChartSvg chart={dual} sheet={sheet} width={420} height={280} />)
+    expect(b.container.querySelector('[data-testid="secondary-axis"]')).toBeTruthy()
+    expect(b.container.textContent).toContain('Margin %')          // right-axis title
+    const dualLineY = b.container.querySelector('path[fill="none"]')?.getAttribute('d')
+    // The line is drawn at a DIFFERENT (higher) position once it has its own scale.
+    expect(dualLineY).not.toBe(sharedLineY)
+    // Legend marks which scale each series belongs to.
+    expect(b.container.textContent).toContain('Revenue (L)')
+    expect(b.container.textContent).toContain('Margin (R)')
+  })
+
+  // The clamp is the hard invariant: a hostile descriptor of ANY new kind must
+  // render safely once it has passed through makeChart.
+  it('renders a makeChart-sanitised hostile descriptor of every new type', () => {
+    const sheet = stackSheet()
+    for (const type of ['column-stacked', 'bar-stacked', 'column-100', 'bar-100', 'donut', 'histogram', 'combo']) {
+      const safe = makeChart({
+        id: 'evil', type,
+        range: 'A1:C3',
+        title: { toString: () => '<script>window.__pwned2=1</script>' },
+        options: {
+          bins: -1e9, secondaryAxis: 'yes', y2AxisLabel: [],
+          xAxisLabel: {}, yAxisLabel: null, legend: 'maybe', headerRow: true, headerCol: true,
+        },
+        x: NaN, y: Infinity, w: -1e9, h: 'nope',
+      })
+      expect(safe.type).toBe(type)                       // legit type survives…
+      expect(safe.options.secondaryAxis).toBe(false)     // …hostile options do not
+      expect(safe.options.bins).toBe(2)
+      expect(typeof safe.title).toBe('string')
+      const { container, unmount } = render(<ChartSvg chart={safe} sheet={sheet} width={360} height={240} />)
+      expect(container.querySelector('svg')).toBeTruthy()
+      expect(container.querySelector('script')).toBeNull()
+      expect(container.innerHTML).not.toContain('NaN')   // no NaN geometry escaped
+      expect(window.__pwned2).toBeUndefined()
+      unmount()
+    }
+  })
+})

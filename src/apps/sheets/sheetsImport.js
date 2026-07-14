@@ -25,6 +25,88 @@ import * as XLSX from 'xlsx'
 import {
   assertFileSize, MAX_SHEETS, MAX_CELLS_PER_SHEET, MAX_ROWS, MAX_COLS, ImportError,
 } from '../../lib/importBounds.js'
+import { makeChart } from './charts.js'
+import { CHART_META_SHEET } from './sheetsExport.js'
+
+// A chart-definition sheet holds at most this many rows; a file claiming more is
+// truncated rather than trusted (import trust boundary — the sheet is untrusted
+// input like any other, even though WE normally write it).
+const MAX_META_CHARTS = 200
+
+/**
+ * chartsFromMetaSheet — parse the "Vulos Charts" definition sheet back into live
+ * chart descriptors (WAVE-64).
+ *
+ * This is the other half of the export round-trip: sheetsExport writes each
+ * chart's type/range/title/options/geometry as rows, so re-importing the .xlsx
+ * restores the charts EXACTLY rather than leaving the user with a mysterious
+ * sheet of rows. (SheetJS cannot read the real OOXML chart parts we also embed,
+ * so this sheet — not the chart XML — is what import reads.)
+ *
+ * SECURITY: the file is untrusted. Every descriptor goes through makeChart, the
+ * same fail-closed clamp used at the CRDT ingress: unknown type → 'column',
+ * geometry clamped to sane finite bounds, strings coerced + length-capped. A
+ * sheet whose header is not ours is ignored entirely (returns []).
+ */
+export function chartsFromMetaSheet(ws) {
+  if (!ws || !ws['!ref']) return []
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false })
+  const header = (rows[0] || []).map((h) => String(h ?? ''))
+  if (header[0] !== 'type' || header[1] !== 'range') return []   // not our schema
+  const col = (name) => header.indexOf(name)
+  const idx = {
+    type: col('type'), range: col('range'), title: col('title'),
+    x1: col('xAxisLabel'), y1: col('yAxisLabel'), y2: col('y2AxisLabel'),
+    legend: col('legend'), headerRow: col('headerRow'), headerCol: col('headerCol'),
+    secondary: col('secondaryAxis'), bins: col('bins'),
+    x: col('x'), y: col('y'), w: col('w'), h: col('h'), id: col('id'),
+  }
+  const get = (row, i) => (i >= 0 ? row[i] : undefined)
+  const yes = (v, dflt) => {
+    if (v === undefined || v === null || v === '') return dflt
+    const s = String(v).trim().toLowerCase()
+    return s === 'yes' || s === 'true' || s === '1'
+  }
+  const out = []
+  for (const row of rows.slice(1, MAX_META_CHARTS + 1)) {
+    if (!Array.isArray(row) || row.every((c) => c === '' || c == null)) continue
+    const type = String(get(row, idx.type) ?? '')
+    if (!type) continue
+    const geom = {}
+    // x/y may legitimately be 0 (a chart dragged flush to the grid origin), so
+    // only w/h — where 0 means "absent", never "zero-sized" — require > 0. A
+    // `v > 0` test on x/y would silently relocate every origin-anchored chart to
+    // makeChart's default offset on re-import.
+    for (const k of ['x', 'y']) {
+      const v = Number(get(row, idx[k]))
+      if (isFinite(v) && v >= 0) geom[k] = v
+    }
+    for (const k of ['w', 'h']) {
+      const v = Number(get(row, idx[k]))
+      if (isFinite(v) && v > 0) geom[k] = v
+    }
+    out.push(makeChart({
+      // makeChart mints a fresh id when this is absent/invalid — an id is only a
+      // local LWW key, so a file that omits it still round-trips fine.
+      id: typeof get(row, idx.id) === 'string' ? get(row, idx.id) : undefined,
+      type,
+      range: String(get(row, idx.range) ?? ''),
+      title: String(get(row, idx.title) ?? ''),
+      options: {
+        xAxisLabel:  String(get(row, idx.x1) ?? ''),
+        yAxisLabel:  String(get(row, idx.y1) ?? ''),
+        y2AxisLabel: String(get(row, idx.y2) ?? ''),
+        legend:      yes(get(row, idx.legend), true),
+        headerRow:   yes(get(row, idx.headerRow), true),
+        headerCol:   yes(get(row, idx.headerCol), true),
+        secondaryAxis: yes(get(row, idx.secondary), false),
+        bins:        Number(get(row, idx.bins)),
+      },
+      ...geom,
+    }))
+  }
+  return out
+}
 
 // Map a SheetJS cell type to a Fortune-Sheet ct.t code.
 function ctType(t) {
@@ -125,6 +207,14 @@ export function workbookToSheets(arrayBuffer, filename = 'file') {
   if (wb.SheetNames.length > MAX_SHEETS) {
     throw new ImportError(`${filename} has more than ${MAX_SHEETS} sheets (import limit).`)
   }
-  const out = names.map((name) => worksheetToSheet(wb.Sheets[name], name))
-  return out.length ? out : [{ name: 'Sheet1', celldata: [], config: {}, row: 84, column: 60 }]
+  // WAVE-64: lift our chart-definition sheet out of the workbook and turn it back
+  // into live charts on the first sheet — it is bookkeeping, not user data, so it
+  // must not show up as a stray worksheet full of rows.
+  const charts = chartsFromMetaSheet(wb.Sheets[CHART_META_SHEET])
+  const visible = names.filter((n) => !(n === CHART_META_SHEET && charts.length))
+
+  const out = visible.map((name) => worksheetToSheet(wb.Sheets[name], name))
+  if (!out.length) return [{ name: 'Sheet1', celldata: [], config: {}, row: 84, column: 60 }]
+  if (charts.length) out[0] = { ...out[0], charts }
+  return out
 }

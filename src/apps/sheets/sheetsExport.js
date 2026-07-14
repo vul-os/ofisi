@@ -1,6 +1,22 @@
 import * as XLSX from 'xlsx'
 import { saveAs } from 'file-saver'
 import { escapeChartText } from './charts.js'
+import { injectChartsIntoXlsx, nativeXlsxSupport } from './xlsxCharts.js'
+
+/** The worksheet that carries our chart definitions (see chartsMetaSheet). */
+export const CHART_META_SHEET = 'Vulos Charts'
+
+/**
+ * CHART_META_COLUMNS — the metadata sheet's schema. The first eight columns are
+ * the original WAVE-54 set (kept in place so an older export still parses); the
+ * rest were added in WAVE-64 to make the sheet a LOSSLESS round-trip of the
+ * descriptor: re-importing the .xlsx restores each chart's type, range, title,
+ * options AND its position/size over the grid.
+ */
+export const CHART_META_COLUMNS = [
+  'type', 'range', 'title', 'xAxisLabel', 'yAxisLabel', 'legend', 'headerRow', 'headerCol',
+  'y2AxisLabel', 'secondaryAxis', 'bins', 'x', 'y', 'w', 'h', 'id',
+]
 
 export function fortuneToWorksheet(sheet) {
   const ws = {}
@@ -69,28 +85,35 @@ export function fortuneToWorksheet(sheet) {
 }
 
 /**
- * chartsMetaSheet — WAVE-54 export fidelity.
+ * chartsMetaSheet — the chart DEFINITIONS as a worksheet.
  *
- * HONEST LIMITATION: our charts render as inline SVG driven by a plain-data
- * descriptor; we deliberately do NOT pull in a heavy library (ExcelJS /
- * xlsx-populate) to emit native OOXML <c:chart> parts. So charts do NOT round-
- * trip as *live Excel charts*. What we DO preserve is the chart DEFINITION: each
- * chart's {type, range, title, options} is written to a hidden-ish "Vulos Charts"
- * metadata worksheet, so the intent survives the export and the app can restore
- * live charts on re-import. CSV cannot carry charts at all (it is values-only) —
- * they are simply omitted there.
+ * WAVE-64: the .xlsx export now also writes REAL OOXML chart parts (see
+ * xlsxCharts.js), so an exported chart opens as a live Excel chart. This sheet is
+ * still written, for two reasons:
+ *
+ *   1. ROUND TRIP. Excel's chart XML cannot express everything our descriptor
+ *      holds (its exact pixel position over the grid, our histogram bin count,
+ *      which of our types it was). SheetJS cannot READ chart parts back either.
+ *      So this sheet is what makes import lossless: sheetsImport parses it and
+ *      restores every chart exactly as it was.
+ *   2. ODS. SheetJS writes ODS from the same worksheet model and there is no
+ *      equivalent injection path, so for .ods this sheet is the ONLY carrier —
+ *      which the export dialog states plainly instead of dropping charts quietly.
+ *
+ * SECURITY (WAVE-55): title / range / axis labels can originate from cell data
+ * (or a hostile CRDT peer). Every free-text field goes through escapeChartText so
+ * a leading =/+/-/@ is neutralised with a quote — otherwise a title like
+ * `=HYPERLINK("http://evil")` would be written as a LIVE FORMULA into the
+ * exported worksheet and evaluate when opened in Excel (formula injection).
+ * The type / legend / header / secondaryAxis columns are fixed enums and the
+ * geometry columns are numbers, so neither is a free-text surface.
  */
 export function chartsMetaSheet(data) {
   const charts = data?.[0]?.charts
   if (!Array.isArray(charts) || charts.length === 0) return null
-  const rows = [['type', 'range', 'title', 'xAxisLabel', 'yAxisLabel', 'legend', 'headerRow', 'headerCol']]
+  const rows = [CHART_META_COLUMNS.slice()]
+  const yn = (v, dflt = true) => ((v === undefined ? dflt : v) ? 'yes' : 'no')
   for (const c of charts) {
-    // WAVE-55 SECURITY: title / range / axis labels can originate from cell data
-    // (or a hostile CRDT peer). Run every free-text field through escapeChartText
-    // so a leading =/+/-/@ is neutralised with a quote — otherwise a title like
-    // `=HYPERLINK("http://evil")` or `=cmd|'/c calc'!A1` would be written as a
-    // LIVE FORMULA into the exported worksheet and evaluate when opened in Excel
-    // (CSV/formula injection). type/legend/header* are fixed enums, not free text.
     rows.push([
       String(c.type ?? ''),
       escapeChartText(c.range ?? ''),
@@ -100,21 +123,118 @@ export function chartsMetaSheet(data) {
       c.options?.legend === false ? 'no' : 'yes',
       c.options?.headerRow === false ? 'no' : 'yes',
       c.options?.headerCol === false ? 'no' : 'yes',
+      escapeChartText(c.options?.y2AxisLabel ?? ''),
+      yn(c.options?.secondaryAxis === true, false),
+      Number(c.options?.bins) || 10,
+      Number(c.x) || 0,
+      Number(c.y) || 0,
+      Number(c.w) || 0,
+      Number(c.h) || 0,
+      escapeChartText(c.id ?? '', 64),
     ])
   }
   return XLSX.utils.aoa_to_sheet(rows)
 }
 
-export function exportSheetsToXlsx(data, filename) {
+/**
+ * exportFidelity — what will actually survive this export, in the user's words.
+ *
+ * This is the data behind the export dialog. Nothing about a chart may be lost
+ * WITHOUT the user being told first, so the report is computed from the same
+ * predicate the writer uses (nativeXlsxSupport) rather than from a hand-kept list
+ * that could drift out of sync with it.
+ *
+ * Returns { format, charts, pivots, native, degraded[], lost[], notes[] }.
+ */
+export function exportFidelity(data, format) {
+  const charts = Array.isArray(data?.[0]?.charts) ? data[0].charts : []
+  const pivots = Array.isArray(data?.[0]?.pivots) ? data[0].pivots : []
+  const report = { format, charts: charts.length, pivots: pivots.length, native: 0, degraded: [], lost: [], notes: [] }
+
+  if (format === 'xlsx') {
+    for (const c of charts) {
+      const s = nativeXlsxSupport(c.type)
+      if (s.native && !s.note) report.native++
+      else if (s.native) { report.native++; report.degraded.push({ type: c.type, title: c.title || '', note: s.note }) }
+      else report.lost.push({ type: c.type, title: c.title || '', note: s.note || 'no Excel equivalent' })
+    }
+    if (charts.length) {
+      report.notes.push(
+        `${charts.length} chart${charts.length === 1 ? '' : 's'} will be embedded as ${charts.length === 1 ? 'a real Excel chart' : 'real Excel charts'} linked to the cells.`
+      )
+      report.notes.push(`Definitions are also written to a “${CHART_META_SHEET}” sheet, so re-importing this file into Vulos restores the charts exactly.`)
+    }
+  } else if (format === 'ods') {
+    // No OOXML injection path for ODS — charts survive only as the definition sheet.
+    report.lost = charts.map((c) => ({ type: c.type, title: c.title || '', note: 'ODS export cannot embed charts' }))
+    if (charts.length) {
+      report.notes.push(`${charts.length} chart${charts.length === 1 ? '' : 's'} cannot be embedded in .ods and will be exported as a “${CHART_META_SHEET}” data sheet instead.`)
+      report.notes.push('Re-importing the file into Vulos restores them; other spreadsheet apps will see the definitions as plain rows, not charts.')
+    }
+  } else if (format === 'csv') {
+    report.lost = charts.map((c) => ({ type: c.type, title: c.title || '', note: 'CSV holds values only' }))
+    if (charts.length) report.notes.push(`CSV holds values only — ${charts.length} chart${charts.length === 1 ? '' : 's'} will NOT be included.`)
+    report.notes.push('CSV exports the FIRST sheet only.')
+  } else if (format === 'xlsx-server') {
+    // The server-side exporter (Go) writes CELLS ONLY — it has no chart writer.
+    // It is reachable from the same Export menu, so it gets the same honesty: a
+    // chart dropped by the server path is still a chart the user lost.
+    report.lost = charts.map((c) => ({ type: c.type, title: c.title || '', note: 'the server exporter writes cells only' }))
+    if (charts.length) {
+      report.notes.push('Export “Excel workbook” instead to keep your charts — the server export writes cells only.')
+    }
+    report.notes.push('The server export uses the LAST SAVED version of this file, not unsaved edits.')
+  }
+
+  if (pivots.length) {
+    report.notes.push(
+      `${pivots.length} live pivot table${pivots.length === 1 ? '' : 's'} ${pivots.length === 1 ? 'is' : 'are'} not exported. ` +
+      'Use “Insert as static sheet” in the pivot panel to write the result into real cells first.'
+    )
+  }
+  return report
+}
+
+/**
+ * exportNeedsConfirm — does this export have anything the user must be told
+ * BEFORE it happens? A plain workbook (no charts, no live pivots) exports with
+ * zero friction; anything that loses or degrades content goes through the dialog.
+ */
+export function exportNeedsConfirm(data, format) {
+  const r = exportFidelity(data, format)
+  return r.lost.length > 0 || r.degraded.length > 0 || r.pivots > 0 || (r.charts > 0 && format !== 'xlsx')
+}
+
+/**
+ * exportSheetsToXlsx — write the workbook, INCLUDING real OOXML charts.
+ *
+ * Async because the chart injection re-opens the ZIP SheetJS produced (JSZip).
+ * Resolves with the injection result ({ embedded, skipped }) so a caller can
+ * surface what happened; nothing here throws away a chart quietly.
+ */
+export async function exportSheetsToXlsx(data, filename) {
   const wb = XLSX.utils.book_new()
   for (const sheet of data) {
     XLSX.utils.book_append_sheet(wb, fortuneToWorksheet(sheet), sheet.name || 'Sheet')
   }
-  // Append the chart-definition metadata sheet when charts exist (see above).
+  // The chart-definition sheet (round-trip carrier). Hidden in Excel: it is our
+  // bookkeeping, not the user's data — but it is DATA, not a chart, so it must
+  // never be the only thing we do (see the injection below).
   const meta = chartsMetaSheet(data)
-  if (meta) XLSX.utils.book_append_sheet(wb, meta, 'Vulos Charts')
+  if (meta) {
+    XLSX.utils.book_append_sheet(wb, meta, CHART_META_SHEET)
+    wb.Workbook = wb.Workbook || {}
+    wb.Workbook.Sheets = wb.SheetNames.map((n) => ({ Hidden: n === CHART_META_SHEET ? 1 : 0 }))
+  }
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
-  saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${filename}.xlsx`)
+
+  const charts = Array.isArray(data?.[0]?.charts) ? data[0].charts : []
+  const { buffer, embedded, skipped } = await injectChartsIntoXlsx(buf, charts, data?.[0] || {})
+  saveAs(
+    new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    `${filename}.xlsx`
+  )
+  return { embedded, skipped }
 }
 
 // Serialise ONE cell value into a CSV field.
@@ -164,6 +284,11 @@ export function exportSheetsToCsv(data, filename) {
  * reused — round-trips cleanly with the xlsx path. Formula-injection is not a
  * concern for the binary ODS body (cells are typed, not re-parsed as text like a
  * CSV); the chart-metadata sheet still runs through escapeChartText.
+ *
+ * CHARTS: there is no ODS chart-injection path (an ODS chart is a whole embedded
+ * sub-document, not a single XML part), so charts here survive ONLY as the
+ * definition sheet — and exportFidelity('ods') says exactly that before the user
+ * commits to the download.
  */
 export function exportSheetsToOds(data, filename) {
   const wb = XLSX.utils.book_new()
@@ -171,7 +296,7 @@ export function exportSheetsToOds(data, filename) {
     XLSX.utils.book_append_sheet(wb, fortuneToWorksheet(sheet), sheet.name || 'Sheet')
   }
   const meta = chartsMetaSheet(data)
-  if (meta) XLSX.utils.book_append_sheet(wb, meta, 'Vulos Charts')
+  if (meta) XLSX.utils.book_append_sheet(wb, meta, CHART_META_SHEET)
   const buf = XLSX.write(wb, { bookType: 'ods', type: 'array' })
   saveAs(new Blob([buf], { type: 'application/vnd.oasis.opendocument.spreadsheet' }), `${filename}.ods`)
 }

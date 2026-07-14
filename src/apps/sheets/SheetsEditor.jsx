@@ -10,7 +10,7 @@ import {
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
 import { readDraft, clearDraft } from '../../lib/draftStore'
-import { exportSheetsToXlsx, exportSheetsToCsv, exportSheetsToOds } from './sheetsExport'
+import { exportSheetsToXlsx, exportSheetsToCsv, exportSheetsToOds, exportNeedsConfirm } from './sheetsExport'
 import { importCSVFile } from './csvImport'
 import { workbookToSheets } from './sheetsImport'
 import { GridSession, getGridReplicaId } from '../../lib/crdt/grid.js'
@@ -67,6 +67,7 @@ const PivotLayer              = lazy(() => import('./PivotLayer.jsx'))
 const ColorScaleLayer         = lazy(() => import('./ColorScaleLayer.jsx'))
 const NamedRangesPanel        = lazy(() => import('./NamedRangesPanel.jsx'))
 const DataValidationPanel     = lazy(() => import('./DataValidationPanel.jsx'))
+const ExportDialog            = lazy(() => import('./ExportDialog.jsx'))
 
 const RETRY_DELAY_MS  = 4000
 const AUTOSAVE_DELAY_MS = 3000
@@ -403,6 +404,7 @@ export default function SheetsEditor() {
   const [showFindReplace,   setShowFindReplace]   = useState(false)
   const [showDataValidation, setShowDataValidation] = useState(false)
   const [editingPivotId,    setEditingPivotId]    = useState(null)   // WAVE-63: pivot being edited (null = insert)
+  const [exportFormat,      setExportFormat]      = useState(null)   // WAVE-64: format awaiting export confirmation
 
   const [activeCell,      setActiveCell]      = useState({ row: 0, col: 0 })
   const [selectionRect,   setSelectionRect]   = useState(null) // {r0,r1,c0,c1} 0-indexed inclusive
@@ -770,6 +772,46 @@ export default function SheetsEditor() {
     setRetryCount(0)
     doSave(dataRef.current)
   }
+
+  // ── Export (WAVE-64) ──────────────────────────────────────────────────────
+  // Charts/pivots do not survive every format identically, and losing them
+  // SILENTLY is a data-loss bug. So an export that would lose or degrade content
+  // goes through ExportDialog first (it names exactly what is at stake and can be
+  // cancelled); a plain workbook downloads immediately, with no extra click.
+  const runExport = useCallback(async (fmt) => {
+    setExportFormat(null)
+    try {
+      if (fmt === 'xlsx') {
+        const { skipped } = await exportSheetsToXlsx(data, title)
+        // The writer is the authority on what actually made it into the file: if
+        // it had to skip a chart the dialog didn't predict, say so now.
+        if (skipped?.length) {
+          showToast(`Exported. ${skipped.length} chart${skipped.length === 1 ? '' : 's'} could not be embedded and ` +
+            'ride only in the “Vulos Charts” sheet.', 'error')
+        }
+      } else if (fmt === 'ods') {
+        exportSheetsToOds(data, title)
+      } else if (fmt === 'csv') {
+        exportSheetsToCsv(data, title)
+      } else if (fmt === 'xlsx-server') {
+        // Server-rendered download (last saved version; cells only — see
+        // exportFidelity('xlsx-server'), which warns before we get here).
+        const a = document.createElement('a')
+        a.href = `/api/sheets/${id}/export?format=xlsx`
+        a.download = ''
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+      }
+    } catch (e) {
+      showToast(`Export failed: ${e?.message || 'unknown error'}`, 'error')
+    }
+  }, [data, title, id, showToast])
+
+  const requestExport = useCallback((fmt) => {
+    if (exportNeedsConfirm(data, fmt)) setExportFormat(fmt)
+    else runExport(fmt)
+  }, [data, runExport])
 
   // ── Charts (WAVE-54) ──────────────────────────────────────────────────────
   // A chart edit already produced the new workbook data (charts.js op). We save
@@ -1182,27 +1224,20 @@ export default function SheetsEditor() {
                 </button>
               }
             >
-              <Menu.Item onClick={() => exportSheetsToXlsx(data, title)}>
+              <Menu.Item onClick={() => requestExport('xlsx')}>
                 <span className="text-2xs font-bold tracking-eyebrow text-accent w-10">XLSX</span>
                 Excel workbook
               </Menu.Item>
-              <Menu.Item onClick={() => exportSheetsToOds(data, title)}>
+              <Menu.Item onClick={() => requestExport('ods')}>
                 <span className="text-2xs font-bold tracking-eyebrow text-success w-10">ODS</span>
                 OpenDocument sheet
               </Menu.Item>
-              <Menu.Item onClick={() => exportSheetsToCsv(data, title)}>
+              <Menu.Item onClick={() => requestExport('csv')}>
                 <span className="text-2xs font-bold tracking-eyebrow text-ink-faint w-10">CSV</span>
                 Current sheet (CSV)
               </Menu.Item>
               {id && (
-                <Menu.Item onClick={() => {
-                  const a = document.createElement('a')
-                  a.href = `/api/sheets/${id}/export?format=xlsx`
-                  a.download = ''
-                  document.body.appendChild(a)
-                  a.click()
-                  a.remove()
-                }}>
+                <Menu.Item onClick={() => requestExport('xlsx-server')}>
                   <span className="text-2xs font-bold tracking-eyebrow text-accent w-10">SRV</span>
                   Server XLSX
                 </Menu.Item>
@@ -1365,6 +1400,15 @@ export default function SheetsEditor() {
             selectionRect={selectionRect}
             onClose={() => { setShowChartWizard(false); setEditingChartId(null) }}
             onChange={(next) => { handleChartChange(next); setShowChartWizard(false); setEditingChartId(null) }}
+          />
+        )}
+        {/* Export fidelity confirmation (WAVE-64) — see runExport. */}
+        {exportFormat && (
+          <ExportDialog
+            data={data}
+            format={exportFormat}
+            onCancel={() => setExportFormat(null)}
+            onConfirm={(fmt) => runExport(fmt)}
           />
         )}
       </Suspense>

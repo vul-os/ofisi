@@ -8,6 +8,7 @@ import {
   makeChart, insertChart, updateChart, deleteChart, getCharts,
   extractChartData, chartValuesSignature, escapeChartText, chartAccessibleSummary,
   chartsBySheetId, mergeCharts, clampCharts,
+  CHART_TYPES, CHART_TYPE_GROUPS, stackModeOf, isHorizontalBar, histogramBins, histogramValues,
 } from './charts.js'
 
 // Build a FortuneSheet-style workbook with the given cell display values.
@@ -306,5 +307,160 @@ describe('WAVE-62 load-path clamp neutralises a poisoned saved/draft document', 
     // ...whereas clamping the source first yields a render-safe descriptor.
     const mergedSafe = mergeCharts(payload, chartsBySheetId(clampCharts(poison)))
     expect(typeof getCharts(mergedSafe)[0].title).toBe('string')
+  })
+})
+
+// ── WAVE-64: new chart types + their options ────────────────────────────────
+
+describe('WAVE-64 chart types', () => {
+  it('every new type is accepted by makeChart and survives the clamp', () => {
+    for (const type of ['column-stacked', 'bar-stacked', 'column-100', 'bar-100', 'donut', 'histogram']) {
+      expect(makeChart({ type }).type).toBe(type)
+      expect(CHART_TYPES.some((t) => t.value === type)).toBe(true)
+    }
+  })
+
+  it('CHART_TYPE_GROUPS covers every type exactly once (the wizard picker source)', () => {
+    const flat = CHART_TYPE_GROUPS.flatMap((g) => g.types.map((t) => t.value))
+    expect(flat.sort()).toEqual(CHART_TYPES.map((t) => t.value).sort())
+    expect(new Set(flat).size).toBe(CHART_TYPES.length)
+  })
+
+  it('stackModeOf / isHorizontalBar classify the family correctly', () => {
+    expect(stackModeOf('column-stacked')).toBe('stacked')
+    expect(stackModeOf('bar-stacked')).toBe('stacked')
+    expect(stackModeOf('column-100')).toBe('percent')
+    expect(stackModeOf('bar-100')).toBe('percent')
+    expect(stackModeOf('column')).toBe('none')
+    expect(stackModeOf('pie')).toBe('none')
+    expect(stackModeOf('evil')).toBe('none')          // unknown → never claims to stack
+    expect(isHorizontalBar('bar')).toBe(true)
+    expect(isHorizontalBar('bar-100')).toBe(true)
+    expect(isHorizontalBar('column-100')).toBe(false)
+  })
+
+  // THE CLAMP IS THE SECURITY BOUNDARY: a hostile CRDT peer / corrupt file may
+  // set ANY field. Every new option must come out of makeChart as safe plain data.
+  it('makeChart clamps the NEW options fail-closed (bins / secondaryAxis / y2 label)', () => {
+    const hostile = makeChart({
+      type: 'histogram',
+      options: {
+        bins: 1e9,                               // absurd → clamped
+        secondaryAxis: 'yes',                    // truthy-but-not-true → false
+        y2AxisLabel: { toString: () => 'boom' }, // object → ''
+      },
+    })
+    expect(hostile.options.bins).toBe(50)                 // upper bound
+    expect(hostile.options.secondaryAxis).toBe(false)     // explicit opt-in only
+    expect(hostile.options.y2AxisLabel).toBe('')
+    expect(JSON.parse(JSON.stringify(hostile))).toEqual(hostile)
+
+    // Non-finite / negative / fractional bin counts can never reach the renderer.
+    expect(makeChart({ options: { bins: NaN } }).options.bins).toBe(10)      // default
+    expect(makeChart({ options: { bins: -5 } }).options.bins).toBe(2)        // lower bound
+    expect(makeChart({ options: { bins: Infinity } }).options.bins).toBe(10)
+    expect(makeChart({ options: { bins: 7.6 } }).options.bins).toBe(8)       // integral
+    expect(makeChart({ options: { bins: '12' } }).options.bins).toBe(12)
+    // secondaryAxis is a strict boolean opt-in.
+    expect(makeChart({ options: { secondaryAxis: true } }).options.secondaryAxis).toBe(true)
+    for (const v of [1, 'true', {}, [], null, undefined]) {
+      expect(makeChart({ options: { secondaryAxis: v } }).options.secondaryAxis).toBe(false)
+    }
+    // A long secondary-axis label is capped like every other free-text field.
+    expect(makeChart({ options: { y2AxisLabel: 'y'.repeat(999) } }).options.y2AxisLabel.length).toBe(120)
+  })
+
+  it('the memo signature moves when bins / secondaryAxis change (no stale chart)', () => {
+    const sheet = wb({ '0_0': 'C', '0_1': 'V', '1_0': 'a', '1_1': 3, '2_0': 'b', '2_1': 9 })[0]
+    const base = makeChart({ type: 'histogram', range: 'A1:B3', options: { bins: 5 } })
+    const more = makeChart({ ...base, options: { ...base.options, bins: 12 } })
+    expect(chartValuesSignature(more, sheet)).not.toBe(chartValuesSignature(base, sheet))
+    const combo = makeChart({ type: 'combo', range: 'A1:B3' })
+    const combo2 = makeChart({ ...combo, options: { ...combo.options, secondaryAxis: true } })
+    expect(chartValuesSignature(combo2, sheet)).not.toBe(chartValuesSignature(combo, sheet))
+  })
+})
+
+describe('histogramBins', () => {
+  it('bins values into equal-width buckets, the max landing in the last one', () => {
+    const { bins, max, total } = histogramBins([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5)
+    expect(bins).toHaveLength(5)
+    expect(total).toBe(10)
+    expect(bins.reduce((a, b) => a + b.count, 0)).toBe(10)   // nothing dropped
+    expect(bins[0].x0).toBe(1)
+    expect(bins[4].x1).toBe(10)
+    expect(bins[4].count).toBeGreaterThan(0)                 // 10 is IN the last bin
+    expect(max).toBe(Math.max(...bins.map((b) => b.count)))
+  })
+
+  it('handles a degenerate range (all values equal) without dividing by zero', () => {
+    const { bins, total } = histogramBins([5, 5, 5], 4)
+    expect(total).toBe(3)
+    expect(bins.reduce((a, b) => a + b.count, 0)).toBe(3)
+    expect(bins.every((b) => isFinite(b.x0) && isFinite(b.x1))).toBe(true)
+  })
+
+  it('drops non-numeric values and returns an empty result for no numbers', () => {
+    expect(histogramBins(['a', null, undefined, NaN], 5).bins).toEqual([])
+    expect(histogramBins([], 5).total).toBe(0)
+    const mixed = histogramBins([1, 'x', 3, null, 5], 2)
+    expect(mixed.total).toBe(3)
+  })
+
+  it('clamps a hostile bin count instead of looping unboundedly', () => {
+    expect(histogramBins([1, 2, 3], 1e9).bins).toHaveLength(50)
+    expect(histogramBins([1, 2, 3], -10).bins).toHaveLength(2)
+    expect(histogramBins([1, 2, 3], NaN).bins).toHaveLength(10)
+    expect(histogramBins([1, 2, 3], 0).bins).toHaveLength(10)
+  })
+
+  // DATA-INTEGRITY: a blank row inside the range is NOT a zero. extractChartData
+  // 0-fills blanks so a cartesian plot keeps one point per category, but a
+  // histogram binning that shape would invent a spike at 0 for every empty row.
+  it('a histogram ignores blank rows instead of counting them as zeros', () => {
+    const sheet = wb({
+      '0_0': 'V', '1_0': 10, '2_0': 12, '3_0': 11,
+      // rows 4..8 of the range are EMPTY
+      '9_0': 90,
+    })[0]
+    const chart = makeChart({ type: 'histogram', range: 'A1:A10', options: { headerRow: true, headerCol: false, bins: 4 } })
+    const extracted = extractChartData(chart, sheet)
+    // The plotting shape still has a point per row (0-filled)…
+    expect(extracted.series[0].values).toHaveLength(9)
+    // …but only the REAL numbers are binned.
+    expect(histogramValues(extracted)).toEqual([10, 12, 11, 90])
+    const { total, bins } = histogramBins(histogramValues(extracted), chart.options.bins)
+    expect(total).toBe(4)
+    expect(bins.reduce((a, b) => a + b.count, 0)).toBe(4)
+  })
+
+  it('negative values bin correctly (the range is not assumed positive)', () => {
+    const { bins, total } = histogramBins([-10, -5, 0, 5, 10], 5)
+    expect(total).toBe(5)
+    expect(bins[0].x0).toBe(-10)
+    expect(bins.reduce((a, b) => a + b.count, 0)).toBe(5)
+  })
+})
+
+describe('chartAccessibleSummary — new types describe themselves', () => {
+  const sheet = wb({ '0_0': 'C', '0_1': 'A', '0_2': 'B', '1_0': 'x', '1_1': 3, '1_2': 4, '2_0': 'y', '2_1': 9, '2_2': 1 })[0]
+
+  it('says a stacked chart is stacked (a screen reader must not think it is grouped)', () => {
+    const c = makeChart({ type: 'column-stacked', range: 'A1:C3', title: 'S' })
+    expect(chartAccessibleSummary(c, extractChartData(c, sheet))).toMatch(/stacked/i)
+    const p = makeChart({ type: 'bar-100', range: 'A1:C3', title: 'P' })
+    expect(chartAccessibleSummary(p, extractChartData(p, sheet))).toMatch(/100%/)
+  })
+
+  it('describes a histogram as a distribution, not as categories', () => {
+    const h = makeChart({ type: 'histogram', range: 'B1:B3', title: 'H', options: { headerRow: true, headerCol: false, bins: 3 } })
+    const s = chartAccessibleSummary(h, extractChartData(h, sheet))
+    expect(s).toMatch(/bins/i)
+    expect(s).toMatch(/Histogram/i)
+  })
+
+  it('announces a combo secondary axis', () => {
+    const c = makeChart({ type: 'combo', range: 'A1:C3', title: 'C', options: { secondaryAxis: true } })
+    expect(chartAccessibleSummary(c, extractChartData(c, sheet))).toMatch(/secondary axis/i)
   })
 })

@@ -33,18 +33,119 @@
 import { parseRange } from './ConditionalFormatPanel.jsx'
 
 export const CHART_TYPES = [
-  { value: 'column',  label: 'Column',  icon: '▮' },
-  { value: 'bar',     label: 'Bar',     icon: '▬' },
-  { value: 'line',    label: 'Line',    icon: '╱' },
-  { value: 'area',    label: 'Area',    icon: '△' },
-  { value: 'pie',     label: 'Pie',     icon: '◔' },
+  { value: 'column',  label: 'Column',  icon: '▮',  group: 'Bar & column' },
+  { value: 'bar',     label: 'Bar',     icon: '▬',  group: 'Bar & column' },
+  // WAVE-64 stacking family. Stacking is a property of the PLOT, not of the data,
+  // so it is encoded in the type (as Google Sheets does) rather than as a flag —
+  // that keeps the descriptor a single allow-listed enum at the CRDT ingress.
+  { value: 'column-stacked', label: 'Stacked column', icon: '▥', group: 'Bar & column' },
+  { value: 'bar-stacked',    label: 'Stacked bar',    icon: '▤', group: 'Bar & column' },
+  { value: 'column-100',     label: '100% column',    icon: '◫', group: 'Bar & column' },
+  { value: 'bar-100',        label: '100% bar',       icon: '⊟', group: 'Bar & column' },
+  { value: 'line',    label: 'Line',    icon: '╱',  group: 'Line & area' },
+  { value: 'area',    label: 'Area',    icon: '△',  group: 'Line & area' },
   // WAVE-63 additional types:
-  { value: 'scatter', label: 'Scatter', icon: '⣿' },  // X/Y points (2 numeric series)
-  { value: 'combo',   label: 'Combo',   icon: '▮╱' }, // 1st series bars, rest lines
-  { value: 'bubble',  label: 'Bubble',  icon: '◍' },  // X/Y + size (3 numeric series)
+  { value: 'combo',   label: 'Combo',   icon: '▮╱', group: 'Line & area' }, // 1st series bars, rest lines
+  { value: 'pie',     label: 'Pie',     icon: '◔',  group: 'Part-to-whole' },
+  { value: 'donut',   label: 'Donut',   icon: '◎',  group: 'Part-to-whole' }, // WAVE-64
+  { value: 'scatter', label: 'Scatter', icon: '⣿',  group: 'Distribution' },  // X/Y points (2 numeric series)
+  { value: 'bubble',  label: 'Bubble',  icon: '◍',  group: 'Distribution' },  // X/Y + size (3 numeric series)
+  { value: 'histogram', label: 'Histogram', icon: '▁▄█', group: 'Distribution' }, // WAVE-64 binned frequency
 ]
 
 const CHART_TYPE_SET = new Set(CHART_TYPES.map((t) => t.value))
+
+/** Ordered, de-duplicated type groups (for the wizard's grouped picker). */
+export const CHART_TYPE_GROUPS = CHART_TYPES.reduce((acc, t) => {
+  const g = acc.find((x) => x.group === t.group)
+  if (g) g.types.push(t)
+  else acc.push({ group: t.group, types: [t] })
+  return acc
+}, [])
+
+/**
+ * stackModeOf — how a cartesian type stacks its series.
+ *   'none'    grouped side-by-side bars / independent lines
+ *   'stacked' values accumulate; axis max = the largest row TOTAL
+ *   'percent' values accumulate, each row normalised to 100%
+ * Anything non-cartesian (pie/donut/scatter/bubble/histogram) is 'none'.
+ */
+export function stackModeOf(type) {
+  if (type === 'column-stacked' || type === 'bar-stacked') return 'stacked'
+  if (type === 'column-100' || type === 'bar-100') return 'percent'
+  return 'none'
+}
+
+/** True for the horizontal-bar family (bar, bar-stacked, bar-100). */
+export function isHorizontalBar(type) {
+  return type === 'bar' || type === 'bar-stacked' || type === 'bar-100'
+}
+
+/** Histogram bin-count bounds — also the clamp used by makeChart. */
+export const HISTOGRAM_BINS_MIN = 2
+export const HISTOGRAM_BINS_MAX = 50
+export const HISTOGRAM_BINS_DEFAULT = 10
+
+/**
+ * histogramBins — bin a flat list of numbers into `bins` equal-width buckets.
+ *
+ * Pure + bounded: `bins` is clamped to [2,50] (the makeChart clamp already caps
+ * the descriptor, this is belt-and-braces for direct callers), non-finite values
+ * are dropped, and a degenerate range (all values equal) collapses to one bucket
+ * so the renderer never divides by zero. The last bucket is inclusive of the max
+ * (standard histogram convention), every other bucket is [x0, x1).
+ *
+ * Returns { bins: [{ x0, x1, count, label }], max, total }.
+ */
+export function histogramBins(values, bins = HISTOGRAM_BINS_DEFAULT) {
+  const nums = []
+  for (const v of values || []) {
+    // A BLANK is not a zero. `Number(null)`/`Number('')` are both 0, so filtering
+    // on isFinite alone would pack a bucket at 0 with every empty row in the
+    // range and misrepresent the distribution.
+    if (v === '' || v === null || v === undefined) continue
+    const n = Number(v)
+    if (isFinite(n)) nums.push(n)
+  }
+  if (!nums.length) return { bins: [], max: 0, total: 0 }
+  const k = Math.min(HISTOGRAM_BINS_MAX, Math.max(HISTOGRAM_BINS_MIN, Math.floor(Number(bins)) || HISTOGRAM_BINS_DEFAULT))
+  let lo = Math.min(...nums)
+  let hi = Math.max(...nums)
+  if (lo === hi) { lo -= 0.5; hi += 0.5 }   // degenerate range → one centred bucket
+  const width = (hi - lo) / k
+  const out = []
+  for (let i = 0; i < k; i++) {
+    const x0 = lo + i * width
+    const x1 = i === k - 1 ? hi : lo + (i + 1) * width
+    out.push({ x0, x1, count: 0, label: `${binNum(x0)}–${binNum(x1)}` })
+  }
+  for (const n of nums) {
+    let i = Math.floor((n - lo) / width)
+    if (i < 0) i = 0
+    if (i >= k) i = k - 1                    // max value lands in the last bucket
+    out[i].count++
+  }
+  let max = 0
+  for (const b of out) if (b.count > max) max = b.count
+  return { bins: out, max, total: nums.length }
+}
+
+function binNum(v) {
+  const r = Math.round(v * 100) / 100
+  return String(r)
+}
+
+/**
+ * histogramValues — the values a histogram bins: the FIRST series' genuinely
+ * numeric cells (see extractChartData's `numeric`), never the 0-filled plotting
+ * shape. One helper so the renderer, the a11y summary and the xlsx writer can
+ * never disagree about what the histogram is counting.
+ */
+export function histogramValues(extracted) {
+  const s = extracted?.series?.[0]
+  if (!s) return []
+  return Array.isArray(s.numeric) ? s.numeric : (s.values || [])
+}
 
 // A palette of fixed, non-user colours for series/slices. Never derived from
 // cell data, so it cannot be an injection vector.
@@ -91,10 +192,11 @@ export function escapeChartText(v, max = 200) {
  */
 export function makeChart(partial = {}) {
   const type = CHART_TYPE_SET.has(partial.type) ? partial.type : 'column'
-  const num = (v, d, lo, hi) => {
+  const num = (v, d, lo, hi, int = false) => {
     const n = Number(v)
     if (!isFinite(n)) return d
-    return Math.min(hi, Math.max(lo, n))
+    const clamped = Math.min(hi, Math.max(lo, n))
+    return int ? Math.round(clamped) : clamped
   }
   return {
     id:    typeof partial.id === 'string' && partial.id ? partial.id : newChartId(),
@@ -104,10 +206,21 @@ export function makeChart(partial = {}) {
     options: {
       xAxisLabel: typeof partial.options?.xAxisLabel === 'string' ? partial.options.xAxisLabel.slice(0, 120) : '',
       yAxisLabel: typeof partial.options?.yAxisLabel === 'string' ? partial.options.yAxisLabel.slice(0, 120) : '',
+      // y2AxisLabel: the SECONDARY (right-hand) value axis of a combo chart.
+      y2AxisLabel: typeof partial.options?.y2AxisLabel === 'string' ? partial.options.y2AxisLabel.slice(0, 120) : '',
       legend:     partial.options?.legend === false ? false : true,
       // headerRow/headerCol: whether the first row/col of the range holds labels.
       headerRow:  partial.options?.headerRow !== false,
       headerCol:  partial.options?.headerCol !== false,
+      // WAVE-64. secondaryAxis (combo): plot the LINE series against their own
+      // right-hand scale, so a small-magnitude series (e.g. a % margin) is still
+      // readable next to large columns. Explicit opt-in: anything that is not
+      // literally `true` is false, so a hostile `'yes'` / {} can never enable it.
+      secondaryAxis: partial.options?.secondaryAxis === true,
+      // bins (histogram): integer bucket count, clamped to [2,50]. A non-finite /
+      // hostile value falls back to the default — never NaN (which would drive a
+      // NaN-width bar and an infinite bucket loop).
+      bins: num(partial.options?.bins, HISTOGRAM_BINS_DEFAULT, HISTOGRAM_BINS_MIN, HISTOGRAM_BINS_MAX, true),
     },
     x: num(partial.x, 40,  0, 100000),
     y: num(partial.y, 40,  0, 100000),
@@ -289,11 +402,18 @@ export function extractChartData(chart, sheet) {
       ? escapeChartText(cellDisplay(idx.get(r0 + ',' + c))) || `Series ${si + 1}`
       : `Series ${si + 1}`
     const values = []
+    // `numeric` = only the cells that REALLY held a number. `values` keeps the
+    // 0-filled shape a cartesian plot needs (one point per category), but a
+    // distribution (histogram) must not treat a blank or text row as a zero — that
+    // would invent a spike at 0 for every empty row inside the range.
+    const numeric = []
     for (let r = dataR0; r < r0 + rows; r++) {
       const n = cellNumber(idx.get(r + ',' + c))
-      values.push(isFinite(n) ? n : 0)
+      const ok = isFinite(n)
+      values.push(ok ? n : 0)
+      if (ok) numeric.push(n)
     }
-    series.push({ name, values, color: CHART_PALETTE[si % CHART_PALETTE.length] })
+    series.push({ name, values, numeric, color: CHART_PALETTE[si % CHART_PALETTE.length] })
     si++
   }
 
@@ -324,9 +444,12 @@ export function chartValuesSignature(chart, sheet) {
       if (d !== '') parts.push(r + ':' + c + '=' + d)
     }
   }
-  // Include the config that changes the plotted shape/labels.
+  // Include the config that changes the plotted shape/labels. WAVE-64: bins and
+  // secondaryAxis are shape-affecting too — omitting them would freeze a chart's
+  // memoised extraction when only those change.
   return chart.type + '|' + chart.range + '|' + chart.title + '|' +
     (chart.options?.headerRow) + '|' + (chart.options?.headerCol) + '|' +
+    (chart.options?.secondaryAxis) + '|' + (chart.options?.bins) + '|' +
     parts.join(',')
 }
 
@@ -340,7 +463,19 @@ export function chartAccessibleSummary(chart, extracted) {
   if (!extracted || extracted.empty) {
     return `${kind} chart: ${title}. No data to plot.`
   }
+  // A histogram has no categories of its own — it summarises ONE numeric series
+  // as a frequency distribution, so describe it that way for a screen reader.
+  if (chart.type === 'histogram') {
+    const h = histogramBins(histogramValues(extracted), chart.options?.bins)
+    return `${kind} chart: ${title}. ${h.total} values distributed across ${h.bins.length} bins, ` +
+      `tallest bin ${h.max}.`
+  }
   const seriesNames = extracted.series.map((s) => s.name).join(', ')
+  const mode = stackModeOf(chart.type)
+  const stackNote = mode === 'stacked' ? ' Series are stacked.'
+    : mode === 'percent' ? ' Series are stacked to 100% of each category.'
+    : chart.type === 'combo' && chart.options?.secondaryAxis ? ' Line series use a secondary axis.'
+    : ''
   return `${kind} chart: ${title}. ${extracted.series.length} series ` +
-    `(${seriesNames}) across ${extracted.categories.length} categories.`
+    `(${seriesNames}) across ${extracted.categories.length} categories.${stackNote}`
 }

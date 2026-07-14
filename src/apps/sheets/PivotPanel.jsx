@@ -1,5 +1,5 @@
 /**
- * src/apps/sheets/PivotPanel.jsx  (WAVE-63 — reactive pivot)
+ * src/apps/sheets/PivotPanel.jsx  (WAVE-63 — reactive pivot; WAVE-64 — depth)
  *
  * Pivot table configuration side panel. Instead of inserting a STATIC snapshot
  * into a new sheet (which went stale the moment a source cell changed), it now
@@ -7,6 +7,11 @@
  * LIVE — re-aggregating from its source range whenever those cells change, like
  * the WAVE-54 charts. The descriptor is validated/clamped through makePivot at
  * every entry point (and at the CRDT ingress in SheetsEditor).
+ *
+ * WAVE-64 adds the depth Google Sheets has and we lacked: MULTIPLE value fields
+ * (each with its own aggregation and its own "% of total / row / column" display
+ * mode) and DATE GROUPING of the row/column field into day/month/quarter/year
+ * buckets.
  *
  * Props:
  *   data        {Sheet[]}  — current workbook sheets
@@ -16,11 +21,14 @@
  *   onInsert    {fn(Sheet[])} — commit workbook data with the pivot upserted
  */
 import { useState, useMemo, useEffect } from 'react'
-import { X, RefreshCw, Table2 } from 'lucide-react'
+import { X, RefreshCw, Table2, Plus, Trash2 } from 'lucide-react'
 import { Button, IconButton } from '../../components/ui'
 import {
-  makePivot, insertPivot, updatePivot, computePivot, pivotHeaders, pivotToSheet, PIVOT_AGGS,
+  makePivot, insertPivot, updatePivot, computePivotModel, pivotHeaders, pivotToSheet,
+  PIVOT_AGGS, PIVOT_DISPLAYS, PIVOT_DISPLAY_LABEL, PIVOT_GROUPINGS, PIVOT_GROUPING_LABEL,
 } from './pivot.js'
+
+const MAX_VALUES = 8
 
 // Turn a 0-indexed selection rect into an A1 range string.
 function colToLetter(idx) {
@@ -53,8 +61,15 @@ export default function PivotPanel({ data, pivot: editPivot, selectionRect, onCl
   const [range, setRange] = useState(initialRange)
   const [rowField, setRowField] = useState(editPivot?.rowField || '')
   const [colField, setColField] = useState(editPivot?.colField || '')
-  const [valueField, setValueField] = useState(editPivot?.valueField || '')
-  const [agg, setAgg] = useState(editPivot?.agg || 'SUM')
+  const [rowGroup, setRowGroup] = useState(editPivot?.rowGroup || 'none')
+  const [colGroup, setColGroup] = useState(editPivot?.colGroup || 'none')
+  const [values, setValues] = useState(
+    editPivot?.values?.length
+      ? editPivot.values.map((v) => ({ ...v }))
+      : editPivot?.valueField
+        ? [{ field: editPivot.valueField, agg: editPivot.agg || 'SUM', display: 'raw' }]
+        : []
+  )
   const [title, setTitle] = useState(editPivot?.title || '')
 
   // Headers available for the current range (live).
@@ -67,19 +82,29 @@ export default function PivotPanel({ data, pivot: editPivot, selectionRect, onCl
   useEffect(() => {
     if (isEditing || headers.length === 0) return
     setRowField((v) => v || headers[0] || '')
-    setValueField((v) => v || headers[2] || headers[1] || '')
+    setValues((vs) => (vs.length ? vs : [{ field: headers[2] || headers[1] || headers[0], agg: 'SUM', display: 'raw' }]))
   }, [headers, isEditing])
 
   const draft = useMemo(
-    () => makePivot({ id: editPivot?.id, range, rowField, colField, valueField, agg, title }),
-    [editPivot, range, rowField, colField, valueField, agg, title]
+    () => makePivot({ id: editPivot?.id, range, rowField, colField, rowGroup, colGroup, values, title }),
+    [editPivot, range, rowField, colField, rowGroup, colGroup, values, title]
   )
-  const preview = useMemo(() => computePivot(draft, activeSheet || {}), [draft, activeSheet])
+  const model = useMemo(() => computePivotModel(draft, activeSheet || {}), [draft, activeSheet])
+  const preview = model?.table || null
+
+  function patchValue(i, patch) {
+    setValues((vs) => vs.map((v, j) => (j === i ? { ...v, ...patch } : v)))
+  }
+  function addValue() {
+    setValues((vs) => (vs.length >= MAX_VALUES ? vs : [...vs, { field: headers[0] || '', agg: 'SUM', display: 'raw' }]))
+  }
+  function removeValue(i) {
+    setValues((vs) => vs.filter((_, j) => j !== i))
+  }
 
   function handleCommit() {
-    const next = isEditing
-      ? updatePivot(data, editPivot.id, { range, rowField, colField, valueField, agg, title })
-      : insertPivot(data, { range, rowField, colField, valueField, agg, title })
+    const patch = { range, rowField, colField, rowGroup, colGroup, values, title }
+    const next = isEditing ? updatePivot(data, editPivot.id, patch) : insertPivot(data, patch)
     onInsert(next)
     onClose()
   }
@@ -95,6 +120,12 @@ export default function PivotPanel({ data, pivot: editPivot, selectionRect, onCl
   }
 
   const sel = 'w-full rounded-md border border-line bg-bg px-2 py-1.5 text-xs text-ink focus:outline-none focus:border-line-strong'
+  const selSm = 'w-full rounded-md border border-line bg-bg px-1.5 py-1 text-[11px] text-ink focus:outline-none focus:border-line-strong'
+  const pctCols = useMemo(() => {
+    const s = new Set()
+    ;(model?.displays || []).forEach((d, i) => { if (d && d !== 'raw') s.add(i) })
+    return s
+  }, [model])
 
   return (
     <div className="flex flex-col w-full sm:w-72 flex-shrink-0 h-full border-l border-line bg-paper overflow-y-auto">
@@ -107,8 +138,8 @@ export default function PivotPanel({ data, pivot: editPivot, selectionRect, onCl
 
       <div className="flex-1 px-3 py-3 space-y-4 text-xs">
         <div className="space-y-1">
-          <label className="block text-ink-muted font-medium">Source range</label>
-          <input value={range} onChange={(e) => setRange(e.target.value)} className={sel} placeholder="e.g. A1:D100" />
+          <label className="block text-ink-muted font-medium" htmlFor="pivot-range">Source range</label>
+          <input id="pivot-range" value={range} onChange={(e) => setRange(e.target.value)} className={sel} placeholder="e.g. A1:D100" />
         </div>
 
         {headers.length === 0 ? (
@@ -116,39 +147,107 @@ export default function PivotPanel({ data, pivot: editPivot, selectionRect, onCl
         ) : (
           <>
             <div className="space-y-1">
-              <label className="block text-ink-muted font-medium">Row field</label>
-              <select value={rowField} onChange={(e) => setRowField(e.target.value)} className={sel}>
+              <label className="block text-ink-muted font-medium" htmlFor="pivot-row">Row field</label>
+              <select id="pivot-row" value={rowField} onChange={(e) => setRowField(e.target.value)} className={sel}>
                 <option value="">— choose —</option>
                 {headers.map((h) => <option key={h} value={h}>{h}</option>)}
               </select>
+              {rowField && (
+                <select
+                  aria-label="Group row dates"
+                  value={rowGroup}
+                  onChange={(e) => setRowGroup(e.target.value)}
+                  className={selSm}
+                >
+                  {PIVOT_GROUPINGS.map((g) => <option key={g} value={g}>{PIVOT_GROUPING_LABEL[g]}</option>)}
+                </select>
+              )}
             </div>
 
             <div className="space-y-1">
-              <label className="block text-ink-muted font-medium">Column field</label>
-              <select value={colField} onChange={(e) => setColField(e.target.value)} className={sel}>
+              <label className="block text-ink-muted font-medium" htmlFor="pivot-col">Column field</label>
+              <select id="pivot-col" value={colField} onChange={(e) => setColField(e.target.value)} className={sel}>
                 <option value="">— none —</option>
                 {headers.map((h) => <option key={h} value={h}>{h}</option>)}
               </select>
+              {colField && (
+                <select
+                  aria-label="Group column dates"
+                  value={colGroup}
+                  onChange={(e) => setColGroup(e.target.value)}
+                  className={selSm}
+                >
+                  {PIVOT_GROUPINGS.map((g) => <option key={g} value={g}>{PIVOT_GROUPING_LABEL[g]}</option>)}
+                </select>
+              )}
+            </div>
+
+            {/* Value fields — one row each: field · aggregation · display. */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-ink-muted font-medium">Values</span>
+                <button
+                  type="button"
+                  onClick={addValue}
+                  disabled={values.length >= MAX_VALUES || !headers.length}
+                  className="flex items-center gap-1 text-[11px] text-accent hover:underline disabled:opacity-40 disabled:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 rounded"
+                >
+                  <Plus size={11} aria-hidden /> Add value
+                </button>
+              </div>
+
+              {values.length === 0 ? (
+                <p className="text-ink-faint text-[11px]">
+                  No value field yet — add one to aggregate a column.
+                </p>
+              ) : (
+                values.map((v, i) => (
+                  <div key={i} className="rounded-md border border-line p-1.5 space-y-1 bg-bg/40">
+                    <div className="flex items-center gap-1">
+                      <select
+                        aria-label={`Value field ${i + 1}`}
+                        value={v.field}
+                        onChange={(e) => patchValue(i, { field: e.target.value })}
+                        className={selSm}
+                      >
+                        <option value="">— choose —</option>
+                        {headers.map((h) => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                      <IconButton
+                        size="sm"
+                        title={`Remove value ${i + 1}`}
+                        aria-label={`Remove value ${i + 1}`}
+                        onClick={() => removeValue(i)}
+                      >
+                        <Trash2 size={11} />
+                      </IconButton>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      <select
+                        aria-label={`Aggregation for value ${i + 1}`}
+                        value={v.agg}
+                        onChange={(e) => patchValue(i, { agg: e.target.value })}
+                        className={selSm}
+                      >
+                        {PIVOT_AGGS.map((k) => <option key={k} value={k}>{k}</option>)}
+                      </select>
+                      <select
+                        aria-label={`Display for value ${i + 1}`}
+                        value={v.display}
+                        onChange={(e) => patchValue(i, { display: e.target.value })}
+                        className={selSm}
+                      >
+                        {PIVOT_DISPLAYS.map((d) => <option key={d} value={d}>{PIVOT_DISPLAY_LABEL[d]}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
 
             <div className="space-y-1">
-              <label className="block text-ink-muted font-medium">Value field</label>
-              <select value={valueField} onChange={(e) => setValueField(e.target.value)} className={sel}>
-                <option value="">— choose —</option>
-                {headers.map((h) => <option key={h} value={h}>{h}</option>)}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-ink-muted font-medium">Aggregation</label>
-              <select value={agg} onChange={(e) => setAgg(e.target.value)} className={sel}>
-                {PIVOT_AGGS.map((k) => <option key={k} value={k}>{k}</option>)}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-ink-muted font-medium">Title (optional)</label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} className={sel} placeholder="Pivot title" />
+              <label className="block text-ink-muted font-medium" htmlFor="pivot-title">Title (optional)</label>
+              <input id="pivot-title" value={title} onChange={(e) => setTitle(e.target.value)} className={sel} placeholder="Pivot title" />
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -182,7 +281,9 @@ export default function PivotPanel({ data, pivot: editPivot, selectionRect, onCl
                       <tr key={ri} className={ri % 2 === 0 ? '' : 'bg-bg'}>
                         {row.map((cell, ci) => (
                           <td key={ci} className="px-1.5 py-0.5 border border-line text-ink whitespace-nowrap">
-                            {typeof cell === 'number' ? cell.toLocaleString(undefined, { maximumFractionDigits: 4 }) : String(cell)}
+                            {typeof cell === 'number'
+                              ? cell.toLocaleString(undefined, { maximumFractionDigits: 4 }) + (pctCols.has(ci) ? '%' : '')
+                              : String(cell)}
                           </td>
                         ))}
                       </tr>
@@ -191,7 +292,7 @@ export default function PivotPanel({ data, pivot: editPivot, selectionRect, onCl
                 </table>
               </div>
             ) : (
-              <p className="text-ink-faint text-[11px]">Pick a Row field and a Value field that match header names to preview.</p>
+              <p className="text-ink-faint text-[11px]">Pick a Row field and at least one Value field that match header names to preview.</p>
             )}
           </>
         )}
