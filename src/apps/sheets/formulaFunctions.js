@@ -95,6 +95,11 @@ export function looseEqual(a, b) {
   return String(a).toLowerCase() === String(b).toLowerCase()
 }
 
+/** Escape a string for safe use as a literal inside a RegExp. */
+function escapeRe(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 /** Numeric coercion; returns NaN when not a finite number. */
 function num(v) {
   if (typeof v === 'number') return v
@@ -351,6 +356,117 @@ export function UNIQUE(params) {
   return out.join(', ')
 }
 
+// ── TEXTBEFORE / TEXTAFTER ───────────────────────────────────────────────────
+// Excel text functions @formulajs does NOT ship (verified). Return the text
+// before/after the Nth occurrence of a delimiter.
+//   TEXTBEFORE(text, delimiter, [instance_num=1], [match_mode=0], [match_end=0], [if_not_found])
+//   TEXTAFTER (text, delimiter, [instance_num=1], [match_mode=0], [match_end=0], [if_not_found])
+// instance_num<0 counts occurrences from the END (Excel). match_mode=1 is
+// case-insensitive. A delimiter not found returns if_not_found, or #N/A.
+
+// Index of the Nth (1-based) occurrence of delim in text, honoring case mode and
+// negative n (from the end). Returns -1 when there is no such occurrence.
+function nthIndexOf(text, delim, n, insensitive) {
+  if (delim === '') return -1
+  const hay = insensitive ? text.toLowerCase() : text
+  const needle = insensitive ? delim.toLowerCase() : delim
+  const positions = []
+  let from = 0
+  for (;;) {
+    const i = hay.indexOf(needle, from)
+    if (i < 0) break
+    positions.push(i)
+    from = i + needle.length
+  }
+  if (positions.length === 0) return -1
+  const idx = n < 0 ? positions.length + n : n - 1
+  if (idx < 0 || idx >= positions.length) return -1
+  return positions[idx]
+}
+
+function textBeforeAfter(params, after) {
+  if (!Array.isArray(params) || params.length < 2) return ERR.NA
+  const [textRaw, delimRaw, instRaw, modeRaw, , ifNotFound] = params
+  if (isErr(textRaw)) return textRaw
+  if (isErr(delimRaw)) return delimRaw
+  const text = textRaw == null ? '' : String(textRaw)
+  const delim = delimRaw == null ? '' : String(delimRaw)
+  const n = instRaw === undefined || instRaw === '' ? 1 : Math.trunc(Number(instRaw))
+  if (!Number.isFinite(n) || n === 0) return ERR.VALUE
+  const insensitive = Number(modeRaw) === 1
+  const at = nthIndexOf(text, delim, n, insensitive)
+  if (at < 0) return ifNotFound !== undefined ? ifNotFound : ERR.NA
+  return after ? text.slice(at + delim.length) : text.slice(0, at)
+}
+
+export function TEXTBEFORE(params) { return textBeforeAfter(params, false) }
+export function TEXTAFTER(params) { return textBeforeAfter(params, true) }
+
+// ── TEXTSPLIT(text, col_delimiter, [row_delimiter], [ignore_empty]) ──────────
+// Excel dynamic-array split. Fortune-Sheet has no spill, so — like FILTER/SORT —
+// a single field returns as a scalar and multiple fields return comma-joined
+// (honest about the no-spill limitation). col_delimiter may be a single string or
+// a range/array of strings (any of them splits). ignore_empty drops empty fields.
+export function TEXTSPLIT(params) {
+  if (!Array.isArray(params) || params.length < 2) return ERR.NA
+  const [textRaw, colDelimRaw, rowDelimRaw, ignoreEmptyRaw] = params
+  if (isErr(textRaw)) return textRaw
+  const text = textRaw == null ? '' : String(textRaw)
+  const delims = [...flatten(colDelimRaw), ...flatten(rowDelimRaw)]
+    .filter((d) => d != null && d !== '')
+    .map((d) => String(d))
+  if (delims.length === 0) return ERR.VALUE
+  const ignoreEmpty = toBool(ignoreEmptyRaw)
+  // Split on any of the delimiters. Escape for a safe alternation regex.
+  const re = new RegExp(delims.map(escapeRe).join('|'))
+  let parts = text.split(re)
+  if (ignoreEmpty) parts = parts.filter((p) => p !== '')
+  if (parts.length === 0) return ''
+  if (parts.length === 1) return parts[0]
+  return parts.join(', ')
+}
+
+// ── SEQUENCE(rows, [columns=1], [start=1], [step=1]) ─────────────────────────
+// Dynamic-array generator. No spill → scalar-safe: one value returns as a scalar,
+// many return comma-joined. The total count is bounded so a hostile SEQUENCE
+// (1e9, …) cannot allocate an enormous string.
+const MAX_SEQUENCE = 10000
+export function SEQUENCE(params) {
+  if (!Array.isArray(params) || params.length < 1) return ERR.NA
+  const rows = Math.trunc(Number(params[0]))
+  const cols = params[1] === undefined || params[1] === '' ? 1 : Math.trunc(Number(params[1]))
+  const start = params[2] === undefined || params[2] === '' ? 1 : Number(params[2])
+  const step = params[3] === undefined || params[3] === '' ? 1 : Number(params[3])
+  if (!Number.isFinite(rows) || !Number.isFinite(cols) || rows < 1 || cols < 1) return ERR.VALUE
+  if (!Number.isFinite(start) || !Number.isFinite(step)) return ERR.VALUE
+  const total = rows * cols
+  if (total > MAX_SEQUENCE) return ERR.NUM
+  const out = []
+  for (let i = 0; i < total; i++) out.push(start + i * step)
+  if (out.length === 1) return out[0]
+  return out.join(', ')
+}
+
+// ── SORTBY(array, by_array, [sort_order=1]) ──────────────────────────────────
+// Sort `array` by the aligned values of `by_array` (1 asc / -1 desc). Scalar-safe
+// like SORT: one value → scalar, many → comma-joined. A length mismatch fails loud
+// with #VALUE! rather than silently dropping/misaligning rows.
+export function SORTBY(params) {
+  if (!Array.isArray(params) || params.length < 2) return ERR.NA
+  const arr = flatten(params[0])
+  const by = flatten(params[1])
+  const order = Number(params[2]) === -1 ? -1 : 1
+  if (arr.length !== by.length) return ERR.VALUE
+  for (const v of arr) if (isErr(v)) return v
+  for (const v of by) if (isErr(v)) return v
+  const idx = arr.map((_, i) => i)
+  idx.sort((a, b) => compareScalar(by[a], by[b]) * order)
+  const sorted = idx.map((i) => arr[i]).filter((v) => v !== '' && v != null)
+  if (sorted.length === 0) return ERR.NA
+  if (sorted.length === 1) return sorted[0]
+  return sorted.join(', ')
+}
+
 // ── Registry ────────────────────────────────────────────────────────────────
 // Names we own. Each is `(params:Array) => value`. The parser calls with a
 // single params array (see argument-shape note above).
@@ -366,6 +482,13 @@ export const CUSTOM_FUNCTIONS = {
   FILTER,
   SORT,
   UNIQUE,
+  // Newly added — all verified ABSENT from @formulajs (so they never shadow a
+  // built-in) and all pure, scalar-safe (honest no-spill) data transforms.
+  TEXTBEFORE,
+  TEXTAFTER,
+  TEXTSPLIT,
+  SEQUENCE,
+  SORTBY,
 }
 
 /**

@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import {
   TEXTJOIN, IFS, SWITCH, XLOOKUP, XMATCH, LET, FILTER, SORT, UNIQUE,
+  TEXTBEFORE, TEXTAFTER, TEXTSPLIT, SEQUENCE, SORTBY,
   flatten, toBool, looseEqual, isErr, ERR, installCustomFormulas, CUSTOM_FUNCTIONS,
 } from './formulaFunctions.js'
 
@@ -166,10 +167,76 @@ describe('UNIQUE (scalar-safe)', () => {
   })
 })
 
+describe('TEXTBEFORE / TEXTAFTER', () => {
+  it('returns text before / after the first delimiter', () => {
+    expect(TEXTBEFORE(['a-b-c', '-'])).toBe('a')
+    expect(TEXTAFTER(['a-b-c', '-'])).toBe('b-c')
+  })
+  it('honors instance_num (positive and negative)', () => {
+    expect(TEXTBEFORE(['a-b-c', '-', 2])).toBe('a-b')
+    expect(TEXTAFTER(['a-b-c', '-', 2])).toBe('c')
+    expect(TEXTBEFORE(['a-b-c', '-', -1])).toBe('a-b') // before the last
+    expect(TEXTAFTER(['a-b-c', '-', -1])).toBe('c')     // after the last
+  })
+  it('case-insensitive match_mode=1', () => {
+    expect(TEXTBEFORE(['aXbxc', 'x', 1, 1])).toBe('a')
+  })
+  it('missing delimiter → #N/A or if_not_found', () => {
+    expect(TEXTBEFORE(['abc', '-'])).toBe(ERR.NA)
+    expect(TEXTAFTER(['abc', '-', 1, 0, 0, 'none'])).toBe('none')
+  })
+  it('propagates an error argument', () => {
+    expect(TEXTBEFORE([ERR.DIV0, '-'])).toBe(ERR.DIV0)
+  })
+})
+
+describe('TEXTSPLIT (scalar-safe)', () => {
+  it('splits on a delimiter; single field is scalar, many are comma-joined', () => {
+    expect(TEXTSPLIT(['a,b,c', ','])).toBe('a, b, c')
+    expect(TEXTSPLIT(['solo', ','])).toBe('solo')
+  })
+  it('ignore_empty drops empty fields', () => {
+    expect(TEXTSPLIT(['a,,c', ',', undefined, true])).toBe('a, c')
+    expect(TEXTSPLIT(['a,,c', ',', undefined, false])).toBe('a, , c')
+  })
+  it('a range of delimiters splits on any of them', () => {
+    expect(TEXTSPLIT(['a,b;c', [[','], [';']]])).toBe('a, b, c')
+  })
+  it('missing delimiter → #VALUE!', () => {
+    expect(TEXTSPLIT(['abc', ''])).toBe(ERR.VALUE)
+  })
+})
+
+describe('SEQUENCE (scalar-safe, bounded)', () => {
+  it('generates rows*cols values from start by step', () => {
+    expect(SEQUENCE([4])).toBe('1, 2, 3, 4')
+    expect(SEQUENCE([2, 2, 10, 5])).toBe('10, 15, 20, 25')
+    expect(SEQUENCE([1])).toBe(1) // single value → scalar
+  })
+  it('rejects non-positive dims and an oversize total', () => {
+    expect(SEQUENCE([0])).toBe(ERR.VALUE)
+    expect(SEQUENCE([100000])).toBe(ERR.NUM)
+  })
+})
+
+describe('SORTBY (scalar-safe)', () => {
+  it('sorts an array by a companion array', () => {
+    expect(SORTBY([['c', 'a', 'b'], [3, 1, 2]])).toBe('a, b, c')
+    expect(SORTBY([['a', 'b', 'c'], [1, 2, 3], -1])).toBe('c, b, a')
+  })
+  it('length mismatch → #VALUE! (no silent misalignment)', () => {
+    expect(SORTBY([['a', 'b', 'c'], [1, 2]])).toBe(ERR.VALUE)
+  })
+  it('propagates an error in either array', () => {
+    expect(SORTBY([['a', ERR.NA], [1, 2]])).toBe(ERR.NA)
+  })
+})
+
 // ── Parser integration seam ──────────────────────────────────────────────────
 describe('installCustomFormulas seam', () => {
   it('registry covers every documented function', () => {
-    for (const name of ['TEXTJOIN', 'IFS', 'SWITCH', 'XLOOKUP', 'XMATCH', 'FILTER', 'SORT', 'UNIQUE']) {
+    for (const name of ['TEXTJOIN', 'IFS', 'SWITCH', 'XLOOKUP', 'XMATCH', 'FILTER', 'SORT', 'UNIQUE',
+      'TEXTBEFORE', 'TEXTAFTER', 'TEXTSPLIT', 'SEQUENCE', 'SORTBY']) {
       expect(typeof CUSTOM_FUNCTIONS[name]).toBe('function')
     }
   })
@@ -190,9 +257,17 @@ describe('installCustomFormulas seam', () => {
     expect(p.parse('IFS(1>2, "x", 2>1, "y")').result).toBe('y')
     expect(p.parse('TEXTJOIN("-", 1, "a", "", "b")').result).toBe('a-b')
     expect(p.parse('SWITCH(2, 1, "one", 2, "two", "def")').result).toBe('two')
+    // Newly-added custom functions resolve + evaluate LIVE through the engine.
+    expect(p.parse('TEXTBEFORE("a-b-c", "-", 2)').result).toBe('a-b')
+    expect(p.parse('TEXTAFTER("a-b-c", "-")').result).toBe('b-c')
+    expect(p.parse('TEXTSPLIT("x,y,z", ",")').result).toBe('x, y, z')
+    expect(p.parse('SEQUENCE(3)').result).toBe('1, 2, 3')
     // Built-in still works (not shadowed).
     expect(p.parse('SUM(1,2,3)').result).toBe(6)
     expect(p.parse('UPPER("hi")').result).toBe('HI')
+    // A @formulajs built-in we deliberately do NOT own (REGEXMATCH) must STILL
+    // resolve through the untouched fall-through — proving we never shadow it.
+    expect(p.parse('REGEXMATCH("abc123", "[0-9]+")').result).toBe(true)
   })
 })
 
