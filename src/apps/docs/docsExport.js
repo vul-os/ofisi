@@ -541,6 +541,16 @@ export function inlineNodes(nodes, fnOrder) {
     if (node.type === 'mathInline') {
       return xr({ text: node.attrs?.latex || '', font: 'Cambria Math', italics: true })
     }
+    // SMART CHIPS: a chip has no `text` child — its display text is the `label`
+    // attribute. Emit it as a styled run so the chip's content is PRESERVED in
+    // the .docx (silent-drop is the worst failure for this product). A file chip
+    // becomes its label text (docx has no in-app link target); person/date/place
+    // become their label. Coloured to read as a chip.
+    if (node.type === 'smartChip') {
+      const label = (node.attrs?.label || '').slice(0, 200)
+      if (!label) return xr('')
+      return xr({ text: label, color: '3730A3', bold: true })
+    }
     if (node.type !== 'text') return xr('')
     const marks = node.marks || []
     const hasMark = (type) => marks.some((m) => m.type === type)

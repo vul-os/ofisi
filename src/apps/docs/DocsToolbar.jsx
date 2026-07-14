@@ -22,6 +22,7 @@ import {
   Indent, Outdent, MoreHorizontal, Heading1, Heading2,
   Heading3, Heading4, Heading5, Heading6, Type,
   ListTree, Printer, AlertCircle, Sigma, FileText, PanelTop,
+  AtSign,
 } from 'lucide-react'
 import { api } from '../../lib/api'
 import { Menu, ToolbarButton, UrlPopover } from '../../components/ui'
@@ -354,6 +355,16 @@ function OverflowMenu({ editor, title, onInsertToc, onPageSetup, onHeaderFooter,
         }}
       >
         <Type size={13} /> Footnote
+      </MenuItem>
+      <MenuItem
+        onClick={() => {
+          // SMART CHIPS: insert a literal "@" so the @-menu opens at the caret
+          // (people / date / file / place). This is the discoverable affordance
+          // for users who don't know the @ shortcut.
+          editor.chain().focus().insertContent('@').run()
+        }}
+      >
+        <AtSign size={13} /> Smart chip
       </MenuItem>
       <MenuItem
         onClick={() => editor.chain().focus().insertContent(

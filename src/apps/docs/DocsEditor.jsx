@@ -93,6 +93,8 @@ import {
 } from './footnotes.js'
 import { MathInline, MathBlock } from './equation.js'
 import { TableOfContentsNode } from './tableOfContents.js'
+import { SmartChip, isSafeChipHref } from './smartChips.js'
+import SmartChipMenu from './components/SmartChipMenu.jsx'
 import EquationEditor from './components/EquationEditor.jsx'
 import PageSetupDialog from './components/PageSetupDialog.jsx'
 import HeaderFooterDialog from './components/HeaderFooterDialog.jsx'
@@ -306,6 +308,10 @@ export default function DocsEditor() {
   // WAVE-45: comment-anchor highlighting + click-to-jump.
   const [comments, setComments] = useState([])          // the live comment list (for decorations)
   const [activeCommentId, setActiveCommentId] = useState(null) // clicked/focused comment
+  // SMART CHIPS: the people source for the @-menu is this document's own
+  // collaborators (NOT the whole directory), so the menu can never enumerate
+  // accounts the user can't already see on this doc.
+  const [chipPeople, setChipPeople] = useState([])
   // onActivate is called from inside the ProseMirror plugin (created once); use
   // a ref so the plugin always sees the latest handler.
   const activateCommentRef = useRef(null)
@@ -485,6 +491,10 @@ export default function DocsEditor() {
       MathBlock,
       // P5: live-updating table of contents (auto-refreshes from headings).
       TableOfContentsNode,
+      // SMART CHIPS: inline atomic people/date/file/place chips inserted from an
+      // @-menu (see smartChips.js + SmartChipMenu.jsx). Data-only attributes;
+      // labels render as inert text (no HTML injection). CRDT-safe like images.
+      SmartChip,
     ],
     // With collaboration ON the document comes from the Y.Doc (the sync plugin
     // owns the content), so passing `content` here would fight the seed and could
@@ -869,6 +879,35 @@ export default function DocsEditor() {
     setActiveCommentId(commentId)
     setShowComments(true)
   }
+
+  // ── SMART CHIPS: load the document's collaborators for the @person source ──
+  // Fail-soft: a standalone/offline server yields an empty people list (the menu
+  // still offers date/file/place). Never blocks the editor.
+  useEffect(() => {
+    if (!id) return
+    api.listFileCollaborators(id)
+      .then((res) => {
+        const raw = Array.isArray(res) ? res : (Array.isArray(res?.collaborators) ? res.collaborators : [])
+        const list = raw
+          .map((c) => ({ id: c.account_id || c.accountId || c.id, name: c.display_name || c.account_id || c.accountId || c.id }))
+          .filter((p) => p.id)
+        setChipPeople(list)
+      })
+      .catch(() => setChipPeople([]))
+  }, [id])
+
+  // File-chip navigation. A file chip carries an INTERNAL, allow-listed route in
+  // data-chip-href (docs/…, sheets/…, slides/…, pdf/…). Delegated click: validate
+  // the href against the same allow-list (defence-in-depth — parse already
+  // dropped anything else) before routing. A chip can never navigate off-app.
+  const handleCanvasClick = useCallback((e) => {
+    const el = e.target?.closest?.('[data-smart-chip][data-chip-href]')
+    if (!el) return
+    const href = el.getAttribute('data-chip-href') || ''
+    if (!isSafeChipHref(href)) return
+    e.preventDefault()
+    navigate(`/${href}`)
+  }, [navigate])
 
   // ── OFFICE-25: Live cursors ───────────────────────────────────────────────
   // Derive a stable local identity from sessionStorage (mirrors CRDT peerId approach).
@@ -1507,8 +1546,10 @@ export default function DocsEditor() {
                 <span className="hf-right">{firstPageBands.header.right}</span>
               </div>
             )}
-            <div className="tiptap-cursor-host relative animate-fade-in">
+            <div className="tiptap-cursor-host relative animate-fade-in" onClick={handleCanvasClick}>
               <EditorContent editor={editor} className="tiptap" />
+              {/* SMART CHIPS @-menu — floats at the caret when an @query is typed. */}
+              <SmartChipMenu editor={editor} people={chipPeople} files={files} />
               <DocsCursorLayer editor={editor} remoteCursors={mergedRemoteCursors} />
               {/* P1: rendered page-break separators. Positioned by measured
                   y-offsets; purely visual, never part of the document. */}
