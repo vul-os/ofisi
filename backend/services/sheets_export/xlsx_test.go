@@ -34,7 +34,7 @@ func TestRoundTrip_Values(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := sheets_export.ExportXLSX(input, &buf); err != nil {
+	if _, err := sheets_export.ExportXLSX(input, &buf); err != nil {
 		t.Fatalf("ExportXLSX: %v", err)
 	}
 
@@ -70,7 +70,7 @@ func TestRoundTrip_SheetNames(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := sheets_export.ExportXLSX(input, &buf); err != nil {
+	if _, err := sheets_export.ExportXLSX(input, &buf); err != nil {
 		t.Fatalf("ExportXLSX: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestRoundTrip_Formulas(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := sheets_export.ExportXLSX(input, &buf); err != nil {
+	if _, err := sheets_export.ExportXLSX(input, &buf); err != nil {
 		t.Fatalf("ExportXLSX: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestRoundTrip_Empty(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := sheets_export.ExportXLSX(input, &buf); err != nil {
+	if _, err := sheets_export.ExportXLSX(input, &buf); err != nil {
 		t.Fatalf("ExportXLSX: %v", err)
 	}
 
@@ -186,7 +186,7 @@ func TestExport_Formatting(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := sheets_export.ExportXLSX(input, &buf); err != nil {
+	if _, err := sheets_export.ExportXLSX(input, &buf); err != nil {
 		t.Fatalf("ExportXLSX with formatting: %v", err)
 	}
 	if buf.Len() == 0 {

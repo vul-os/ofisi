@@ -12,7 +12,7 @@ import (
 
 func openPPTX(t *testing.T, deck Deck) map[string]string {
 	t.Helper()
-	data, err := GeneratePPTX(deck)
+	data, _, err := GeneratePPTX(deck)
 	if err != nil {
 		t.Fatalf("GeneratePPTX: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestGeneratePPTXEscapesUserContent(t *testing.T) {
 }
 
 func TestGeneratePPTXRejectsEmptyDeck(t *testing.T) {
-	if _, err := GeneratePPTX(Deck{Title: "empty"}); err == nil {
+	if _, _, err := GeneratePPTX(Deck{Title: "empty"}); err == nil {
 		t.Fatal("GeneratePPTX(deck with no slides) = nil error, want an error")
 	}
 }

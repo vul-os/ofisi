@@ -97,10 +97,14 @@ func (h *SheetsHandler) Export(c *gin.Context) {
 	switch format {
 	case "xlsx":
 		var buf bytes.Buffer
-		if err := sheets_export.ExportXLSX(jsonData, &buf); err != nil {
+		rep, err := sheets_export.ExportXLSX(jsonData, &buf)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "export xlsx: " + err.Error()})
 			return
 		}
+		// Charts now ride as real chart parts; anything that could not (an unknown
+		// type, a live pivot) is reported rather than dropped in silence.
+		setExportWarnings(c, rep.Warnings)
 		safeName := sanitizeFilename(existing.Name)
 		c.Header("Content-Disposition", `attachment; filename="`+safeName+`.xlsx"`)
 		c.Data(http.StatusOK,

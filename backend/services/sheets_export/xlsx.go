@@ -45,6 +45,15 @@ type Sheet struct {
 		Rowlen    map[string]float64 `json:"rowlen"`
 		Columnlen map[string]float64 `json:"columnlen"`
 	} `json:"config"`
+
+	// Charts the content model persists alongside the cells (see charts.js).
+	// These used to be absent from this struct entirely, which is exactly why the
+	// server export silently dropped every one of them — see charts.go.
+	Charts []Chart `json:"charts,omitempty"`
+	// Pivots are LIVE pivot descriptors. Excel has no equivalent, so they are not
+	// exported — but they are counted here so the caller can be TOLD (pivotWarning)
+	// instead of quietly receiving a workbook without them.
+	Pivots []json.RawMessage `json:"pivots,omitempty"`
 }
 
 // Workbook is the top-level structure stored in the file's Content field.
@@ -129,18 +138,35 @@ func decodeCell(raw json.RawMessage) (decodedCell, error) {
 
 // ─── Export (Fortune Sheet → XLSX) ──────────────────────────────────────────
 
-// ExportXLSX converts a Fortune Sheet JSON workbook ([]Sheet) into an XLSX
-// file written to w.
-func ExportXLSX(jsonData []byte, w io.Writer) error {
+// ExportXLSX converts a Fortune Sheet JSON workbook ([]Sheet) into an XLSX file
+// written to w, INCLUDING every chart as a real, cell-linked OOXML chart part.
+//
+// It returns a *Report describing what the file actually carries. The report is
+// not optional decoration: a caller that receives warnings MUST surface them (the
+// HTTP handlers put them on the response), because an export that quietly loses a
+// chart is the bug this signature exists to prevent. The Report is non-nil even
+// on error paths that still produced a file.
+func ExportXLSX(jsonData []byte, w io.Writer) (*Report, error) {
+	rep := &Report{}
 	var wb Workbook
 	if err := json.Unmarshal(jsonData, &wb); err != nil {
-		return fmt.Errorf("parse workbook: %w", err)
+		return rep, fmt.Errorf("parse workbook: %w", err)
 	}
 
 	f := excelize.NewFile()
 	defer f.Close()
 
 	createdSheets := map[string]bool{}
+	// Charts are anchored on the sheet they belong to; the values that are OURS
+	// (histogram bins, header-less series labels) accumulate into one hidden data
+	// sheet, so its column cursor is shared across every sheet.
+	aux := &auxSheet{f: f}
+	type pendingCharts struct {
+		sheetName string
+		sheet     Sheet
+	}
+	var pending []pendingCharts
+	var allCharts []Chart
 
 	for sheetIdx, sheet := range wb {
 		sheetName := sheet.Name
@@ -153,17 +179,22 @@ func ExportXLSX(jsonData []byte, w io.Writer) error {
 			// excelize always starts with "Sheet1" — rename it.
 			idx, _ = f.GetSheetIndex("Sheet1")
 			if err := f.SetSheetName("Sheet1", sheetName); err != nil {
-				return fmt.Errorf("rename sheet: %w", err)
+				return rep, fmt.Errorf("rename sheet: %w", err)
 			}
 		} else {
 			var err error
 			idx, err = f.NewSheet(sheetName)
 			if err != nil {
-				return fmt.Errorf("new sheet %s: %w", sheetName, err)
+				return rep, fmt.Errorf("new sheet %s: %w", sheetName, err)
 			}
 		}
 		createdSheets[sheetName] = true
 		_ = idx
+
+		if len(sheet.Charts) > 0 {
+			pending = append(pending, pendingCharts{sheetName: sheetName, sheet: sheet})
+			allCharts = append(allCharts, sheet.Charts...)
+		}
 
 		// Write cells.
 		styleCache := map[string]int{}
@@ -276,10 +307,25 @@ func ExportXLSX(jsonData []byte, w io.Writer) error {
 		}
 	}
 
-	if _, err := f.WriteTo(w); err != nil {
-		return fmt.Errorf("write xlsx: %w", err)
+	// Charts LAST: every worksheet a chart's series can reference now exists, and
+	// the hidden bookkeeping sheets land after the user's tabs rather than between
+	// them.
+	for _, p := range pending {
+		if err := addCharts(f, p.sheetName, p.sheet, indexCells(p.sheet), rep, aux); err != nil {
+			return rep, fmt.Errorf("write charts for %s: %w", p.sheetName, err)
+		}
 	}
-	return nil
+	// The definition sheet is written for EVERY chart — embedded or skipped — so a
+	// re-import into Vulos restores the workbook exactly either way.
+	if err := writeChartMetaSheet(f, allCharts); err != nil {
+		return rep, fmt.Errorf("write chart definitions: %w", err)
+	}
+	pivotWarning(wb, rep)
+
+	if _, err := f.WriteTo(w); err != nil {
+		return rep, fmt.Errorf("write xlsx: %w", err)
+	}
+	return rep, nil
 }
 
 // ─── Import (XLSX → Fortune Sheet) ──────────────────────────────────────────
@@ -295,6 +341,12 @@ func ImportXLSX(r io.Reader) ([]byte, error) {
 	var wb Workbook
 
 	for _, sheetName := range f.GetSheetList() {
+		// Our own bookkeeping sheets are not user data: the definitions sheet comes
+		// back as CHARTS (below) and the histogram bins are re-derived on export.
+		// Importing them as grids would leak our plumbing into the user's workbook.
+		if sheetName == chartMetaSheet || sheetName == chartDataSheet {
+			continue
+		}
 		rows, err := f.GetRows(sheetName)
 		if err != nil {
 			continue
@@ -383,6 +435,12 @@ func ImportXLSX(r io.Reader) ([]byte, error) {
 
 	if wb == nil {
 		wb = Workbook{{Name: "Sheet1", CellData: []CellData{}}}
+	}
+
+	// Close the round trip: charts we exported come back as live descriptors on the
+	// first sheet (where the content model keeps them), not as a mystery grid.
+	if charts := readChartMetaSheet(f); len(charts) > 0 {
+		wb[0].Charts = charts
 	}
 
 	out, err := json.Marshal(wb)

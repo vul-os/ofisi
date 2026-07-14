@@ -171,6 +171,10 @@ func main() {
 	corsCfg := cors.Config{
 		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders: []string{"Origin", "Content-Type", "Authorization", "X-Registration-Token", "X-Account-ID"},
+		// An export that could not carry everything says so in these headers (see
+		// backend/handlers/export_warnings.go). They must be EXPOSED or a browser
+		// caller cannot read them — and a warning nobody can read is a silent loss.
+		ExposeHeaders: []string{"Content-Disposition", "X-Export-Fidelity", "X-Export-Warnings"},
 	}
 	if raw := strings.TrimSpace(os.Getenv("VULOS_OFFICE_CORS_ORIGINS")); raw != "" {
 		var origins []string

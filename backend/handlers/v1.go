@@ -390,21 +390,25 @@ func (h *V1Handler) exportDocument(c *gin.Context, f *models.File, format string
 				{Type: "paragraph", Content: []docs_export.Node{{Type: "text", Text: string(raw)}}},
 			}}
 		}
-		paras := docs_export.ExtractParagraphs(doc)
+		// BLOCKS, not paragraphs: the flat list dropped every image and shredded
+		// every table (docs_export/blocks.go).
+		blocks, rep := docs_export.ExtractBlocks(doc)
 		switch format {
 		case "pdf":
-			data, err := docs_export.GeneratePDF(f.Name, paras)
+			data, rep, err := docs_export.GeneratePDFReport(f.Name, blocks, rep)
 			if err != nil {
 				v1err(c, http.StatusInternalServerError, "pdf generation failed: "+err.Error())
 				return
 			}
+			setExportWarnings(c, rep.Warnings)
 			h.sendBinary(c, safe+".pdf", "application/pdf", data)
 		case "docx":
-			data, err := docs_export.GenerateDOCX(f.Name, paras)
+			data, err := docs_export.GenerateDOCX(f.Name, blocks)
 			if err != nil {
 				v1err(c, http.StatusInternalServerError, "docx generation failed: "+err.Error())
 				return
 			}
+			setExportWarnings(c, rep.Warnings)
 			h.sendBinary(c, safe+".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", data)
 		default:
 			v1err(c, http.StatusBadRequest, "unsupported format for doc; use pdf or docx")
@@ -417,10 +421,12 @@ func (h *V1Handler) exportDocument(c *gin.Context, f *models.File, format string
 		}
 		raw, _ := json.Marshal(f.Content)
 		var buf bytes.Buffer
-		if err := sheets_export.ExportXLSX(raw, &buf); err != nil {
+		rep, err := sheets_export.ExportXLSX(raw, &buf)
+		if err != nil {
 			v1err(c, http.StatusInternalServerError, "xlsx export failed: "+err.Error())
 			return
 		}
+		setExportWarnings(c, rep.Warnings)
 		h.sendBinary(c, safe+".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
 
 	case models.FileTypeSlide:
@@ -441,19 +447,21 @@ func (h *V1Handler) exportDocument(c *gin.Context, f *models.File, format string
 			deck.Title = f.Name
 		}
 		if format == "pptx" {
-			data, err := slides_export.GeneratePPTX(slides_export.Deck{Title: deck.Title, Slides: deck.Slides})
+			data, rep, err := slides_export.GeneratePPTX(slides_export.Deck{Title: deck.Title, Slides: deck.Slides})
 			if err != nil {
 				v1err(c, http.StatusInternalServerError, "pptx generation failed: "+err.Error())
 				return
 			}
+			setExportWarnings(c, rep.Warnings)
 			h.sendBinary(c, safe+".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", data)
 			return
 		}
-		data, err := slides_export.RenderPDF(slides_export.Deck{Title: deck.Title, Slides: deck.Slides})
+		data, rep, err := slides_export.RenderPDF(slides_export.Deck{Title: deck.Title, Slides: deck.Slides})
 		if err != nil {
 			v1err(c, http.StatusInternalServerError, "pdf generation failed: "+err.Error())
 			return
 		}
+		setExportWarnings(c, rep.Warnings)
 		h.sendBinary(c, safe+".pdf", "application/pdf", data)
 
 	default:

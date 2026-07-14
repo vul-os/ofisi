@@ -58,7 +58,7 @@ func TestRenderPDF(t *testing.T) {
 		},
 	}
 
-	data, err := RenderPDF(deck)
+	data, _, err := RenderPDF(deck)
 	if err != nil {
 		t.Fatalf("RenderPDF returned error: %v", err)
 	}

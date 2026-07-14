@@ -77,15 +77,33 @@ func (h *SlidesExportHandler) Export(c *gin.Context) {
 	case "pdf":
 		h.exportPDF(c, rawDeck.Title, rawDeck.Slides)
 	case "pptx":
-		// PPTX is handled client-side via pptxgenjs.
-		// Return 501 so the frontend falls back to its JS export path.
-		c.JSON(http.StatusNotImplemented, gin.H{
-			"error":   "PPTX server export not implemented — use client-side export",
-			"message": "The PPTX export is handled in your browser via pptxgenjs.",
-		})
+		h.exportPPTX(c, rawDeck.Title, rawDeck.Slides)
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported format — use pdf or pptx"})
 	}
+}
+
+// exportPPTX renders the deck server-side, INCLUDING its positioned objects.
+//
+// This used to answer 501 ("use the browser") — which was honest about the server
+// not doing the work, but left /v1 callers with no PPTX at all. The server now
+// carries the objects (see slides_export/objects.go).
+func (h *SlidesExportHandler) exportPPTX(c *gin.Context, title string, slides []slides_export.Slide) {
+	data, rep, err := slides_export.GeneratePPTX(slides_export.Deck{Title: title, Slides: slides})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "PPTX generation failed: " + err.Error()})
+		return
+	}
+	setExportWarnings(c, rep.Warnings)
+
+	safeName := slidesSanitiseFilename(title)
+	if safeName == "" {
+		safeName = "presentation"
+	}
+	c.Header("Content-Disposition", `attachment; filename="`+safeName+`.pptx"`)
+	c.Header("Cache-Control", "no-store")
+	c.Data(http.StatusOK,
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation", data)
 }
 
 func (h *SlidesExportHandler) exportPDF(c *gin.Context, title string, slides []slides_export.Slide) {
@@ -94,11 +112,14 @@ func (h *SlidesExportHandler) exportPDF(c *gin.Context, title string, slides []s
 		Slides: slides,
 	}
 
-	pdfBytes, err := slides_export.RenderPDF(deck)
+	pdfBytes, rep, err := slides_export.RenderPDF(deck)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "PDF generation failed: " + err.Error()})
 		return
 	}
+	// The slide PDF is a text-flow renderer: it cannot place images or shapes, and
+	// the caller is told so rather than handed a quietly emptier deck.
+	setExportWarnings(c, rep.Warnings)
 
 	// Sanitise filename — strip path separators.
 	safeName := slidesSanitiseFilename(title)

@@ -67,24 +67,28 @@ func (h *DocsExportHandler) Export(c *gin.Context) {
 		}
 	}
 
-	paragraphs := docs_export.ExtractParagraphs(doc)
+	// BLOCKS, not paragraphs: a flat paragraph list is what used to shred every
+	// table into loose paragraphs and drop every image (see docs_export/blocks.go).
+	blocks, rep := docs_export.ExtractBlocks(doc)
 
 	switch format {
 	case "pdf":
-		data, err := docs_export.GeneratePDF(title, paragraphs)
+		data, rep, err := docs_export.GeneratePDFReport(title, blocks, rep)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("pdf generation failed: %v", err)})
 			return
 		}
+		setExportWarnings(c, rep.Warnings)
 		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pdf"`, docsExportSanitizeFilename(title)))
 		c.Data(http.StatusOK, "application/pdf", data)
 
 	case "docx":
-		data, err := docs_export.GenerateDOCX(title, paragraphs)
+		data, err := docs_export.GenerateDOCX(title, blocks)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("docx generation failed: %v", err)})
 			return
 		}
+		setExportWarnings(c, rep.Warnings)
 		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.docx"`, docsExportSanitizeFilename(title)))
 		c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", data)
 

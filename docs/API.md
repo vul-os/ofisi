@@ -227,11 +227,11 @@ Fetch the document body, or export it.
 - **`?format=<fmt>`** → the exported binary as an `attachment` download. The
   available formats depend on the document type:
 
-  | Type    | Formats        | Notes                                   |
-  | ------- | -------------- | --------------------------------------- |
-  | `doc`   | `pdf`, `docx`  |                                         |
-  | `sheet` | `xlsx`         |                                         |
-  | `slide` | `pdf`, `pptx`  | Rendered server-side from the deck model. |
+  | Type    | Formats        | Carries                                                         |
+  | ------- | -------------- | --------------------------------------------------------------- |
+  | `doc`   | `pdf`, `docx`  | Text, headings, lists, **tables**, **embedded images**.          |
+  | `sheet` | `xlsx`         | Cells, styles, merges, formulas, **real charts** (cell-linked).  |
+  | `slide` | `pdf`, `pptx`  | `pptx`: **positioned text boxes, images and shapes**. `pdf`: text only. |
 
 ### `POST /v1/documents/:id/export`
 
@@ -252,10 +252,51 @@ Content-Disposition: attachment; filename="Q3 Plan.docx"
 
 Unsupported format for the document type → `400 {"error":"unsupported format…"}`.
 
-A `slide` deck exports to `pptx` server-side, so the endpoint needs no browser in
-the loop. The editor's own PPTX download (pptxgenjs) additionally carries the
-positioned objects it holds client-side; the server renders what the stored deck
-model holds — per slide a background, a title and the body copy.
+### Export fidelity — an export never loses your data in silence
+
+Every export response carries its own fidelity, because a binary attachment has no
+body to put a warning in:
+
+| Header              | Value                                                            |
+| ------------------- | ---------------------------------------------------------------- |
+| `X-Export-Fidelity` | `full` — everything in the document is in the file.               |
+|                     | `degraded` — something could not be carried. See the warnings.    |
+| `X-Export-Warnings` | A JSON array of plain-English strings. Present only when degraded. |
+
+```
+200 OK
+Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+Content-Disposition: attachment; filename="Q3.xlsx"
+X-Export-Fidelity: degraded
+X-Export-Warnings: ["Chart \"Funnel\" was NOT embedded in the .xlsx (no Excel equivalent); its definition is preserved in the hidden \"Vulos Charts\" sheet, so re-importing this file into Vulos restores it."]
+<binary>
+```
+
+A client that cares about fidelity should check `X-Export-Fidelity` and surface the
+warnings; a client that does not can ignore both headers. **`full` is a promise** —
+if a path cannot carry something, it says so rather than returning a quietly
+incomplete file.
+
+What is reported today:
+
+- **`sheet` → `xlsx`.** Charts are embedded as real, cell-linked OOXML charts
+  (column/bar/stacked/100%, line, area, combo incl. a secondary axis, pie, donut,
+  scatter, bubble, histogram). A chart type with no Excel equivalent, or one whose
+  range cannot be resolved, is reported — and its definition still rides in the
+  hidden `Vulos Charts` sheet, so re-importing the file into Vulos restores it
+  exactly. A **histogram** is embedded with a caveat (its bins are computed at export
+  time and written to cells; Excel will not re-bin them). **Live pivot tables** are
+  not exported and are reported.
+- **`doc` → `docx` / `pdf`.** Tables and images are embedded. A **remote** (`http(s)`)
+  image is **not fetched** — the server will not make a request a document tells it
+  to — and is reported; only images embedded in the document (`data:` PNG/JPEG/GIF/WebP)
+  are carried. Equations export as their LaTeX source. In the PDF, an image inside a
+  table cell is shown as its alt text.
+- **`slide` → `pptx`.** Text boxes, images and shapes export at their real position,
+  size and rotation. Remote images are not fetched (reported); speaker notes are not
+  included (reported).
+- **`slide` → `pdf`.** A text-flow renderer: images and shapes are not drawn, and
+  their loss is reported. Export `pptx` to keep them.
 
 ---
 
