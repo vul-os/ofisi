@@ -26,6 +26,7 @@ import { api } from '../../lib/api'
 import SlidePreview from './SlidePreview'
 import { exportSlidesToPdf, exportSlidesToPptx } from './slidesExport'
 import { slideImportLossItems } from './importNotes.js'
+import { buildNotesPrintHtml } from './notesPrint.js'
 import SlideCanvas from './SlideCanvas.jsx'
 import ObjectTextEditor from './ObjectTextEditor.jsx'
 import ArrangeToolbar from './ArrangeToolbar.jsx'
@@ -799,21 +800,10 @@ export default function SlidesEditor() {
   const handlePrintNotes = () => {
     const printWindow = window.open('', '_blank', 'width=800,height=600')
     if (!printWindow) return
-    const slidesHtml = slidesData.slides.map((slide, i) => `
-      <div style="page-break-after:always;padding:20px;border-bottom:2px solid #eee">
-        <h2 style="font-size:18px">${i + 1}. ${slide.title || 'Untitled'}</h2>
-        <div style="background:#f5f5f5;padding:12px;border-radius:4px;margin:8px 0;font-size:12px">
-          ${sanitize(slide.content)}
-        </div>
-        <div style="margin-top:12px">
-          <strong style="font-size:11px;text-transform:uppercase;color:#666">Notes</strong>
-          <p style="font-size:13px;white-space:pre-wrap">${slide.notes || '(no notes)'}</p>
-        </div>
-      </div>
-    `).join('')
-    printWindow.document.write(`<!DOCTYPE html><html><head><title>${title} — Notes</title>
-      <style>body{font-family:Georgia,serif;margin:0;padding:0}</style>
-    </head><body>${slidesHtml}</body></html>`)
+    // SECURITY: title/notes are untrusted plain-text (a note can come straight
+    // from an imported .pptx) written into a new same-origin window — escaped in
+    // buildNotesPrintHtml (slide.content is HTML-sanitised there via `sanitize`).
+    printWindow.document.write(buildNotesPrintHtml(slidesData, title, sanitize))
     printWindow.document.close()
     printWindow.print()
   }
