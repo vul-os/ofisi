@@ -19,7 +19,44 @@ import { stripExternalCssImports } from './vite.strip-external-css-imports.js'
 
 const dir = import.meta.dirname
 
+// Vite 8's rolldown bundler requires manualChunks in function form (the
+// object/record form is a legacy rollup-only shape). Map each vendored
+// package to its chunk by node_modules path.
+const chunkGroups = {
+  'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+  'vendor-tiptap': [
+    '@tiptap/react', '@tiptap/starter-kit',
+    '@tiptap/extension-image', '@tiptap/extension-link',
+    '@tiptap/extension-table', '@tiptap/extension-table-row',
+    '@tiptap/extension-table-cell', '@tiptap/extension-table-header',
+    '@tiptap/extension-text-align', '@tiptap/extension-text-style',
+    '@tiptap/extension-color', '@tiptap/extension-highlight',
+    '@tiptap/extension-underline', '@tiptap/extension-task-list',
+    '@tiptap/extension-task-item', '@tiptap/extension-character-count',
+    '@tiptap/extension-placeholder', '@tiptap/extension-typography',
+  ],
+  'vendor-sheets': ['@fortune-sheet/react'],
+  'vendor-slides': ['reveal.js', 'pptxgenjs'],
+  'vendor-export': ['docx', 'xlsx', 'file-saver', 'turndown', 'mammoth'],
+  'vendor-pdf': ['pdfjs-dist', 'pdf-lib', 'signature_pad'],
+}
+
+function manualChunks(id) {
+  if (!id.includes('/node_modules/')) return
+  for (const [chunk, pkgs] of Object.entries(chunkGroups)) {
+    for (const pkg of pkgs) {
+      if (id.includes(`/node_modules/${pkg}/`)) return chunk
+    }
+  }
+}
+
 export default defineConfig({
+  // Same one-React pin as vite.config.js: @vulos/relay-client is a symlinked
+  // file: dep carrying its own react, which Vite 8's rolldown resolver would
+  // otherwise bundle as a second copy (silent build, broken hooks at runtime).
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+  },
   plugins: [react(), stripExternalCssImports()],
   root: dir,
   define: {
@@ -32,24 +69,7 @@ export default defineConfig({
     rollupOptions: {
       input: resolve(dir, 'index.office.html'),
       output: {
-        manualChunks: {
-          'vendor-react':  ['react', 'react-dom', 'react-router-dom'],
-          'vendor-tiptap': [
-            '@tiptap/react', '@tiptap/starter-kit',
-            '@tiptap/extension-image', '@tiptap/extension-link',
-            '@tiptap/extension-table', '@tiptap/extension-table-row',
-            '@tiptap/extension-table-cell', '@tiptap/extension-table-header',
-            '@tiptap/extension-text-align', '@tiptap/extension-text-style',
-            '@tiptap/extension-color', '@tiptap/extension-highlight',
-            '@tiptap/extension-underline', '@tiptap/extension-task-list',
-            '@tiptap/extension-task-item', '@tiptap/extension-character-count',
-            '@tiptap/extension-placeholder', '@tiptap/extension-typography',
-          ],
-          'vendor-sheets': ['@fortune-sheet/react'],
-          'vendor-slides': ['reveal.js', 'pptxgenjs'],
-          'vendor-export': ['docx', 'xlsx', 'file-saver', 'turndown', 'mammoth'],
-          'vendor-pdf':    ['pdfjs-dist', 'pdf-lib', 'signature_pad'],
-        },
+        manualChunks,
       },
     },
   },

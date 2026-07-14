@@ -13,6 +13,37 @@ const keepGitkeep = {
   },
 }
 
+// Vite 8's rolldown bundler requires manualChunks in function form (the
+// object/record form is a legacy rollup-only shape). Map each vendored
+// package to its chunk by node_modules path.
+const chunkGroups = {
+  'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+  'vendor-tiptap': [
+    '@tiptap/react', '@tiptap/starter-kit',
+    '@tiptap/extension-image', '@tiptap/extension-link',
+    '@tiptap/extension-table', '@tiptap/extension-table-row',
+    '@tiptap/extension-table-cell', '@tiptap/extension-table-header',
+    '@tiptap/extension-text-align', '@tiptap/extension-text-style',
+    '@tiptap/extension-color', '@tiptap/extension-highlight',
+    '@tiptap/extension-underline', '@tiptap/extension-task-list',
+    '@tiptap/extension-task-item', '@tiptap/extension-character-count',
+    '@tiptap/extension-placeholder', '@tiptap/extension-typography',
+  ],
+  'vendor-sheets': ['@fortune-sheet/react'],
+  'vendor-slides': ['reveal.js', 'pptxgenjs'],
+  'vendor-export': ['docx', 'xlsx', 'file-saver', 'turndown', 'mammoth'],
+  'vendor-pdf': ['pdfjs-dist', 'pdf-lib', 'signature_pad'],
+}
+
+function manualChunks(id) {
+  if (!id.includes('/node_modules/')) return
+  for (const [chunk, pkgs] of Object.entries(chunkGroups)) {
+    for (const pkg of pkgs) {
+      if (id.includes(`/node_modules/${pkg}/`)) return chunk
+    }
+  }
+}
+
 // Default config: monolithic vulos-office build (dist/).
 // For the subdomain build use vite.config.office.js.
 // (Talk/Spaces is now the standalone vulos-talk product; Calendar/Contacts
@@ -25,6 +56,13 @@ export default defineConfig({
     setupFiles: ['./src/test-setup.js'],
     include: ['src/**/*.test.{js,jsx}', 'src/__tests__/**/*.test.{js,jsx}'],
   },
+  // @vulos/relay-client is a symlinked file: dep that ships its own copy of
+  // react in node_modules. Vite 6 (rollup) resolved its bare `react` imports
+  // from this project root; Vite 8 (rolldown) resolves them from the dep's own
+  // location, loading a SECOND React and breaking hooks. Pin to one copy.
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+  },
   plugins: [react(), keepGitkeep, stripExternalCssImports()],
   build: {
     outDir: 'dist',
@@ -32,24 +70,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-tiptap': [
-            '@tiptap/react', '@tiptap/starter-kit',
-            '@tiptap/extension-image', '@tiptap/extension-link',
-            '@tiptap/extension-table', '@tiptap/extension-table-row',
-            '@tiptap/extension-table-cell', '@tiptap/extension-table-header',
-            '@tiptap/extension-text-align', '@tiptap/extension-text-style',
-            '@tiptap/extension-color', '@tiptap/extension-highlight',
-            '@tiptap/extension-underline', '@tiptap/extension-task-list',
-            '@tiptap/extension-task-item', '@tiptap/extension-character-count',
-            '@tiptap/extension-placeholder', '@tiptap/extension-typography',
-          ],
-          'vendor-sheets': ['@fortune-sheet/react'],
-          'vendor-slides': ['reveal.js', 'pptxgenjs'],
-          'vendor-export': ['docx', 'xlsx', 'file-saver', 'turndown', 'mammoth'],
-          'vendor-pdf': ['pdfjs-dist', 'pdf-lib', 'signature_pad'],
-        },
+        manualChunks,
       },
     },
   },
