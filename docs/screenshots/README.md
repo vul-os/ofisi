@@ -10,6 +10,7 @@ Populated with realistic demo data from `scripts/seed-demo.mjs`.
 | docs-editor.png | Documents editor — Q2 Product Update | populated |
 | sheets-editor.png | Spreadsheets editor — Revenue Tracker | populated |
 | slides-editor.png | Presentations editor — Product Overview | populated |
+| whiteboard-editor.png | Whiteboard editor — Excalidraw canvas on the P2P collab engine | populated |
 | pdf-editor.png | PDF viewer / annotator | populated |
 | settings.png | Settings — standalone account / storage / admin | populated |
 

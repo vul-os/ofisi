@@ -8,6 +8,11 @@ const (
 	FileTypeDoc   FileType = "doc"
 	FileTypeSheet FileType = "sheet"
 	FileTypeSlide FileType = "slide"
+	// FileTypeWhiteboard is an Excalidraw scene (elements + image blobs) synced,
+	// like Docs, over Office's distributed peer-to-peer collab engine. Its content
+	// is a plain JSON scene ({elements:[…], files:{…}}); the schema-agnostic
+	// docindex extractor picks up text elements for search with no special-casing.
+	FileTypeWhiteboard FileType = "whiteboard"
 )
 
 type File struct {

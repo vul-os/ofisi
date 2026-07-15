@@ -1,6 +1,6 @@
 # Vulos Office — User Guide
 
-Vulos Office is the documents product of VulOS: word-processor documents (**Docs**), spreadsheets (**Sheets**), presentations (**Slides**), and PDF viewing/annotation/**Signing**, all served from a single self-hosted Go binary with the web app built in. This guide covers everyday use — creating and opening files, editing in each surface, collaborating live with other people, working offline, importing and exporting files, and keyboard shortcuts. If you run the server yourself, see the [Admin Guide](ADMIN-GUIDE.md); for how collaboration works under the hood, see [Collaboration](COLLABORATION.md).
+Vulos Office is the documents product of VulOS: word-processor documents (**Docs**), spreadsheets (**Sheets**), presentations (**Slides**), infinite-canvas **Whiteboards** (built on Excalidraw), and PDF viewing/annotation/**Signing**, all served from a single self-hosted Go binary with the web app built in. This guide covers everyday use — creating and opening files, editing in each surface, collaborating live with other people, working offline, importing and exporting files, and keyboard shortcuts. If you run the server yourself, see the [Admin Guide](ADMIN-GUIDE.md); for how collaboration works under the hood, see [Collaboration](COLLABORATION.md).
 
 ---
 
@@ -126,6 +126,16 @@ Slides is a positioned-object canvas editor:
 - An **arrange toolbar** for z-order and alignment of objects.
 - **Presenter view** — speaker notes plus a timer in a second window while presenting.
 - **Present** runs a full-screen slideshow (transitions are hosted by Reveal.js under the hood — the content is still your positioned objects).
+
+---
+
+## 5a. Whiteboards
+
+Whiteboards are an infinite hand-drawn canvas, built on the open-source [Excalidraw](https://github.com/excalidraw/excalidraw) editor. Create one with **New → Whiteboard** (from Home, the app rail, or the file browser).
+
+- **Draw anything** — rectangles, ellipses, diamonds, arrows and lines, freehand pen, text labels, and pasted/inserted raster images, all on a pannable, zoomable canvas.
+- **Live collaboration is peer-to-peer**, exactly like Docs: share an invite link (`#vp2p=`) and co-editors connect directly over an end-to-end-encrypted room — every shape merges independently (a Yjs CRDT), and there is **no central whiteboard server**. On a plain standalone binary (no peering fabric) the board works **local-only** with autosave and shows an honest **Offline** pill rather than a fake "Live".
+- Your whiteboard **autosaves** to its own file. A **view-only** invite lets someone watch live edits without being able to change the board.
 
 ---
 

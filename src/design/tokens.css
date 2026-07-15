@@ -95,6 +95,8 @@
   --app-slides-bg: color-mix(in srgb, #e2a93f 13%, transparent);
   --app-pdf:       #e0726a;                                  /* soft red    */
   --app-pdf-bg:    color-mix(in srgb, #e0726a 13%, transparent);
+  --app-board:     #a487d8;                                  /* soft violet */
+  --app-board-bg:  color-mix(in srgb, #a487d8 13%, transparent);
 
   /* ── Semantic aliases (DEFAULT = near-black dark) ─────────────────────── */
   --bg:        var(--bg-base);        /* #0c0c0c */
@@ -262,6 +264,8 @@
   --app-slides-bg: color-mix(in srgb, #a9760f 12%, transparent);
   --app-pdf:       #bf443c;
   --app-pdf-bg:    color-mix(in srgb, #bf443c 10%, transparent);
+  --app-board:     #8360c8;
+  --app-board-bg:  color-mix(in srgb, #8360c8 12%, transparent);
 
   --elev-1: 0 1px 2px rgba(20, 20, 20, 0.06),
             0 1px 3px rgba(20, 20, 20, 0.05);

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  FileText, Table2, Presentation, FileSearch, Clock,
+  FileText, Table2, Presentation, FileSearch, PenTool, Clock,
   ArrowUpRight, FolderSearch, HardDrive, RefreshCw, Loader2, Plus,
 } from 'lucide-react'
 import { useFilesStore } from '../store/filesStore'
@@ -16,6 +16,7 @@ const typeInfo = {
   doc:   { icon: FileText,     iconCn: 'text-app-docs',   bgCn: 'bg-app-docs-bg',   route: 'docs'   },
   sheet: { icon: Table2,       iconCn: 'text-app-sheets', bgCn: 'bg-app-sheets-bg', route: 'sheets' },
   slide: { icon: Presentation, iconCn: 'text-app-slides', bgCn: 'bg-app-slides-bg', route: 'slides' },
+  whiteboard: { icon: PenTool, iconCn: 'text-app-board',  bgCn: 'bg-app-board-bg',  route: 'whiteboards' },
 }
 
 const localTypeInfo = {
@@ -42,6 +43,7 @@ const quickStarts = [
   { label: 'New Document',     shortLabel: 'Document',     icon: FileText,     type: 'doc'   },
   { label: 'New Spreadsheet',  shortLabel: 'Spreadsheet',  icon: Table2,       type: 'sheet' },
   { label: 'New Presentation', shortLabel: 'Presentation', icon: Presentation, type: 'slide' },
+  { label: 'New Whiteboard',   shortLabel: 'Whiteboard',   icon: PenTool,      type: 'whiteboard' },
 ]
 
 export default function Home() {
@@ -80,7 +82,7 @@ export default function Home() {
         {/* ── Quick-start cluster ── */}
         <section>
           <p className="mono-label mb-3.5">Start something new</p>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {quickStarts.map(({ label, shortLabel, icon: Icon, type }) => {
               const info = typeInfo[type]
               return (

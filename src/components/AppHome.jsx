@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, Search, LayoutGrid, List, MoreVertical, Clock,
-  Trash2, Pencil, ArrowUpRight, FileText, Table2, Presentation,
+  Trash2, Pencil, ArrowUpRight, FileText, Table2, Presentation, PenTool,
   HardDrive, Loader2, RefreshCw, FileSearch, Upload,
   Star, Folder, FolderPlus, RotateCcw, ChevronRight, Home, FolderInput,
   Share2, Users,
@@ -47,6 +47,16 @@ const CONFIG = {
     localExts: ['.ppt', '.pptx', '.odp'],
     extLabel: 'pptx, odp',
     importExts: '.pptx,.odp',
+    canCreate: true,
+  },
+  whiteboard: {
+    label: 'Whiteboards', singularLabel: 'Whiteboard',
+    icon: PenTool,
+    iconCn: 'text-app-board',    bgCn: 'bg-app-board-bg',
+    route: 'whiteboards', emptyMsg: 'No whiteboards yet',
+    localExts: ['.excalidraw'],
+    extLabel: 'excalidraw',
+    importExts: '.excalidraw',
     canCreate: true,
   },
   pdf: {

@@ -342,6 +342,47 @@ export function seedStaticFiles() {
     updated_at: now,
   })
 
+  // ── Whiteboard (Excalidraw scene) ──────────────────────────────────────────
+  // A small architecture sketch so the whiteboard doc-type showcases real
+  // shapes/arrows/text. Elements carry the full Excalidraw field set so the
+  // canvas renders them without a restore pass.
+  const wbEl = (o) => ({
+    angle: 0, strokeColor: '#1e1e1e', backgroundColor: 'transparent',
+    fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid', roughness: 1,
+    opacity: 100, groupIds: [], frameId: null, roundness: { type: 3 },
+    seed: Math.floor(Math.random() * 2 ** 31), versionNonce: Math.floor(Math.random() * 2 ** 31),
+    isDeleted: false, boundElements: null, updated: Date.now(), link: null, locked: false,
+    version: 1, ...o,
+  })
+  const wbText = (o) => wbEl({
+    type: 'text', fontSize: 20, fontFamily: 1, textAlign: 'center', verticalAlign: 'middle',
+    baseline: 18, containerId: null, originalText: o.text, lineHeight: 1.25, roundness: null,
+    ...o,
+  })
+  writeJSON(path.join(DEMO_DATA_DIR, 'demo-board.json'), {
+    id: 'demo-board',
+    name: 'Vulos Office — Architecture Sketch',
+    type: 'whiteboard',
+    content: {
+      type: 'excalidraw',
+      elements: [
+        wbEl({ id: 'box-client', type: 'rectangle', x: 120, y: 140, width: 220, height: 90, index: 'a0', backgroundColor: '#a5d8ff' }),
+        wbText({ id: 't-client', x: 150, y: 172, width: 160, height: 25, index: 'a1', text: 'Browser (P2P peer)', strokeColor: '#1e1e1e' }),
+        wbEl({ id: 'box-box', type: 'rectangle', x: 500, y: 140, width: 220, height: 90, index: 'a2', backgroundColor: '#b2f2bb' }),
+        wbText({ id: 't-box', x: 540, y: 172, width: 140, height: 25, index: 'a3', text: 'Vulos OS box', strokeColor: '#1e1e1e' }),
+        wbEl({ id: 'box-relay', type: 'rectangle', x: 310, y: 360, width: 220, height: 90, index: 'a4', backgroundColor: '#ffec99' }),
+        wbText({ id: 't-relay', x: 330, y: 384, width: 180, height: 42, index: 'a5', text: 'Content-blind relay\n(hard-NAT fallback)', strokeColor: '#1e1e1e', height: 42 }),
+        wbEl({ id: 'arrow-1', type: 'arrow', x: 345, y: 185, width: 150, height: 0, index: 'a6', points: [[0, 0], [150, 0]], strokeColor: '#1971c2', roundness: null, startBinding: null, endBinding: null, startArrowhead: null, endArrowhead: 'arrow' }),
+        wbText({ id: 't-e2e', x: 360, y: 150, width: 120, height: 20, index: 'a7', text: 'E2E WebRTC', fontSize: 16, strokeColor: '#1971c2', height: 20 }),
+        wbEl({ id: 'arrow-2', type: 'arrow', x: 260, y: 235, width: 120, height: 120, index: 'a8', points: [[0, 0], [120, 120]], strokeColor: '#e8590c', roundness: null, strokeStyle: 'dashed', startBinding: null, endBinding: null, startArrowhead: null, endArrowhead: 'arrow' }),
+        wbEl({ id: 'arrow-3', type: 'arrow', x: 580, y: 235, width: 120, height: 120, index: 'a9', points: [[0, 0], [-120, 120]], strokeColor: '#e8590c', roundness: null, strokeStyle: 'dashed', startBinding: null, endBinding: null, startArrowhead: null, endArrowhead: 'arrow' }),
+      ],
+      files: {},
+    },
+    created_at: twoDaysAgo,
+    updated_at: now,
+  })
+
   console.log(`  wrote static seed files → ${DEMO_DATA_DIR}`)
 }
 

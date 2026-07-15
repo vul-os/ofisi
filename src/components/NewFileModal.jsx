@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FileText, Table2, Presentation, Loader2, Check } from 'lucide-react'
+import { FileText, Table2, Presentation, PenTool, Loader2, Check } from 'lucide-react'
 import { useFilesStore } from '../store/filesStore'
 import { Button, Input, Modal, DocThumb } from './ui'
 import { templatesFor } from '../lib/templates'
@@ -37,9 +37,19 @@ const TYPES = [
     borderActive: 'border-warning',
     bgActive: 'bg-warning-bg',
   },
+  {
+    type: 'whiteboard',
+    label: 'Whiteboard',
+    desc: 'Infinite canvas for diagrams and sketches',
+    icon: PenTool,
+    iconCn: 'text-app-board',
+    bgCn: 'bg-app-board-bg',
+    borderActive: 'border-app-board',
+    bgActive: 'bg-app-board-bg',
+  },
 ]
 
-const ROUTE = { doc: 'docs', sheet: 'sheets', slide: 'slides' }
+const ROUTE = { doc: 'docs', sheet: 'sheets', slide: 'slides', whiteboard: 'whiteboards' }
 
 /**
  * NewFileModal — Modal primitive + type picker + (for Docs/Sheets) a built-in
@@ -96,7 +106,7 @@ export default function NewFileModal({ onClose, defaultType, lockType, parentId 
           {/* ── Type grid — only shown when not locked ── */}
           {!lockType && (
             <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {TYPES.map(({ type, label, borderActive, bgActive }) => {
                   const active = selectedType === type
                   return (

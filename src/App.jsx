@@ -9,6 +9,7 @@ import AppHome from './components/AppHome'
 import DocsEditor from './apps/docs/DocsEditor'
 import SheetsEditor from './apps/sheets/SheetsEditor'
 import SlidesEditor from './apps/slides/SlidesEditor'
+import WhiteboardEditor from './apps/whiteboard/WhiteboardEditor'
 import PDFEditor from './apps/pdf/PDFEditor'
 import SigningSetup from './apps/pdf/SigningSetup'
 import Settings from './components/Settings'
@@ -91,9 +92,11 @@ export default function App() {
         <Route path="/docs" element={<AppHome type="doc" />} />
         <Route path="/sheets" element={<AppHome type="sheet" />} />
         <Route path="/slides" element={<AppHome type="slide" />} />
+        <Route path="/whiteboards" element={<AppHome type="whiteboard" />} />
         <Route path="/docs/:id" element={<DocsEditor />} />
         <Route path="/sheets/:id" element={<SheetsEditor />} />
         <Route path="/slides/:id" element={<SlidesEditor />} />
+        <Route path="/whiteboards/:id" element={<WhiteboardEditor />} />
         <Route path="/pdf" element={<AppHome type="pdf" />} />
         <Route path="/pdf-editor" element={<PDFEditor />} />
         <Route path="/signing-setup" element={<SigningSetup />} />

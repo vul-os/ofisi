@@ -8,7 +8,7 @@ Vulos Office is a collaborative document editing + e-signing service. It exposes
   co-editing) over three complementary transports — see the note below
 - E-signing workflow (envelope → sign → sealed PDF)
 
-> **Scope:** Office is documents-only (Docs, Sheets, Slides, PDF/Signing). Calendar
+> **Scope:** Office is documents-only (Docs, Sheets, Slides, Whiteboards, PDF/Signing). Calendar
 > and Contacts come from the bring-your-own-mailbox PIM connector (lilmail
 > CalDAV/CardDAV + lilmail `/v1/calendar` + `/v1/contacts`), surfaced by the OS as
 > standalone widgets. Chat and video are third-party (Matrix/Element; Element Call /

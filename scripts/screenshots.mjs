@@ -72,6 +72,15 @@ const ROUTES = [
     waitFor: '.reveal, [data-testid="slides-editor"]',
   },
   {
+    name: 'whiteboard-editor',
+    path: '/whiteboards/demo-board',
+    description: 'Whiteboard editor — Excalidraw canvas on the P2P collab engine',
+    // The real Excalidraw canvas mounts its own .excalidraw container; give the
+    // scene a moment to paint the seeded shapes before the shot.
+    waitFor: '.excalidraw, [data-testid="whiteboard-editor"]',
+    settleMs: 1500,
+  },
+  {
     name: 'pdf-editor',
     path: '/pdf/demo',
     description: 'PDF viewer / annotator',
@@ -182,8 +191,9 @@ async function capture(page, route) {
       }
     }
 
-    // Extra pause for CSS transitions / async renders
-    await page.waitForTimeout(800)
+    // Extra pause for CSS transitions / async renders (routes with a canvas that
+    // paints asynchronously — e.g. the whiteboard — can ask for a longer settle).
+    await page.waitForTimeout(route.settleMs || 800)
 
     const outPath = path.join(OUT, `${route.name}.png`)
     await page.screenshot({ path: outPath, fullPage: false })

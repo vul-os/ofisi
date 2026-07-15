@@ -19,6 +19,7 @@ const TINT = {
   sheet: 'var(--app-sheets)',
   slide: 'var(--app-slides)',
   pdf:   'var(--app-pdf)',
+  whiteboard: 'var(--app-board)',
 }
 
 function DocGlyph({ tint }) {
@@ -83,7 +84,21 @@ function PdfGlyph({ tint }) {
   )
 }
 
-const GLYPH = { doc: DocGlyph, sheet: SheetGlyph, slide: SlideGlyph, pdf: PdfGlyph }
+function WhiteboardGlyph({ tint }) {
+  // An infinite canvas: a few loose shapes + a connector, sketch-style.
+  return (
+    <svg viewBox="0 0 96 72" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+      <rect x="16" y="10" width="64" height="52" rx="4" fill="var(--bg-elevated)" stroke="var(--line-strong)" />
+      <rect x="26" y="20" width="20" height="14" rx="2" fill={tint} opacity="0.28" stroke={tint} strokeWidth="1.2" />
+      <circle cx="62" cy="27" r="8" fill="none" stroke={tint} strokeWidth="1.4" opacity="0.85" />
+      <path d="M46 27 h8" stroke="var(--ink-ghost)" strokeWidth="1.4" />
+      <path d="M30 44 q10 8 24 2 t14 -2" fill="none" stroke={tint} strokeWidth="1.4" opacity="0.7" />
+      <rect x="30" y="24" width="12" height="2.2" rx="1.1" fill={tint} opacity="0.9" />
+    </svg>
+  )
+}
+
+const GLYPH = { doc: DocGlyph, sheet: SheetGlyph, slide: SlideGlyph, pdf: PdfGlyph, whiteboard: WhiteboardGlyph }
 
 export default function DocThumb({ type = 'doc', className = '' }) {
   const Glyph = GLYPH[type] || DocGlyph

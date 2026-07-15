@@ -6,7 +6,7 @@
 
 **A sovereign, self-hostable office suite — your documents, your server, your rules.**
 
-Docs · Sheets · Slides · PDF Signing
+Docs · Sheets · Slides · PDF Signing · Whiteboards
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.2.1-informational)](CHANGELOG.md)
@@ -26,7 +26,7 @@ Docs · Sheets · Slides · PDF Signing
 
 ## What is this?
 
-Vulos Office is the **documents** product of VulOS, shipped as a **single Go binary** with the entire frontend embedded — no cloud account, no telemetry, no lock-in. It brings document editing, spreadsheets, presentations, and cryptographic document signing together in one clean, modern web interface. (Calendar and Contacts come through the **mail connector** — CalDAV/CardDAV via lilmail — see [Part of VulOS](#part-of-vulos).)
+Vulos Office is the **documents** product of VulOS, shipped as a **single Go binary** with the entire frontend embedded — no cloud account, no telemetry, no lock-in. It brings document editing, spreadsheets, presentations, whiteboards, and cryptographic document signing together in one clean, modern web interface. (Calendar and Contacts come through the **mail connector** — CalDAV/CardDAV via lilmail — see [Part of VulOS](#part-of-vulos).)
 
 It is **independently self-hostable by default**: with zero configuration it runs as a single-user, local-storage app on your own machine. Everything that *could* tie it to an external service lives behind a small, clean **seam** — so you can run it fully standalone, or opt into the [vulos-cloud](#self-hosting) control plane for multi-tenant identity, entitlements, and usage. The core never imports cloud code; remove the adapter and the standalone build still compiles.
 
@@ -41,8 +41,7 @@ It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers wh
 **VulOS** is an open, self-hostable sovereign web OS + app suite. The **Vulos OS** is the shell (launcher, windows, dock, assistant) that hosts the apps; each product is also independently self-hostable on its own:
 
 - **Vulos OS** — the web-native desktop shell that hosts the apps
-- **Vulos Office** — documents: docs, sheets, slides, PDF *(this repo)*
-- **Vulos Board** — collaborative whiteboard (`@vulos/board-ui`)
+- **Vulos Office** — documents: docs, sheets, slides, PDF, **whiteboards** *(this repo)*. The Excalidraw-based collaborative whiteboard (formerly `@vulos/board-ui`) is now a first-class Office document type, riding Office's own distributed P2P collab engine.
 - **Vulos Files** — file storage + P2P sharing, built into the OS
 - **Vulos Relay** — sovereign connectivity / reachability fabric (`@vulos/relay-client`)
 - **llmux** — sovereign AI gateway
@@ -54,7 +53,7 @@ It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers wh
 
 Products never import each other — they are linked/embedded across clean seams.
 
-**Vulos Office's role:** the documents surface — Docs, Sheets, Slides, and PDF/Signing. It **runs standalone** as a single Go binary **and** as an app hosted by the Vulos OS. Calendar and Contacts are **not** part of Office; in the OS they come from the bring-your-own-mailbox PIM (lilmail `/v1/calendar` + `/v1/contacts`).
+**Vulos Office's role:** the documents surface — Docs, Sheets, Slides, Whiteboards, and PDF/Signing. It **runs standalone** as a single Go binary **and** as an app hosted by the Vulos OS. Calendar and Contacts are **not** part of Office; in the OS they come from the bring-your-own-mailbox PIM (lilmail `/v1/calendar` + `/v1/contacts`).
 
 ---
 
@@ -65,8 +64,9 @@ Products never import each other — they are linked/embedded across clean seams
 | **Docs** | Rich-text editing via TipTap — headings, tables, inline images (resize/align/alt), footnotes, task lists, links; anchored **comments**, **suggestions** (track-changes with accept/reject), **version history** with restore, find/replace, live document outline + word count |
 | **Sheets** | Full spreadsheet grid via Fortune Sheet — formulas, number formats, conditional formatting, **data validation**, **charts** (column/bar/line/area/pie), **filters**, **pivot tables**, **named ranges**, freeze panes |
 | **Slides** | Presentation editor on a **from-scratch positioned-object canvas** — free drag/resize/rotate of text, shapes, and images in normalized slide space, per-element **animations**, **themes**, editable **master slides**, per-slide **transitions**, **presenter view** (notes + timer in a second window), template gallery, `.pptx`/`.odp` import. The full-screen *present* overlay uses Reveal.js only as the slide-transition host for those positioned objects |
+| **Whiteboards** | Infinite-canvas whiteboard built on the MIT [Excalidraw](https://github.com/excalidraw/excalidraw) editor — shapes, arrows, freehand, text and images on a hand-drawn canvas. The scene is a **Yjs CRDT** (elements merge one-per-id), synced over the **exact same** end-to-end-encrypted peer-to-peer engine as Docs — **no central whiteboard/collab server**. New → Whiteboard from anywhere you make a doc |
 | **Signing** | View, **annotate** (text/draw/shapes), **fill interactive form fields** (AcroForm detection + one-click fill), and **sign** PDFs (draw/type/upload); multi-party signing envelopes (sequential or parallel) with a public signer page and a cryptographic audit trail; page reorder/rotate/insert/extract |
-| **Real-time collab** | **Always peer-to-peer — there is no central document server.** Docs sync as **Yjs CRDT** updates inside an **end-to-end-encrypted** room: peers connect **directly** over WebRTC (STUN-assisted), with a **content-blind relay** only as a hard-NAT fallback. You share collaboration via an **invite link** (`#vp2p=`); the key rides the URL fragment and never reaches any server. Sheets/Slides get live presence + cursors and CRDT content sync over the same peer fabric. Collaboration needs a host that provides content-blind peer **discovery** (`/api/peering/*`, a Vulos OS / Relay deployment); a bare standalone binary has none, so editing stays **local-only** and autosaves — no silent "fake Live". See [docs/COLLABORATION.md](docs/COLLABORATION.md) |
+| **Real-time collab** | **Always peer-to-peer — there is no central document server.** Docs **and whiteboards** sync as **Yjs CRDT** updates inside an **end-to-end-encrypted** room: peers connect **directly** over WebRTC (STUN-assisted), with a **content-blind relay** only as a hard-NAT fallback. You share collaboration via an **invite link** (`#vp2p=`); the key rides the URL fragment and never reaches any server. Sheets/Slides get live presence + cursors and CRDT content sync over the same peer fabric. Collaboration needs a host that provides content-blind peer **discovery** (`/api/peering/*`, a Vulos OS / Relay deployment); a bare standalone binary has none, so editing stays **local-only** and autosaves — no silent "fake Live". See [docs/COLLABORATION.md](docs/COLLABORATION.md) |
 | **Import / Export** | Docs `.docx` / Markdown / HTML / PDF · Sheets `.xlsx` / `.csv` · Slides `.pptx` / PDF · PDF signing; browse-and-import from the server's own `~/Documents`, `~/Downloads`, `~/Desktop` (single-user self-host only — disabled in multi-user mode, since it would expose the operator's local files to every account) |
 | **Storage** | Local files + SQLite by default; optional PostgreSQL (schema `office`) for multi-user; optional S3-compatible object store |
 | **Auth** | Optional password / JWT login — off by default for local use; per-file ACLs when multi-user |
@@ -77,10 +77,11 @@ Products never import each other — they are linked/embedded across clean seams
 Every surface is also published as an npm library (`@vulos/office-client`) so the Vulos OS — or your own app — can embed any editor as a native panel:
 
 ```js
-import { DocsApp }     from '@vulos/office-client/docs'
-import { SheetsApp }   from '@vulos/office-client/sheets'
-import { SlidesApp }   from '@vulos/office-client/slides'
-import { PDFApp }      from '@vulos/office-client/pdf'
+import { DocsApp }        from '@vulos/office-client/docs'
+import { SheetsApp }      from '@vulos/office-client/sheets'
+import { SlidesApp }      from '@vulos/office-client/slides'
+import { WhiteboardApp }  from '@vulos/office-client/whiteboard'
+import { PDFApp }         from '@vulos/office-client/pdf'
 ```
 
 ---
@@ -93,8 +94,10 @@ import { PDFApp }      from '@vulos/office-client/pdf'
 | <img src="docs/screenshots/docs-editor.png" alt="Docs" /> | <img src="docs/screenshots/sheets-editor.png" alt="Sheets" /> |
 | **Slides** — themes, transitions, present | **Signing** — annotate & sign PDFs |
 | <img src="docs/screenshots/slides-editor.png" alt="Slides" /> | <img src="docs/screenshots/pdf-editor.png" alt="Signing" /> |
-| **Home** — workspace & recent files | **Settings** — account, storage & admin |
-| <img src="docs/screenshots/home.png" alt="Home" /> | <img src="docs/screenshots/settings.png" alt="Settings" /> |
+| **Whiteboards** — Excalidraw canvas, P2P CRDT | **Home** — workspace & recent files |
+| <img src="docs/screenshots/whiteboard-editor.png" alt="Whiteboards" /> | <img src="docs/screenshots/home.png" alt="Home" /> |
+| **Settings** — account, storage & admin | |
+| <img src="docs/screenshots/settings.png" alt="Settings" /> | |
 
 > Regenerate anytime with `npm run screenshots` — it boots the app with seeded demo data (no real backend or credentials needed) and captures every screen. See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 
@@ -165,7 +168,7 @@ export VULOS_OFFICE_JWT_SECRET="$(openssl rand -hex 32)"
 
 ```mermaid
 flowchart TD
-    FE["React + Vite + Tailwind frontend (JSX only)<br/>Docs · Sheets · Slides · PDF Signing"]
+    FE["React + Vite + Tailwind frontend (JSX only)<br/>Docs · Sheets · Slides · PDF Signing · Whiteboards"]
     BE["Go backend (Gin)<br/>handlers · userauth · signing · storage · obs"]
     Seam["backend/seam — Identity · Entitlements · Usage<br/>standalone defaults (local, unlimited, no-op)"]
     Cloud["backend/integration/cloud<br/>(vulos-cloud adapter, opt-in)"]
@@ -190,8 +193,10 @@ The cloud adapter lives in a **separate package** and is selected *only* when `V
 
 Co-editing is **CRDT-based and always peer-to-peer — there is no central
 document server.** Docs sync as **Yjs** updates (structure-aware: bold, headings,
-tables, images all propagate correctly); Sheets and Slides use an LWW grid CRDT
-and a fractional-index tree CRDT. Because CRDT apply is idempotent + commutative,
+tables, images all propagate correctly); **whiteboards** sync as Yjs updates too
+(each Excalidraw element merges one-per-id) over the very same E2E-encrypted room
+and session — no separate whiteboard/collab server; Sheets and Slides use an LWW
+grid CRDT and a fractional-index tree CRDT. Because CRDT apply is idempotent + commutative,
 peers converge with no coordinating authority — which is exactly what lets the
 document ride an end-to-end-encrypted room where no server could rebase anything.
 

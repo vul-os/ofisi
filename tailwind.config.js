@@ -95,6 +95,8 @@ export default {
         'app-slides-bg': 'var(--app-slides-bg)',
         'app-pdf':       'var(--app-pdf)',
         'app-pdf-bg':    'var(--app-pdf-bg)',
+        'app-board':     'var(--app-board)',
+        'app-board-bg':  'var(--app-board-bg)',
       },
       fontFamily: {
         sans:  ['var(--font-sans)'],

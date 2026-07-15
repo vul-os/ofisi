@@ -49,6 +49,7 @@ Demo data is committed in `scripts/seed-demo.mjs` and never touches `./data` —
 | **Docs** | "Q2 2026 Product Update" — headings, prose, bullet lists, table; "ADR-014: Sync Layer" — decision record |
 | **Sheets** | "Revenue Tracker H1 2026" — 6 months × 5 columns, SUM + margin formulas, 2 sheets |
 | **Slides** | "Vulos Office Product Overview" — 5 slides, Reveal.js obsidian theme |
+| **Whiteboards** | "Vulos Office — Architecture Sketch" — Excalidraw scene: labelled boxes + E2E/relay arrows |
 
 ---
 
@@ -61,6 +62,7 @@ Demo data is committed in `scripts/seed-demo.mjs` and never touches `./data` —
 | `docs-editor.png` | `/docs/demo` | Documents editor | Yes — Q2 Product Update with prose + table |
 | `sheets-editor.png` | `/sheets/demo-sheet` | Spreadsheets editor | Yes — Revenue Tracker with formulas |
 | `slides-editor.png` | `/slides/demo-slides` | Presentations editor | Yes — 5-slide product overview |
+| `whiteboard-editor.png` | `/whiteboards/demo-board` | Whiteboard editor (Excalidraw) | Yes — architecture sketch on the real canvas |
 | `pdf-editor.png` | `/pdf/demo` | PDF viewer/annotator | Partial — UI shell (no PDF pre-loaded) |
 
 ---
@@ -90,6 +92,12 @@ The Spreadsheets editor (Fortune Sheet) with the "Revenue Tracker H1 2026" — 6
 ![Slides Editor](screenshots/slides-editor.png)
 
 The Presentations editor (Reveal.js) open on the 5-slide "Vulos Office Product Overview" deck with the obsidian dark theme.
+
+### Whiteboard Editor
+
+![Whiteboard Editor](screenshots/whiteboard-editor.png)
+
+The Whiteboard editor — the MIT [Excalidraw](https://github.com/excalidraw/excalidraw) canvas mounted on Office's own distributed peer-to-peer collab engine (the same Yjs/E2E-encrypted room Docs uses, no central whiteboard server). Shown open on the seeded "Architecture Sketch". Note the "Excalidraw · MIT" attribution in the top bar.
 
 ### PDF Editor
 

@@ -25,7 +25,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Home as HomeIcon, FileText, Table2, Presentation, FileSearch,
+  Home as HomeIcon, FileText, Table2, Presentation, FileSearch, PenTool,
   LogOut, ChevronLeft, ChevronRight, Settings as SettingsIcon, Plus,
   Menu, X, Bell,
 } from 'lucide-react'
@@ -43,16 +43,17 @@ import { Sidebar, IconButton, Tooltip, ThemeSwitch } from './ui'
 // Office is documents-only: chat/video and calendar/contacts are third-party and
 // are NOT launched from here.
 const NAV_APPS = [
-  { label: 'Docs',     icon: FileText,      route: '/docs',    tint: 'text-app-docs'   },
-  { label: 'Sheets',   icon: Table2,        route: '/sheets',  tint: 'text-app-sheets' },
-  { label: 'Slides',   icon: Presentation,  route: '/slides',  tint: 'text-app-slides' },
-  { label: 'PDF',      icon: FileSearch,    route: '/pdf',     tint: 'text-app-pdf'    },
+  { label: 'Docs',        icon: FileText,      route: '/docs',        tint: 'text-app-docs'   },
+  { label: 'Sheets',      icon: Table2,        route: '/sheets',      tint: 'text-app-sheets' },
+  { label: 'Slides',      icon: Presentation,  route: '/slides',      tint: 'text-app-slides' },
+  { label: 'Whiteboards', icon: PenTool,       route: '/whiteboards', tint: 'text-app-board'  },
+  { label: 'PDF',         icon: FileSearch,    route: '/pdf',         tint: 'text-app-pdf'    },
 ]
 
-// Recent-file rows mirror the app tints so a recent doc/sheet/slide reads the
-// same hue as its app in the rail above.
-const RECENT_ICON = { doc: FileText, sheet: Table2, slide: Presentation }
-const RECENT_TINT = { doc: 'text-app-docs', sheet: 'text-app-sheets', slide: 'text-app-slides' }
+// Recent-file rows mirror the app tints so a recent doc/sheet/slide/whiteboard
+// reads the same hue as its app in the rail above.
+const RECENT_ICON = { doc: FileText, sheet: Table2, slide: Presentation, whiteboard: PenTool }
+const RECENT_TINT = { doc: 'text-app-docs', sheet: 'text-app-sheets', slide: 'text-app-slides', whiteboard: 'text-app-board' }
 
 /**
  * SidebarContent — the rail body, shared between the persistent (≥lg) column
@@ -76,8 +77,8 @@ function SidebarContent({ collapsed, onNavigate, onNewFile }) {
   const fileTypeOf = (id) => files.find((f) => f.id === id)?.type
 
   const recentFiles = files.slice(0, 5)
-  const typeRoute = (f) =>
-    `/${f.type === 'doc' ? 'docs' : f.type === 'sheet' ? 'sheets' : 'slides'}/${f.id}`
+  const TYPE_ROUTE = { doc: 'docs', sheet: 'sheets', slide: 'slides', whiteboard: 'whiteboards' }
+  const typeRoute = (f) => `/${TYPE_ROUTE[f.type] || 'docs'}/${f.id}`
 
   return (
     <>

@@ -61,7 +61,15 @@ export class YP2PCollabSession extends EventTarget {
     super()
     if (!room || !room.encKey) throw new Error('YP2PCollabSession: missing room keys')
     if (cap !== CAP_RW && cap !== CAP_RO) throw new Error(`YP2PCollabSession: bad cap "${cap}"`)
-    if (!ctx || !ctx.ydoc || !ctx.schema) throw new Error('YP2PCollabSession: missing Y context')
+    // A context must carry a Y.Doc AND a way to validate an untrusted peer's
+    // update fail-closed: either a ProseMirror `schema` (the default document
+    // path, validated by applyRemoteUpdate) OR its own `applyUpdate` validator
+    // (e.g. the whiteboard's Excalidraw-scene validator — see boardYdoc.js).
+    // This is what lets the SAME encrypted P2P transport carry either a text
+    // document or a whiteboard without a second collab stack.
+    if (!ctx || !ctx.ydoc || (!ctx.schema && typeof ctx.applyUpdate !== 'function')) {
+      throw new Error('YP2PCollabSession: missing Y context')
+    }
 
     this._room = room
     this._cap = cap
@@ -184,7 +192,14 @@ export class YP2PCollabSession extends EventTarget {
       const max = msg.type === 'ysync' ? MAX_SNAPSHOT_BYTES : undefined
       const update = decodeUpdateEnvelope({ y: 1, u: msg.u }, max)
       if (!update) { this.rejectedUpdates++; return }
-      const res = applyRemoteUpdate(this._ctx, update)
+      // Validate + apply through the context's own fail-closed validator when it
+      // supplies one (whiteboard), otherwise the default ProseMirror-document
+      // guard. Either way an untrusted peer's bytes are tried on a SHADOW doc
+      // first and dropped if they would produce something unrenderable/unsafe.
+      const apply = typeof this._ctx.applyUpdate === 'function'
+        ? this._ctx.applyUpdate
+        : applyRemoteUpdate
+      const res = apply(this._ctx, update)
       if (!res.applied) {
         this.rejectedUpdates++
         console.warn('[y-p2p] rejected a peer update (fail-closed):', res.reason)

@@ -1,0 +1,214 @@
+/**
+ * Whiteboard co-editing over Office's P2P collab engine — the guarantees that
+ * matter, pinned exactly as the Docs multipeer suite pins them for documents:
+ *
+ *   • The whiteboard rides the SAME YP2PCollabSession + FabricClient transport as
+ *     Docs — there is NO central whiteboard/collab server. A relay is a dumb
+ *     content-blind frame router; every peer is directly in the mesh.
+ *   • THREE peers converge on the identical scene (a mesh, not a hub).
+ *   • A peer that JOINS LATE catches up to the full current scene via the
+ *     state-vector resync — no server bootstrap.
+ *   • The scene is NEVER visible on the wire: a relay/eavesdropper who captures
+ *     frames holds only ciphertext (the E2E property, for the whiteboard path).
+ *   • Concurrent edits to different elements merge (the per-element Y.Map).
+ *
+ * The Excalidraw canvas is stood in for by an in-memory scene API driven through
+ * the REAL ExcalidrawYBinding — so the whole Yjs<->scene glue runs for real; only
+ * the socket and the canvas are fake.
+ */
+
+import { describe, it, expect } from 'vitest'
+import { YP2PCollabSession } from '../yP2PSession.js'
+import { createBoardYContext, boardDocToScene, ELEMENTS_KEY } from '../boardYdoc.js'
+import { ExcalidrawYBinding } from '../../../apps/whiteboard/binding.js'
+import { parseInvite, deriveRoomKeys, openFrame } from '../p2pRoom.js'
+
+// A tiny in-process mesh fabric: every connected peer receives every frame any
+// member broadcasts. `wireLog` records raw wire frames — exactly what a relay /
+// passive eavesdropper would see.
+class FakeFabric extends EventTarget {
+  constructor(wireLog) {
+    super()
+    this.peers = new Set()
+    this.id = Math.random().toString(36).slice(2)
+    this.wireLog = wireLog
+  }
+  connect(other) { this.peers.add(other); other.peers.add(this) }
+  disconnect() { for (const p of this.peers) p.peers.delete(this); this.peers.clear() }
+  async join() {}
+  leave() { this.disconnect() }
+  send(frame) {
+    if (this.wireLog) this.wireLog.push(frame)
+    for (const p of this.peers) {
+      p.dispatchEvent(new CustomEvent('message', { detail: { from: this.id, data: frame } }))
+    }
+  }
+  sendTo(_peerId, frame) { this.send(frame) }
+}
+
+const INVITE = 'https://office.test/whiteboards/wb1'
+const settle = () => new Promise((r) => setTimeout(r, 60))
+
+/** A peer: a real Y.Doc + board ctx + binding + an in-memory scene API. */
+function makePeer(fabric) {
+  let scene = []
+  const files = {}
+  const api = {
+    updateScene(s) { if (s.elements) scene = [...s.elements] },
+    getSceneElementsIncludingDeleted() { return scene },
+    addFiles(fs) { for (const f of fs) files[f.id] = f },
+    getFiles() { return files },
+  }
+  const ctx = createBoardYContext()
+  const binding = new ExcalidrawYBinding(ctx.ydoc, api)
+  return { ctx, binding, fabric, sceneIds: () => scene.map((e) => e.id), scene: () => scene }
+}
+
+function el(id, extra = {}) {
+  return { id, version: 1, type: 'rectangle', ...extra }
+}
+
+/** Live element map of a peer's doc, for convergence equality. */
+function docElements(ctx) {
+  const out = {}
+  ctx.ydoc.getMap(ELEMENTS_KEY).forEach((v, k) => { out[k] = v })
+  return out
+}
+
+describe('Whiteboard P2P — three peers converge (mesh, no central server)', () => {
+  it('an edit from any peer reaches every other peer, and all converge', async () => {
+    const fa = new FakeFabric(); const fb = new FakeFabric(); const fc = new FakeFabric()
+    fa.connect(fb); fb.connect(fc); fa.connect(fc)
+
+    const a = makePeer(fa)
+    const { session: aSession, rwLink } = await YP2PCollabSession.create({
+      peerId: 'a', fileId: 'wb1', baseUrl: INVITE, ctx: a.ctx, fabric: fa,
+    })
+    a.session = aSession
+    const b = makePeer(fb)
+    b.session = await YP2PCollabSession.fromInvite({ inviteLink: rwLink, peerId: 'b', fileId: 'wb1', ctx: b.ctx, fabric: fb })
+    const c = makePeer(fc)
+    c.session = await YP2PCollabSession.fromInvite({ inviteLink: rwLink, peerId: 'c', fileId: 'wb1', ctx: c.ctx, fabric: fc })
+
+    await a.session.join(); await b.session.join(); await c.session.join()
+    await settle()
+
+    // Each peer draws a distinct shape (a local edit through the real binding).
+    a.binding.handleChange([el('shape-A', { index: 'a0' })], {}, {})
+    await settle()
+    b.binding.handleChange([el('shape-A', { index: 'a0' }), el('shape-B', { index: 'a1' })], {}, {})
+    await settle()
+    c.binding.handleChange([el('shape-A', { index: 'a0' }), el('shape-B', { index: 'a1' }), el('shape-C', { index: 'a2' })], {}, {})
+    await settle()
+
+    // All three docs are identical and hold every peer's element.
+    expect(docElements(b.ctx)).toEqual(docElements(a.ctx))
+    expect(docElements(c.ctx)).toEqual(docElements(a.ctx))
+    expect(Object.keys(docElements(a.ctx)).sort()).toEqual(['shape-A', 'shape-B', 'shape-C'])
+    // …and every peer's EDITOR shows the elements it received REMOTELY (a peer's
+    // OWN local edit is already live in its real Excalidraw and is not re-rendered
+    // back into its scene by the binding — so peers A and B, which received C's
+    // shape as a remote change, show the full merged scene).
+    expect(a.sceneIds().sort()).toEqual(['shape-A', 'shape-B', 'shape-C'])
+    expect(b.sceneIds().sort()).toEqual(['shape-A', 'shape-B', 'shape-C'])
+  })
+})
+
+describe('Whiteboard P2P — late joiner catches up with no server', () => {
+  it('a peer joining AFTER edits pulls the full scene via state-vector resync', async () => {
+    const fa = new FakeFabric(); const fb = new FakeFabric()
+    fa.connect(fb)
+
+    const a = makePeer(fa)
+    const { session: aSession, rwLink } = await YP2PCollabSession.create({
+      peerId: 'a', fileId: 'wb1', baseUrl: INVITE, ctx: a.ctx, fabric: fa,
+    })
+    a.session = aSession
+    await a.session.join()
+
+    // The owner draws a whole board BEFORE anyone else is in the room.
+    a.binding.handleChange([el('r1', { index: 'a0' }), el('r2', { index: 'a1' })], {}, {})
+    await settle()
+
+    // A second peer joins late from an EMPTY doc and must recover the whole scene
+    // purely from its peer — there is no server to bootstrap from.
+    const b = makePeer(fb)
+    b.session = await YP2PCollabSession.fromInvite({ inviteLink: rwLink, peerId: 'b', fileId: 'wb1', ctx: b.ctx, fabric: fb })
+    expect(Object.keys(docElements(b.ctx))).toEqual([])
+
+    await b.session.join()   // join() issues a state-vector resync request
+    await settle()
+
+    expect(docElements(b.ctx)).toEqual(docElements(a.ctx))
+    expect(b.sceneIds().sort()).toEqual(['r1', 'r2'])
+  })
+})
+
+describe('Whiteboard P2P — the wire is content-blind (E2E)', () => {
+  it('a relay/eavesdropper who captures frames cannot recover the scene', async () => {
+    const wire = []
+    const fa = new FakeFabric(wire); const fb = new FakeFabric(wire)
+    fa.connect(fb)
+
+    const a = makePeer(fa)
+    const { session: aSession, rwLink } = await YP2PCollabSession.create({
+      peerId: 'a', fileId: 'wb1', baseUrl: INVITE, ctx: a.ctx, fabric: fa,
+    })
+    a.session = aSession
+    const b = makePeer(fb)
+    b.session = await YP2PCollabSession.fromInvite({ inviteLink: rwLink, peerId: 'b', fileId: 'wb1', ctx: b.ctx, fabric: fb })
+    await a.session.join(); await b.session.join()
+    await settle()
+
+    const SECRET = 'TOPSECRET-DIAGRAM-2026'
+    a.binding.handleChange([el('note', { type: 'text', text: SECRET })], {}, {})
+    await settle()
+
+    // The peers DID converge on the plaintext scene…
+    expect(boardDocToScene(b.ctx.ydoc).elements.find((e) => e.id === 'note')?.text).toBe(SECRET)
+    // …but the secret never appears anywhere on the wire (frames are sealed).
+    expect(wire.length).toBeGreaterThan(0)
+    for (const frame of wire) expect(String(frame)).not.toContain(SECRET)
+
+    // Even an attacker who knows the (public, derived) roomId cannot open a frame
+    // without the roomKey — the key lives only in the invite fragment.
+    const wrongKey = await deriveRoomKeys(new Uint8Array(32).fill(7))
+    const attackerRoom = { encKey: wrongKey.encKey, macKeyRw: null }
+    let opened = false
+    for (const frame of wire) {
+      try { await openFrame(attackerRoom, frame); opened = true } catch { /* AEAD fail — expected */ }
+    }
+    expect(opened).toBe(false)
+
+    const { roomId } = await parseInvite(rwLink)
+    expect(roomId).toBeTruthy()
+    expect(rwLink).toContain('#vp2p=')   // the key rides the fragment, never the path
+  })
+})
+
+describe('Whiteboard P2P — concurrent edits to different elements merge', () => {
+  it('two peers drawing different shapes offline both keep both shapes', async () => {
+    const fa = new FakeFabric(); const fb = new FakeFabric()
+    // Deliberately NOT connected while they draw (a partition).
+    const a = makePeer(fa)
+    const { session: aSession, rwLink } = await YP2PCollabSession.create({
+      peerId: 'a', fileId: 'wb1', baseUrl: INVITE, ctx: a.ctx, fabric: fa,
+    })
+    a.session = aSession
+    const b = makePeer(fb)
+    b.session = await YP2PCollabSession.fromInvite({ inviteLink: rwLink, peerId: 'b', fileId: 'wb1', ctx: b.ctx, fabric: fb })
+    await a.session.join(); await b.session.join()
+
+    a.binding.handleChange([el('a-rect', { index: 'a0' })], {}, {})
+    b.binding.handleChange([el('b-oval', { index: 'a1', type: 'ellipse' })], {}, {})
+    await settle()
+
+    // Heal the partition — both sessions resync and the per-id Y.Map unions.
+    fa.connect(fb)
+    await a.session.resync(); await b.session.resync()
+    await settle()
+
+    expect(docElements(a.ctx)).toEqual(docElements(b.ctx))
+    expect(Object.keys(docElements(a.ctx)).sort()).toEqual(['a-rect', 'b-oval'])
+  })
+})

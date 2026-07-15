@@ -52,6 +52,12 @@
       "require": "./dist-lib/slides.cjs",
       "default": "./dist-lib/slides.js"
     },
+    "./whiteboard": {
+      "source": "./src/apps/whiteboard/lib.jsx",
+      "import": "./dist-lib/whiteboard.js",
+      "require": "./dist-lib/whiteboard.cjs",
+      "default": "./dist-lib/whiteboard.js"
+    },
     "./pdf": {
       "source": "./src/apps/pdf/lib.jsx",
       "import": "./dist-lib/pdf.js",
@@ -67,12 +73,14 @@
     "src/apps/docs/",
     "src/apps/sheets/",
     "src/apps/slides/",
+    "src/apps/whiteboard/",
     "src/apps/pdf/",
     "README.md",
     "LICENSE",
     "THIRD-PARTY-NOTICES.txt"
   ],
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource/dancing-script": "^5.2.8",
     "@fontsource/pacifico": "^5.2.7",

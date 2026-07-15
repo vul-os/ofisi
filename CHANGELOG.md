@@ -8,6 +8,29 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Whiteboards, a new Office document type (Board folded into Office)
+
+- **Vulos Board is now a first-class Office document type.** The Excalidraw-based
+  collaborative whiteboard (formerly the separate `@vulos/board-ui` library) is
+  brought in as a `whiteboard` file type alongside doc/sheet/slide/PDF —
+  "**New → Whiteboard**" from the launcher, the app rail, and the file browser.
+- **It rides Office's OWN distributed peer-to-peer collab engine** — the exact
+  same `YP2PCollabSession` + `FabricClient` transport, E2E-encrypted room,
+  content-blind signalling (`/api/peering/*`) and TURN-only-on-hard-NAT fallback
+  that Docs uses. There is **no** central whiteboard/collab server and **no**
+  second collab stack: board-ui's own websocket/channel transport was NOT brought
+  across. The scene is a Yjs CRDT (Excalidraw elements merge one-per-id via
+  `lib/crdt/boardYdoc.js`); the P2P session was given a pluggable, fail-closed
+  validator so it can carry either a ProseMirror document or an Excalidraw scene.
+- The Y.Doc is hydrated **locally** from the file's own scene (sovereign storage,
+  the same hydrate-from-file pattern as Docs) and saved back to the file — a
+  standalone binary works local-only with autosave and an honest "Offline" pill.
+- Copied from board-ui and adapted: the `ExcalidrawYBinding` (Yjs⇄Excalidraw glue,
+  incl. the raster-only image allow-list that refuses active-content blobs).
+  Depends on the MIT [`@excalidraw/excalidraw`](https://github.com/excalidraw/excalidraw)
+  editor (attribution in THIRD-PARTY-NOTICES). A `whiteboard-editor` screenshot
+  was added to the gallery.
+
 ### Changed — Collaboration is now ALWAYS peer-to-peer (no central document server)
 
 - **Removed the server-mediated collaboration path entirely.** Office's

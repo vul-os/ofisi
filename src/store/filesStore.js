@@ -10,6 +10,10 @@ function defaultContent(type) {
       return [{ name: 'Sheet1', celldata: [], config: {} }]
     case 'slide':
       return { theme: 'black', transition: 'slide', slides: [{ id: crypto.randomUUID(), title: '', content: '<p></p>', notes: '' }] }
+    case 'whiteboard':
+      // An Excalidraw scene: elements one-per-id (merged as a Yjs Y.Map) + image
+      // blobs. Empty to start; the WhiteboardEditor seeds its Y.Doc from this.
+      return { type: 'excalidraw', elements: [], files: {} }
     default:
       return null
   }

@@ -15,11 +15,12 @@ import { stripExternalCssImports } from './vite.strip-external-css-imports.js'
 const dir = import.meta.dirname
 
 const entries = {
-  index:    resolve(dir, 'src/lib/index.js'),
-  docs:     resolve(dir, 'src/apps/docs/lib.jsx'),
-  sheets:   resolve(dir, 'src/apps/sheets/lib.jsx'),
-  slides:   resolve(dir, 'src/apps/slides/lib.jsx'),
-  pdf:      resolve(dir, 'src/apps/pdf/lib.jsx'),
+  index:      resolve(dir, 'src/lib/index.js'),
+  docs:       resolve(dir, 'src/apps/docs/lib.jsx'),
+  sheets:     resolve(dir, 'src/apps/sheets/lib.jsx'),
+  slides:     resolve(dir, 'src/apps/slides/lib.jsx'),
+  whiteboard: resolve(dir, 'src/apps/whiteboard/lib.jsx'),
+  pdf:        resolve(dir, 'src/apps/pdf/lib.jsx'),
 }
 
 export default defineConfig({
