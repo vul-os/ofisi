@@ -10,11 +10,10 @@ on different Vulos instances, and PDFs signed with cryptographic audit trails �
 all riding the **Vulos peer fabric** that already connects and routes instances
 across the network, with relay/TURN fallback.
 
-> **Product scope.** Vulos Office is documents-only. Team chat + Spaces ship as the
-> separate **vulos-talk** product and video calling as **vulos-meet**; the **Vulos
-> OS** hosts the apps and the **Vulos Workspace** hub app consolidates Office, Talk,
-> and Meet into one cockpit. Chat/calling roadmap items previously tracked here now
-> live in those repos.
+> **Product scope.** Vulos Office is documents-only. Chat and video are **third-party**
+> (Matrix/Element for chat; Element Call / Jitsi for video), not Vulos products; the
+> **Vulos OS** is the shell that hosts the apps. Any chat/calling roadmap items
+> previously tracked here are out of scope for this repo.
 
 The throughline: Vulos Office never invents its own network. Real-time document
 collaboration reuses the **same fabric the Vulos OS uses for device routing** —
@@ -216,22 +215,18 @@ identity ties to the **Vulos account**.
 
 ---
 
-## 4. Chat, Calling & Meetings — moved to vulos-talk / vulos-meet
+## 4. Chat, Calling & Meetings — third-party (not built by Vulos)
 
-Team chat + Spaces (channels, DMs, threads, reactions, pins, presence) and
-real-time voice/video calling + meetings were originally planned as an Office
-pillar. They have since been **extracted into their own products**:
+Team chat + Spaces and real-time voice/video calling + meetings were once planned
+as an Office pillar. Vulos no longer builds comms: chat and video are provided by
+**established third-party open protocols/apps**:
 
-- **vulos-talk** — team chat + Spaces (the Slack equivalent).
-- **vulos-meet** — voice/video calling, screen-share, and meeting rooms (the
-  Google-Meet equivalent).
+- **Chat** — Matrix / Element (the Slack equivalent).
+- **Video** — Element Call / Jitsi (the Google-Meet equivalent).
 
-Both ride the same Vulos peer fabric (CRDT/bucket sync for messages, WebRTC +
-relay/TURN for media) and share the one Vulos account identity with Office. The
-the **Vulos OS** hosts the apps and the **Vulos Workspace** hub app consolidates
-Office, Talk, and Meet into a single cockpit; Office's sidebar links out to
-Talk/Meet but never embeds them. See the
-`vulos-talk` and `vulos-meet` repos for their roadmaps and threat models.
+The **Vulos OS** is the shell that hosts the apps; it can link out to whatever
+comms app the user runs, but Office never embeds chat or video, and neither is a
+first-party Vulos product.
 
 ---
 
@@ -240,7 +235,7 @@ Talk/Meet but never embeds them. See the
 ### Storage-backend choice
 
 Vulos Office stores documents, sheets, and slides in the same S3-compatible
-object store as OS sync and mail. The same two-backend choice applies:
+object store as OS sync. The same two-backend choice applies:
 
 - **Tigris (default):** Per-org bucket prefix on Vulos Tigris; managed, durable, replicated.
 - **MinIO local (complete BYO):** Customer's own MinIO instance. Document data never touches
@@ -248,21 +243,21 @@ object store as OS sync and mail. The same two-backend choice applies:
 
 The storage backend is set by the Vulos OS or control plane at provisioning time. `vulos-office`
 does not select or provision the backend — it receives the endpoint and credentials as
-configuration (consistent with `vulos-mail`'s model).
+configuration (consistent with the rest of the suite).
 
 ### Co-location on a single instance
 
-Vulos Office can run co-located with the OS and vulos-mail on a single box, sharing one bucket
+Vulos Office can run co-located with the OS on a single box, sharing one bucket
 and one CRDT/peering fabric. The BYO single-box story — "one box = your whole Vulos" — requires
-only one shared bucket endpoint for all three services. The meta-bundle installer (`BUNDLE-01`
+only one shared bucket endpoint. The meta-bundle installer (`BUNDLE-01`
 in `vulos`) wires this up; no vulos-office code changes are needed.
 
-### Anchor inbox / identity
+### Identity
 
-Vulos Office uses the same `@vulos.org` identity as mail and OS. There is no separate Office
-identity — the Vulos account is the single identity for all surfaces. Collaboration sessions
-are keyed by Vulos account address; the cloud control plane routes presence and CRDT sync
-using the same identity service as mail.
+Vulos Office uses the same Vulos account identity as the OS. There is no separate Office
+identity — the Vulos account (email + password / OAuth / passkey) is the single identity for
+all surfaces. Collaboration sessions are keyed by Vulos account; the cloud control plane routes
+presence and CRDT sync using the same identity service.
 
 ---
 
@@ -281,9 +276,10 @@ model.
 
 ## Mail connector (Office is not involved)
 
-Vulos Office is not involved in mail at all — mail is a separate, experimental **connector**
-(`lilmail` + `@vulos/mail-ui`) that logs into your existing IMAP/SMTP mailbox. Office installs
-alongside the rest of the suite regardless of whether the mail connector is configured. There
+Vulos Office is not involved in mail at all — PIM is a separate **bring-your-own-mailbox
+connector** (`lilmail`, exposing `/v1`) that logs into your existing IMAP/SMTP mailbox; the OS
+surfaces Calendar/Contacts widgets over it. There is no hosted Vulos mail. Office installs
+alongside the rest of the suite regardless of whether the connector is configured. There
 is no "Mail tier" gating Office.
 
 ---
@@ -343,9 +339,8 @@ navigated. Coordinate with the multi-target build work above for OS launcher int
   over the peer fabric is **dormant** — the Go CRDT engine was removed; the live path is
   REST + persistence.
 
-> Chat/Spaces and calling/meetings (and their presence, recording, and relay/TURN
-> machinery) were extracted to **vulos-talk** and **vulos-meet**; their "what's live"
-> status lives in those repos.
+> Chat/Spaces and calling/meetings are third-party (Matrix/Element; Element Call /
+> Jitsi), not Vulos products, and are out of scope for this repo.
 
 ### Near-term items
 

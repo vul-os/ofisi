@@ -1,10 +1,13 @@
 # Vulos Office — Task Backlog
 
 > **Historical record.** Vulos Office is now the **documents-only** product. The
-> Vulos Spaces (chat) and meetings/calling work described below was later extracted
-> into the separate **vulos-talk** and **vulos-meet** products and is no longer part
-> of this repo — those backlog entries are retained for history only. See ROADMAP.md
-> and CHANGELOG.md for the current scope.
+> Vulos Spaces (chat) and meetings/calling work described below is retained for
+> history only — Vulos no longer builds comms (chat/video are third-party:
+> Matrix/Element, Element Call / Jitsi). Likewise, entries below that reference the
+> archived `vulos-mail` / `vulos-talk` / `vulos-meet` repos or a co-located mail
+> server are superseded: there is no hosted Vulos mail, and PIM is a bring-your-own
+> mailbox connector (`lilmail`) surfaced by the OS. See ROADMAP.md and CHANGELOG.md
+> for the current scope.
 
 **Status: 39 / 40 tasks done (98%).** Office Core, Real-time Collaboration (CRDT +
 fabric), PDF Auto-Sign, and Vulos Spaces (channels, calls, screen-share, meetings) are

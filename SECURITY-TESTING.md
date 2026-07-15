@@ -3,9 +3,9 @@
 This document describes the **pentest / adversarial test suite** for the
 `vulos-office` backend (Go) and the document/slide HTML render path (JSX/vitest).
 
-> Vulos Office is the documents-only product. The chat/Spaces and meetings/calling
-> pentest suites moved to the **vulos-talk** and **vulos-meet** repos along with
-> those surfaces; this document covers only Office's own attack surface.
+> Vulos Office is the documents-only product. Chat and video are third-party
+> (Matrix/Element; Element Call / Jitsi), not Vulos products; this document covers
+> only Office's own attack surface.
 
 The suites are written attacker-first: every test **attempts a concrete attack
 and asserts it is blocked**. A green run means the corresponding defense holds.

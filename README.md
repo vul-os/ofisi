@@ -38,21 +38,23 @@ It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers wh
 
 ## Part of VulOS
 
-**VulOS** is an open, self-hostable web OS + app suite. The **Vulos OS** is the shell (launcher, windows, dock, assistant) that hosts the apps; each product is also independently self-hostable on its own:
+**VulOS** is an open, self-hostable sovereign web OS + app suite. The **Vulos OS** is the shell (launcher, windows, dock, assistant) that hosts the apps; each product is also independently self-hostable on its own:
 
-- **Vulos Talk** — team chat + channels/Spaces + huddles
-- **Vulos Meet** — video meetings (LiveKit SFU)
+- **Vulos OS** — the web-native desktop shell that hosts the apps
 - **Vulos Office** — documents: docs, sheets, slides, PDF *(this repo)*
 - **Vulos Board** — collaborative whiteboard (`@vulos/board-ui`)
-- **Vulos Relay** — sovereign connectivity fabric (`@vulos/relay-client`)
-- **Vulos Workspace** — an OS-hosted productivity hub that consolidates Office, Talk, Meet & Board
-- **Vulos OS** — the web-native desktop (the shell that hosts the suite apps)
+- **Vulos Files** — file storage + P2P sharing, built into the OS
+- **Vulos Relay** — sovereign connectivity / reachability fabric (`@vulos/relay-client`)
+- **llmux** — sovereign AI gateway
+- **Cloud / CP** — accounts, auth, provisioning and billing
 
-**Mail is a connector, not a product:** bring your own mailbox (Gmail / Microsoft 365 / IMAP) into Workspace and the OS via **lilmail** (the IMAP/SMTP connector client) and the shared **`@vulos/mail-ui`** inbox surface — plus calendar/contacts over CalDAV/CardDAV.
+**Comms are third-party:** chat and video use established open protocols/apps (Matrix/Element for chat; Element Call / Jitsi for video), not products built by Vulos.
+
+**PIM is bring-your-own:** connect your own mailbox (Gmail / Microsoft 365 / IMAP) via **lilmail** (an independent connect-your-own-mailbox engine exposing `/v1`, incl. `/v1/calendar` + `/v1/contacts` over CalDAV/CardDAV); the OS adds standalone **Calendar** and **Contacts** widgets over it. There is no hosted Vulos mail.
 
 Products never import each other — they are linked/embedded across clean seams.
 
-**Vulos Office's role:** the documents surface — Docs, Sheets, Slides, and PDF/Signing. It **runs standalone** as a single Go binary **and** as an app hosted by the Vulos OS, where the Workspace hub app can surface it. Its sidebar links out to Vulos Talk and Vulos Meet, but never embeds them — chat lives in **vulos-talk** and video in **vulos-meet**. Calendar and Contacts are **not** part of Office; they come through the **mail connector** (CalDAV/CardDAV via lilmail `/v1/calendar` + `/v1/contacts`).
+**Vulos Office's role:** the documents surface — Docs, Sheets, Slides, and PDF/Signing. It **runs standalone** as a single Go binary **and** as an app hosted by the Vulos OS. Calendar and Contacts are **not** part of Office; in the OS they come from the bring-your-own-mailbox PIM (lilmail `/v1/calendar` + `/v1/contacts`).
 
 ---
 
@@ -72,7 +74,7 @@ Products never import each other — they are linked/embedded across clean seams
 | **PWA-ready** | Installable as a desktop / mobile app via web manifest |
 | **Observability** | Prometheus metrics at `/metrics` and optional OpenTelemetry traces |
 
-Every surface is also published as an npm library (`@vulos/office-client`) so the Vulos Workspace hub app — or your own app — can embed any editor as a native panel:
+Every surface is also published as an npm library (`@vulos/office-client`) so the Vulos OS — or your own app — can embed any editor as a native panel:
 
 ```js
 import { DocsApp }     from '@vulos/office-client/docs'

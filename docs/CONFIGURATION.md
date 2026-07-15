@@ -106,7 +106,7 @@ Written by the OS storage-mode selector; consumed by all three bundle services:
 
 ### SMTP (optional)
 
-Office itself does not send mail — outbound notifications are handled by the vulos-mail service when co-located. In standalone mode you may point at an external relay:
+Office itself does not send mail. If you want outbound notifications, point Office at an external SMTP relay:
 
 | Variable | Description |
 |----------|-------------|

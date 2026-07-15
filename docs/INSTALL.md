@@ -1,7 +1,7 @@
 # Vulos Office — Install Guide
 
 This document covers how to install and run `vulos-office` either co-located
-with Vulos OS + vulos-mail (the recommended single-box deployment) or as a
+with the Vulos OS (the recommended single-box deployment) or as a
 standalone service.
 
 For an end-to-end deployment walkthrough (Docker, building from source,
@@ -11,16 +11,16 @@ upgrading), see [`DEPLOY.md`](DEPLOY.md).
 
 ## Co-located deployment (recommended)
 
-The supported "easy path" is the **co-located bundle**: one box runs Vulos OS,
-vulos-mail, and vulos-office, all sharing **one S3-compatible bucket endpoint**
+The supported "easy path" is the **co-located bundle**: one box runs the Vulos
+OS and vulos-office, sharing **one S3-compatible bucket endpoint**
 (Vulos-managed Tigris by default; local MinIO via the OS-side storage selector
-opt-in). All three services share one CRDT/peering fabric and one identity.
+opt-in). Both services share one CRDT/peering fabric and one identity.
 
 ### Use the bundle installer (canonical command)
 
 The `vulos` repo provides a meta-bundle installer (`BUNDLE-01`,
 [`scripts/install-vulos.sh`](https://github.com/vul-os/vulos/blob/main/scripts/install-vulos.sh))
-that provisions OS + mail + office, writes their systemd units, and seeds the
+that provisions the OS + office, writes their systemd units, and seeds the
 shared storage config. Do **not** duplicate it here — invoke it:
 
 ```sh
@@ -43,7 +43,7 @@ See https://docs.vulos.org/self-host/bundle for the full bundle reference.
 
 The OS-side storage-mode selector (`STORE-LOCAL-01`,
 `vulos/backend/internal/storagemode/`) writes a single shared env file
-(consumed by `vulos.service`, `vulos-mail.service`, and `vulos-office.service`)
+(consumed by `vulos.service` and `vulos-office.service`)
 with the following variables. Office reads these at startup and passes them
 into [`OfficeBackendConfig`](../backend/storage/backendconfig.go):
 
@@ -52,7 +52,7 @@ into [`OfficeBackendConfig`](../backend/storage/backendconfig.go):
 | `VULOS_STORAGE_MODE`    | `central-tigris` (default) or `local-minio-sync` (BYO single-box MinIO) |
 | `VULOS_MINIO_ENDPOINT`  | S3 endpoint URL (only when mode is `local-minio-sync`)                  |
 | `VULOS_MINIO_REGION`    | Region label (defaults to `auto`)                                       |
-| `VULOS_MINIO_BUCKET`    | Bucket shared by OS + mail + office (e.g. `vulos-bundle`)               |
+| `VULOS_MINIO_BUCKET`    | Bucket shared by OS + office (e.g. `vulos-bundle`)                      |
 | `VULOS_MINIO_CREDS_REF` | Path to the credentials file (e.g. `/var/lib/vulos/minio/.minio_secret`) |
 
 In `central-tigris` mode, office falls back to the canonical Tigris env vars
@@ -62,9 +62,9 @@ In `central-tigris` mode, office falls back to the canonical Tigris env vars
 ### Systemd unit ordering
 
 The bundle installer writes the units below — `vulos-office` starts **after**
-`vulos-mail`, and both start after the shared `vulos-fabric.service` oneshot
-(which performs the shared identity/fabric init). All three are pulled in by
-`vulos-bundle.target` (the all-up sentinel).
+`vulos.service` and the shared `vulos-fabric.service` oneshot (which performs the
+shared identity/fabric init). Both are pulled in by `vulos-bundle.target` (the
+all-up sentinel).
 
 ```mermaid
 flowchart TD
@@ -72,13 +72,11 @@ flowchart TD
     MinIO["[vulos-minio.service]<br/>(optional — local-MinIO mode only)"]
     Fabric["vulos-fabric.service<br/>(shared fabric identity init — oneshot)"]
     OS["vulos.service (OS backend, :8443)"]
-    Mail["vulos-mail.service (mail server, :25/:587/:8444)"]
     Office["vulos-office.service (office backend, :8445)"]
     Bundle["vulos-bundle.target"]
     Net --> MinIO
     MinIO --> Fabric
     Fabric --> OS
-    Fabric --> Mail
     Fabric --> Office
     Office --> Bundle
 ```
@@ -100,14 +98,14 @@ Office is intentionally ordered **after** `vulos.service` and the fabric
 oneshot so the shared bucket creds + fabric identity are already in place
 before office tries to open the storage backend. The bundle target
 ([`scripts/vulos-bundle.target`](https://github.com/vul-os/vulos/blob/main/scripts/vulos-bundle.target))
-`Wants=` and `After=` all three services so `systemctl start vulos-bundle.target`
+`Wants=` and `After=` both services so `systemctl start vulos-bundle.target`
 brings the suite up atomically (and `systemctl stop` tears it down).
 
 ---
 
 ## Standalone office
 
-If you only want the office suite (no Vulos OS, no vulos-mail), run office
+If you only want the office suite (no Vulos OS), run office
 directly and inject the storage endpoint yourself via
 [`OfficeBackendConfig`](../backend/storage/backendconfig.go) — there is no
 endpoint-selection logic inside vulos-office; it just receives what you give

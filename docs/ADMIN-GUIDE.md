@@ -1,6 +1,6 @@
 # Vulos Office — Admin Guide
 
-This chapter is for the person who runs Vulos Office: deploying it (bare binary, Docker, Fly.io, or as part of a Vulos OS bundle), configuring it (`config.yaml` + environment variables), understanding where documents actually live on disk, enabling multi-user auth, integrating with Vulos Workspace/OS, and backing it all up. Vulos Office is a **single Go binary with the entire web app embedded** — the default deployment is one process, one port (`:8080`), one data directory, no external dependencies. Every endpoint and variable named here exists in the code of this repository.
+This chapter is for the person who runs Vulos Office: deploying it (bare binary, Docker, Fly.io, or as part of a Vulos OS bundle), configuring it (`config.yaml` + environment variables), understanding where documents actually live on disk, enabling multi-user auth, integrating with the Vulos OS, and backing it all up. Vulos Office is a **single Go binary with the entire web app embedded** — the default deployment is one process, one port (`:8080`), one data directory, no external dependencies. Every endpoint and variable named here exists in the code of this repository.
 
 ---
 
@@ -186,9 +186,9 @@ Related behavior to be aware of:
 
 ---
 
-## 5. Integration into Vulos Workspace / OS
+## 5. Integration into the Vulos OS
 
-- **Embedding**: every editor surface ships as the npm library `@vulos/office-client` with entries `…/docs`, `…/sheets`, `…/slides`, `…/pdf` — the Vulos Workspace hub (or your own app) mounts them as native panels. Built by `vite.config.lib.js` into `dist-lib/`.
+- **Embedding**: every editor surface ships as the npm library `@vulos/office-client` with entries `…/docs`, `…/sheets`, `…/slides`, `…/pdf` — the Vulos OS (or your own app) mounts them as native panels. Built by `vite.config.lib.js` into `dist-lib/`.
 - **Identity**: on a Vulos box or cloud cell, set `IDENTITY_URL` so Office introspects the shared `vc_session` cookie — Office deliberately holds no session-signing power in that mode.
 - **Peering fabric**: the OS/Relay host provides `/api/peering/stream` (WebSocket signaling) and `/api/peering/ice`; Office's collab code discovers them same-origin and lights up P2P collaboration + presence automatically. Without them it degrades gracefully.
 - **Control plane** (managed/multi-tenant): `VULOS_CP_BASE_URL` + `VULOS_CP_TOKEN` + `VULOS_ORG_ID` enable entitlements (`GET {CP}/api/entitlements`, fails open on transient CP outage), usage metering (fire-and-forget `POST {CP}/api/usage`), and `vk_` API-key introspection for `/v1` (fail-closed `503` if the CP is unreachable during key validation). See [SELFHOST.md](../SELFHOST.md) for the full seam contract.
