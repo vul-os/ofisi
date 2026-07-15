@@ -67,10 +67,31 @@ flowchart TD
   pure-Go SQLite (`backend/userauth/`).
 - **Storage**: pluggable interface — local JSON (default), PostgreSQL (multi-user), or
   S3-compatible object store (BYO/Tigris).
+- **Deploy modes** (`backend/deploymode/`, `DEPLOY_MODE`): exactly two — `standalone`
+  (default; a fully sovereign self-host with no OS gateway in front — all features
+  open, no billing/entitlement gating, blob I/O via the process-wide object client
+  or a silent no-op) and `os` (Office running as an app **behind a Vulos OS box
+  gateway**). Office is never multi-tenant cloud-hosted; the cloud runs Mail + Relay
+  + the control plane only. In `os` mode the process **refuses to boot** without an
+  authenticated posture (native auth or SSO introspection) so a hosted deployment can
+  never silently collapse every caller onto one shared identity.
+- **Storage seam** (`backend/storage/seam_client.go`, `backend/handlers/bucket_store.go`):
+  in `os` mode the gateway injects per-request `X-Vulos-Storage-*` headers describing a
+  short-lived, per-user S3 slice, so Office never holds full-bucket credentials. The
+  headers are honoured **only** when the request also carries a valid
+  `X-Vulos-Storage-Broker-Auth` matching `VULOS_STORAGE_BROKER_SECRET` (constant-time),
+  and the injected endpoint is SSRF-checked (`ValidateSeamEndpoint`: https always,
+  http only for loopback/private hosts). Otherwise the seam headers are ignored and
+  Office falls back to the standalone object client. In every mode blob keys are built
+  by `storage.OrgScopedKey(accountID, name)`, which scopes each object under its
+  owning account and sanitises every segment so a caller-influenced id can never inject
+  a path separator or `..` and escape into another account's namespace.
 - **Org-bucket wiring**: `backend/storage/backendconfig.go` carries `OfficeBackendConfig`
-  for per-org S3 bucket + CRDT snapshot configuration, injected by the Vulos control plane.
+  for the S3 bucket + CRDT snapshot configuration used by the standalone object client.
 - **Per-file ACLs**: `backend/fileacl/` enforces per-file read/write/admin permissions
-  backed by SQLite or Postgres (co-located with the file store).
+  backed by SQLite or Postgres (co-located with the file store). Identity is always the
+  server-verified requester (JWT subject / SSO tenant), never a client header, and a
+  denied file op returns `404` so responses never leak whether a file exists.
 
 ## See Also
 
