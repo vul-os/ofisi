@@ -71,9 +71,9 @@ never a general-purpose interactive accent.  When you need a new category colour
 Signal colours are the cloud semantic set: `warning` amber (`#f59e0b`), `error`
 rose (`#f43f5e`), `success` teal (`#2dd4bf`), `info` purple (`#C96AFF`) — each
 with a low-alpha `-bg` companion so backgrounds never shout.  Each app carries
-one low-saturation icon tint so Docs / Sheets / Slides / PDF / Talk are
+one low-saturation icon tint so Docs / Sheets / Slides / PDF are
 findable at a glance (`--app-docs` blue, `--app-sheets` green, `--app-slides`
-amber, `--app-pdf` red, `--app-talk` teal) — these colour the icon *stroke* in
+amber, `--app-pdf` red) — these colour the icon *stroke* in
 the rail and the Home card chip, never a row background.
 
 ---

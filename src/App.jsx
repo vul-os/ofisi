@@ -18,18 +18,9 @@ import Verify from './components/Verify'
 import AnonDocView from './components/AnonDocView'
 import InstallPrompt from './lib/InstallPrompt.jsx'
 
-// Chat + huddles ("Spaces"/Talk) is now the standalone Vulos Talk product, and
-// Calendar + Contacts come via the mail connector (CalDAV/CardDAV through
-// lilmail), not part of Office. seam-C handoff: those deep-links redirect to the
-// owning surface instead of being served in-process.
-// See backend/seam for the integration contract.
-// Cross-product handoff targets — set per deployment (VITE_*_URL). Empty (the
-// default) means that product isn't wired here, so its deep-links 404 locally
-// instead of bouncing to the public cloud. Keeps standalone/self-host Office
-// self-contained; operators who run the sibling products opt in via env.
-const TALK_URL = import.meta.env.VITE_TALK_URL || ''
-const MEET_URL = import.meta.env.VITE_MEET_URL || ''
-const MAIL_URL = import.meta.env.VITE_MAIL_URL || ''
+// Office is documents-only. Chat/video and calendar/contacts are THIRD-PARTY
+// (not Vulos products) and are deliberately not launched or redirected to from
+// here — Office ships no first-party Talk/Meet/Mail coupling.
 
 // Public routes that bypass Vulos auth entirely.
 // External signers and external verifiers have no Vulos account; anonymous
@@ -69,25 +60,6 @@ export default function App() {
       if (clean) navigate('/' + clean, { replace: true })
     }
   }, []) // eslint-disable-line
-
-  // seam-C handoff: chat/Spaces deep-links live in the Talk product, and
-  // meeting/call deep-links in the Meet product. Redirect the browser there
-  // (carrying the sub-path) rather than 404-ing on a route Office no longer owns.
-  if (TALK_URL && /^\/spaces(\/|$)/.test(location.pathname)) {
-    window.location.href = TALK_URL + location.pathname + location.search
-    return null
-  }
-  if (MEET_URL && /^\/(meetings|room)(\/|$)/.test(location.pathname)) {
-    window.location.href = MEET_URL + location.pathname + location.search
-    return null
-  }
-  // seam-C handoff: Calendar + Contacts come via the mail connector (CalDAV/
-  // CardDAV through lilmail), not part of Office.
-  // Redirect their deep-links (carrying the sub-path) to the mail surface.
-  if (MAIL_URL && /^\/(calendar|contacts)(\/|$)/.test(location.pathname)) {
-    window.location.href = MAIL_URL + location.pathname + location.search
-    return null
-  }
 
   // Render public routes immediately — no auth check, no Layout shell.
   if (isPublicRoute(location.pathname)) {

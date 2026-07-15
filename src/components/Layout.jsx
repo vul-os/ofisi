@@ -25,7 +25,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Home as HomeIcon, FileText, Table2, Presentation, FileSearch, MessageSquare,
+  Home as HomeIcon, FileText, Table2, Presentation, FileSearch,
   LogOut, ChevronLeft, ChevronRight, Settings as SettingsIcon, Plus,
   Menu, X, Bell,
 } from 'lucide-react'
@@ -40,20 +40,13 @@ import { Sidebar, IconButton, Tooltip, ThemeSwitch } from './ui'
 // Sheets/Slides/PDF at a glance); it brightens to accent only when its app is
 // active — the cloud "restrained accent" trait. Tints live on the icon glyph
 // only (never a row bg) and match the Home page cards so rail ↔ content agree.
-// seam-C handoff: team chat + huddles is the standalone Vulos Talk product now.
-// The "Talk" rail item launches it (external) instead of routing in-process.
-// Calendar + Contacts come via the mail connector (CalDAV/CardDAV through
-// lilmail), not part of Office — documents-only, so they no longer appear in the rail.
-const TALK_URL = import.meta.env.VITE_TALK_URL || ''
-
+// Office is documents-only: chat/video and calendar/contacts are third-party and
+// are NOT launched from here.
 const NAV_APPS = [
   { label: 'Docs',     icon: FileText,      route: '/docs',    tint: 'text-app-docs'   },
   { label: 'Sheets',   icon: Table2,        route: '/sheets',  tint: 'text-app-sheets' },
   { label: 'Slides',   icon: Presentation,  route: '/slides',  tint: 'text-app-slides' },
   { label: 'PDF',      icon: FileSearch,    route: '/pdf',     tint: 'text-app-pdf'    },
-  // Cross-product launcher to the standalone Talk product — shown only when
-  // wired (VITE_TALK_URL); standalone Office stays documents-only otherwise.
-  ...(TALK_URL ? [{ label: 'Talk', icon: MessageSquare, external: TALK_URL, tint: 'text-app-talk' }] : []),
 ]
 
 // Recent-file rows mirror the app tints so a recent doc/sheet/slide reads the
@@ -113,16 +106,14 @@ function SidebarContent({ collapsed, onNavigate, onNewFile }) {
       </Sidebar.Section>
 
       <Sidebar.Section label="Apps">
-        {NAV_APPS.map(({ label, icon, route, external, beta, tint }) => (
+        {NAV_APPS.map(({ label, icon, route, beta, tint }) => (
           <Sidebar.Item
-            key={route ?? external}
-            to={external ? undefined : route}
+            key={route}
+            to={route}
             icon={icon}
             iconAccent={tint}
-            title={external ? `${label} (opens in a new tab)` : beta ? `${label} (beta)` : label}
-            onClick={external
-              ? () => { window.open(external, '_blank', 'noopener'); onNavigate?.() }
-              : onNavigate}
+            title={beta ? `${label} (beta)` : label}
+            onClick={onNavigate}
           >
             {label}
             {beta && !collapsed && (
