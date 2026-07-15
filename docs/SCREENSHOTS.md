@@ -97,5 +97,5 @@ The Presentations editor (Reveal.js) open on the 5-slide "Vulos Office Product O
 
 The PDF viewer with annotation and signing tools. (A PDF file must be opened or uploaded to show content — the seed data does not include a pre-loaded PDF.)
 
-> **Calendar and Contacts** moved to the Vulos Mail/PIM product — their screenshots
-> and seed data now live in `vulos-mail`, not here.
+> **Calendar and Contacts** moved to the mail connector — their screenshots
+> and seed data now live with lilmail, not here.

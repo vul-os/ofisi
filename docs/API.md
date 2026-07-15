@@ -4,7 +4,7 @@ A clean, JSON-only REST API over the Vulos Office document engine (Docs, Sheets,
 Slides). It exposes the same document store, per-file access control, and export
 services the web app uses, behind a stable, versioned, developer-facing surface.
 
-Conventions (modelled on the Vulos Mail `/v1` API):
+Conventions (modelled on the mail connector's `/v1` API — lilmail):
 
 - **JSON in, JSON out.** Request and response bodies are `application/json`
   (export endpoints return binary office files — see below).

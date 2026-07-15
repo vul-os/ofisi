@@ -225,12 +225,12 @@ reports what the instance is **actually** doing, instead of hardcoded placeholde
 - **Screenshots**: added a `settings` capture to `npm run screenshots` and the
   README gallery (`scripts/screenshots.mjs`, `docs/screenshots/settings.png`).
 
-### Changed — Calendar + Contacts moved to Vulos Mail/PIM
+### Changed — Calendar + Contacts moved to the mail connector
 
 Vulos Office is now **documents-only** (Docs, Sheets, Slides, PDF/Signing). Calendar
-and Contacts were redundant with the canonical PIM surfaces now owned by the **Vulos
-Mail** product (vulos-mail CalDAV/CardDAV server + lilmail `/v1/calendar` +
-`/v1/contacts` + `@vulos/mail-ui`), so they have been removed from this repo. This
+and Contacts were redundant with the canonical PIM surfaces now served by the **mail
+connector** (lilmail CalDAV/CardDAV + `/v1/calendar` + `/v1/contacts` +
+`@vulos/mail-ui`), so they have been removed from this repo. This
 mirrors the earlier Meet/Talk extractions.
 
 - **Frontend removed**: the `src/apps/calendar` + `src/apps/contacts` apps, the

@@ -2,8 +2,8 @@
 
 Vulos Office is the **documents** surface of the Vulos project — a self-hosted,
 open-source (MIT) suite for Documents, Sheets, Slides, and PDF/Signing that runs
-as a single Go binary with a React frontend. (Calendar and Contacts now live in
-the Vulos Mail/PIM product.) Today it is a
+as a single Go binary with a React frontend. (Calendar and Contacts come through
+the mail connector — CalDAV/CardDAV via lilmail.) Today it is a
 fast, private, local-first editor. This roadmap charts its growth into a
 **networked** office: the same documents, edited together in real time by people
 on different Vulos instances, and PDFs signed with cryptographic audit trails —
@@ -325,8 +325,8 @@ navigated. Coordinate with the multi-target build work above for OS launcher int
     text, shapes, and images in normalized slide space, per-element animations,
     master slides, themes, presenter view. Reveal.js is used only for the
     full-screen *present* transition, not authoring.
-- **Calendar** and **Contacts** moved to the Vulos Mail/PIM product (vulos-mail
-  CalDAV/CardDAV + lilmail `/v1/calendar` + `/v1/contacts`); Office is documents-only.
+- **Calendar** and **Contacts** moved to the mail connector (CalDAV/CardDAV via
+  lilmail `/v1/calendar` + `/v1/contacts`); Office is documents-only.
 - **Org-bucket wiring** (`OfficeBackendConfig`) is fully wired (`FIX-OFFICE-STORE-WIRE-01`):
   file CRUD and sealed PDFs read/write to the S3-compatible bucket (Tigris or MinIO)
   when `VULOS_ORG_ID` is set; falls back to local storage otherwise.

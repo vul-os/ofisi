@@ -26,7 +26,7 @@ Docs · Sheets · Slides · PDF Signing
 
 ## What is this?
 
-Vulos Office is the **documents** product of VulOS, shipped as a **single Go binary** with the entire frontend embedded — no cloud account, no telemetry, no lock-in. It brings document editing, spreadsheets, presentations, and cryptographic document signing together in one clean, modern web interface. (Calendar and Contacts now live in the **Vulos Mail/PIM** product — see [Part of VulOS](#part-of-vulos).)
+Vulos Office is the **documents** product of VulOS, shipped as a **single Go binary** with the entire frontend embedded — no cloud account, no telemetry, no lock-in. It brings document editing, spreadsheets, presentations, and cryptographic document signing together in one clean, modern web interface. (Calendar and Contacts come through the **mail connector** — CalDAV/CardDAV via lilmail — see [Part of VulOS](#part-of-vulos).)
 
 It is **independently self-hostable by default**: with zero configuration it runs as a single-user, local-storage app on your own machine. Everything that *could* tie it to an external service lives behind a small, clean **seam** — so you can run it fully standalone, or opt into the [vulos-cloud](#self-hosting) control plane for multi-tenant identity, entitlements, and usage. The core never imports cloud code; remove the adapter and the standalone build still compiles.
 
@@ -40,17 +40,19 @@ It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers wh
 
 **VulOS** is an open, self-hostable web OS + app suite. The **Vulos OS** is the shell (launcher, windows, dock, assistant) that hosts the apps; each product is also independently self-hostable on its own:
 
-- **Vulos Mail** — mail + calendar + contacts (engine: lilmail; server: vulos-mail)
 - **Vulos Talk** — team chat + channels/Spaces + huddles
 - **Vulos Meet** — video meetings (LiveKit SFU)
 - **Vulos Office** — documents: docs, sheets, slides, PDF *(this repo)*
+- **Vulos Board** — collaborative whiteboard (`@vulos/board-ui`)
 - **Vulos Relay** — sovereign connectivity fabric (`@vulos/relay-client`)
-- **Vulos Workspace** — an OS-hosted productivity hub that consolidates Mail, Office, Talk & Meet
+- **Vulos Workspace** — an OS-hosted productivity hub that consolidates Office, Talk, Meet & Board
 - **Vulos OS** — the web-native desktop (the shell that hosts the suite apps)
+
+**Mail is a connector, not a product:** bring your own mailbox (Gmail / Microsoft 365 / IMAP) into Workspace and the OS via **lilmail** (the IMAP/SMTP connector client) and the shared **`@vulos/mail-ui`** inbox surface — plus calendar/contacts over CalDAV/CardDAV.
 
 Products never import each other — they are linked/embedded across clean seams.
 
-**Vulos Office's role:** the documents surface — Docs, Sheets, Slides, and PDF/Signing. It **runs standalone** as a single Go binary **and** as an app hosted by the Vulos OS, where the Workspace hub app can surface it. Its sidebar links out to Vulos Talk and Vulos Meet, but never embeds them — chat lives in **vulos-talk** and video in **vulos-meet**. Calendar and Contacts are **not** part of Office; they are the canonical PIM surfaces of **Vulos Mail** (CalDAV/CardDAV + lilmail `/v1/calendar` + `/v1/contacts`).
+**Vulos Office's role:** the documents surface — Docs, Sheets, Slides, and PDF/Signing. It **runs standalone** as a single Go binary **and** as an app hosted by the Vulos OS, where the Workspace hub app can surface it. Its sidebar links out to Vulos Talk and Vulos Meet, but never embeds them — chat lives in **vulos-talk** and video in **vulos-meet**. Calendar and Contacts are **not** part of Office; they come through the **mail connector** (CalDAV/CardDAV via lilmail `/v1/calendar` + `/v1/contacts`).
 
 ---
 
