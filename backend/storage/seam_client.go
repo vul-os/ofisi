@@ -80,7 +80,14 @@ func (c SeamStorageConfig) Trusted() bool {
 	if presented == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(presented), []byte(secret)) == 1
+	// Compare fixed-width sha256 digests rather than the raw secrets: a direct
+	// ConstantTimeCompare over the raw bytes short-circuits on a length mismatch,
+	// leaking the configured secret's byte-length as a timing side-channel.
+	// Hashing both sides to 32 bytes first removes that leak (correct secret
+	// still accepted, wrong still rejected). Mirrors sibling Talk's broker gate.
+	ph := sha256.Sum256([]byte(presented))
+	sh := sha256.Sum256([]byte(secret))
+	return subtle.ConstantTimeCompare(ph[:], sh[:]) == 1
 }
 
 // officePrefix returns the key prefix under which office namespaces its blobs:

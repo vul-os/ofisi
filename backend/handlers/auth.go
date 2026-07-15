@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"net/http"
 	"os"
@@ -266,9 +267,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		// supplied OR configured password outright (an empty configured password
 		// must never authenticate anyone), and compare in constant time to avoid
 		// leaking the password length/prefix via timing.
-		if req.Password != "" && h.cfg.Auth.Password != "" &&
-			subtle.ConstantTimeCompare([]byte(req.Password), []byte(h.cfg.Auth.Password)) == 1 {
-			authOK = true
+		if req.Password != "" && h.cfg.Auth.Password != "" {
+			// Compare fixed-width sha256 digests: a raw ConstantTimeCompare
+			// short-circuits on a length mismatch, leaking the configured
+			// password's byte-length via timing. Hashing both sides to 32 bytes
+			// first closes that side-channel with no behaviour change.
+			got := sha256.Sum256([]byte(req.Password))
+			want := sha256.Sum256([]byte(h.cfg.Auth.Password))
+			if subtle.ConstantTimeCompare(got[:], want[:]) == 1 {
+				authOK = true
+			}
 		}
 		if subject == "" {
 			subject = "self"
@@ -423,7 +431,14 @@ func registrationTokenOK(c *gin.Context) (configured, valid bool) {
 	if got == "" {
 		return true, false
 	}
-	return true, subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+	// Compare fixed-width sha256 digests rather than the raw token: a direct
+	// ConstantTimeCompare short-circuits on a length mismatch, leaking the
+	// configured token's byte-length via timing. Hashing both sides to 32 bytes
+	// first closes that side-channel (correct token still accepted, wrong
+	// rejected).
+	gotH := sha256.Sum256([]byte(got))
+	wantH := sha256.Sum256([]byte(want))
+	return true, subtle.ConstantTimeCompare(gotH[:], wantH[:]) == 1
 }
 
 // requestIsAdmin validates an optional session JWT on the request and reports

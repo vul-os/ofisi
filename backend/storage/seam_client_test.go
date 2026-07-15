@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -207,6 +208,32 @@ func TestSeamStorageConfig_Trusted(t *testing.T) {
 	}
 	if (SeamStorageConfig{BrokerAuth: secret}).Trusted() {
 		t.Fatal("Trusted() = true with no endpoint (seam absent)")
+	}
+}
+
+// TestSeamStorageConfig_TrustedHashedCompare pins the F5 fix: the broker-secret
+// gate compares fixed-width sha256 digests, so a wrong secret of a DIFFERENT
+// byte-length than the configured one is still rejected (a raw compare would
+// short-circuit on length) while the correct secret — regardless of length — is
+// still accepted, and an empty presented secret still fails closed.
+func TestSeamStorageConfig_TrustedHashedCompare(t *testing.T) {
+	for _, secret := range []string{"s", "broker-secret-123", strings.Repeat("x", 200)} {
+		t.Setenv("VULOS_STORAGE_BROKER_SECRET", secret)
+
+		if !(SeamStorageConfig{Endpoint: "https://x", BrokerAuth: secret}).Trusted() {
+			t.Fatalf("correct secret (len=%d) not accepted", len(secret))
+		}
+		// Wrong secret whose length differs from the configured one — a raw
+		// ConstantTimeCompare would leak the mismatch via the length short-circuit;
+		// the hashed compare must still reject it.
+		for _, wrong := range []string{"", "y", "wrong", strings.Repeat("z", 999)} {
+			if wrong == secret {
+				continue
+			}
+			if (SeamStorageConfig{Endpoint: "https://x", BrokerAuth: wrong}).Trusted() {
+				t.Fatalf("wrong secret %q accepted against configured len=%d", wrong, len(secret))
+			}
+		}
 	}
 }
 
