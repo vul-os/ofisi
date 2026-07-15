@@ -42,8 +42,8 @@ import { Sidebar, IconButton, Tooltip, ThemeSwitch } from './ui'
 // only (never a row bg) and match the Home page cards so rail ↔ content agree.
 // seam-C handoff: team chat + huddles is the standalone Vulos Talk product now.
 // The "Talk" rail item launches it (external) instead of routing in-process.
-// Calendar + Contacts moved to the Vulos Mail/PIM product — Office is
-// documents-only, so they no longer appear in the rail.
+// Calendar + Contacts come via the mail connector (CalDAV/CardDAV through
+// lilmail), not part of Office — documents-only, so they no longer appear in the rail.
 const TALK_URL = import.meta.env.VITE_TALK_URL || ''
 
 const NAV_APPS = [

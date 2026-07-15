@@ -19,8 +19,9 @@ import AnonDocView from './components/AnonDocView'
 import InstallPrompt from './lib/InstallPrompt.jsx'
 
 // Chat + huddles ("Spaces"/Talk) is now the standalone Vulos Talk product, and
-// Calendar + Contacts moved to the Vulos Mail/PIM product. seam-C handoff:
-// those deep-links redirect to the owning app instead of being served in-process.
+// Calendar + Contacts come via the mail connector (CalDAV/CardDAV through
+// lilmail), not part of Office. seam-C handoff: those deep-links redirect to the
+// owning surface instead of being served in-process.
 // See backend/seam for the integration contract.
 // Cross-product handoff targets — set per deployment (VITE_*_URL). Empty (the
 // default) means that product isn't wired here, so its deep-links 404 locally
@@ -80,8 +81,9 @@ export default function App() {
     window.location.href = MEET_URL + location.pathname + location.search
     return null
   }
-  // seam-C handoff: Calendar + Contacts are now the Vulos Mail/PIM product.
-  // Redirect their deep-links (carrying the sub-path) to the Mail surface.
+  // seam-C handoff: Calendar + Contacts come via the mail connector (CalDAV/
+  // CardDAV through lilmail), not part of Office.
+  // Redirect their deep-links (carrying the sub-path) to the mail surface.
   if (MAIL_URL && /^\/(calendar|contacts)(\/|$)/.test(location.pathname)) {
     window.location.href = MAIL_URL + location.pathname + location.search
     return null
