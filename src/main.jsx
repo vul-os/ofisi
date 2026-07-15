@@ -19,10 +19,10 @@ configure({ lsKeyPrefix: 'vulos.office.endpoints.v1', healthPath: '/api/auth/sta
 if (import.meta.env.DEV) {
   import('@vulos/relay-client/roundTripCheck')
 }
-// OFFICE-OFFLINE-01: register SW for app-shell caching + prime cloud↔LAN failover.
-import { bootstrapOffline } from '@vulos/relay-client/offlineBootstrap'
-
-bootstrapOffline()
+// OFFICE-OFFLINE-01: register the app-shell SW (+ prime cloud↔LAN failover +
+// update detection) via the guarded PWA helper. No-op in dev, when embedded in
+// the OS hub, or on unsupported browsers — see src/lib/pwa.js.
+import { registerServiceWorker } from './lib/pwa.js'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -31,3 +31,5 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </BrowserRouter>
   </React.StrictMode>
 )
+
+registerServiceWorker()

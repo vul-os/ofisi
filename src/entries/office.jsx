@@ -15,9 +15,10 @@ import '../index.css'
 // RELAY-CLIENT-02: configure relay-client seams BEFORE bootstrap touches LS.
 import { configure } from '@vulos/relay-client/endpoints'
 configure({ lsKeyPrefix: 'vulos.office.endpoints.v1', healthPath: '/api/auth/status' })
-import { bootstrapOffline } from '@vulos/relay-client/offlineBootstrap'
-
-bootstrapOffline()
+// PWA: register the app-shell service worker (+ prime cloud↔LAN failover +
+// update detection) via the guarded PWA helper. No-op in dev, when embedded in
+// the OS hub, or on unsupported browsers — see src/lib/pwa.js.
+import { registerServiceWorker } from '../lib/pwa.js'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -26,3 +27,5 @@ createRoot(document.getElementById('root')).render(
     </BrowserRouter>
   </StrictMode>
 )
+
+registerServiceWorker()

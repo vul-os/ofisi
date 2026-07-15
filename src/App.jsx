@@ -16,6 +16,7 @@ import SignView from './apps/pdf/SignView'
 import EnvelopeDashboard from './components/EnvelopeDashboard'
 import Verify from './components/Verify'
 import AnonDocView from './components/AnonDocView'
+import InstallPrompt from './lib/InstallPrompt.jsx'
 
 // Chat + huddles ("Spaces"/Talk) is now the standalone Vulos Talk product, and
 // Calendar + Contacts moved to the Vulos Mail/PIM product. seam-C handoff:
@@ -127,6 +128,7 @@ export default function App() {
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <InstallPrompt />
     </Layout>
   )
 }

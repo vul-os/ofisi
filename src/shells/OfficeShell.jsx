@@ -24,6 +24,7 @@ import Home from '../components/Home.jsx'
 import AppHome from '../components/AppHome.jsx'
 import Settings from '../components/Settings.jsx'
 import AnonDocView from '../components/AnonDocView.jsx'
+import InstallPrompt from '../lib/InstallPrompt.jsx'
 import { LoadingState } from '../components/ui'
 
 const DocsEditor   = lazy(() => import('../apps/docs/DocsEditor.jsx'))
@@ -71,6 +72,7 @@ export default function OfficeShell() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        <InstallPrompt />
       </Layout>
     </RequireAuth>
   )
