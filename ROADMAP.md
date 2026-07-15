@@ -288,7 +288,7 @@ is no "Mail tier" gating Office.
 
 ### Multi-target builds: web subdomain + OS-embed library for all apps
 Build each Office app surface (docs, sheets, slides, pdf) as two targets:
-(1) a standalone web build served from a subdomain (`office.vulos.org`), and
+(1) a standalone web build served by **path** under the app hub (`app.vulos.org/office`), and
 (2) an embeddable library (`lib.jsx` export) consumed by the
 Vulos OS shell as a native app wrapper. Vite multi-entry config wires both outputs from the
 same source tree. The subdomain builds integrate with the `vulos-cloud` multi-target routing

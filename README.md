@@ -43,9 +43,15 @@ It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers wh
 - **Vulos OS** — the web-native desktop shell that hosts the apps
 - **Vulos Office** — documents: docs, sheets, slides, PDF, **whiteboards** *(this repo)*. The Excalidraw-based collaborative whiteboard (formerly `@vulos/board-ui`) is now a first-class Office document type, riding Office's own distributed P2P collab engine.
 - **Vulos Files** — file storage + P2P sharing, built into the OS
-- **Vulos Relay** — sovereign connectivity / reachability fabric (`@vulos/relay-client`)
+- **Vulos Relay** — sovereign connectivity / reachability fabric (`@vulos/relay-client`) — one of the two paid services
 - **llmux** — sovereign AI gateway
-- **Cloud / CP** — accounts, auth, provisioning and billing
+
+**Vulos = free, open-source software + two paid services.** The OS, all its apps
+(this one included), and the app store are OSS and free — you self-host them on
+your own box; Vulos does not host or provision boxes. Vulos bills for only two
+things: **Vulos Relay** (reachability) and **backup storage** (buckets). There is
+no compute, mail, or app-store billing. Apps are listed on the main site
+(`vulos.org/products/…`) and their source lives on GitHub (`github.com/vul-os`).
 
 **Comms are third-party:** chat and video use established open protocols/apps (Matrix/Element for chat; Element Call / Jitsi for video), not products built by Vulos.
 

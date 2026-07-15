@@ -37,7 +37,7 @@ After install:
 sudo systemctl enable --now vulos-bundle.target
 ```
 
-See https://docs.vulos.org/self-host/bundle for the full bundle reference.
+See https://github.com/vul-os/vulos/blob/dev/docs/SELF-HOST-BUNDLE.md for the full bundle reference.
 
 ### Shared storage config (env)
 

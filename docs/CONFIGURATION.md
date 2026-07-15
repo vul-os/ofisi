@@ -68,7 +68,7 @@ Precedence (first match wins): `vk_` API key → per-product session JWT → SSO
 **Operator quick-reference**
 
 - Self-host single-user box: leave `IDENTITY_URL` unset. Nothing else to do.
-- Cloud / multi-user: set `IDENTITY_URL=https://cp.vulos.org` and `VULOS_CP_TOKEN=<CP shared secret>` (plus `auth.enabled: true` / `VULOS_OFFICE_JWT_SECRET` if you also keep native JWT logins).
+- Cloud / multi-user: set `IDENTITY_URL=https://api.vulos.org` and `VULOS_CP_TOKEN=<CP shared secret>` (plus `auth.enabled: true` / `VULOS_OFFICE_JWT_SECRET` if you also keep native JWT logins).
 
 ### Database paths (SQLite)
 

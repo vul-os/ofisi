@@ -15,7 +15,7 @@ Conventions (modelled on the mail connector's `/v1` API — lilmail):
   filtered through the per-file ACL. Access denied to a document you may not see
   returns `404` (no existence leak), not `403`.
 
-Base path: `/v1`. All examples assume a host of `https://office.vulos.org`.
+Base path: `/v1`. All examples assume a host of `http://localhost:8080` (the standalone default).
 
 ---
 
@@ -114,7 +114,7 @@ For an unknown / revoked / expired key the CP still returns `200` with:
 
 | Env var              | Purpose                                                             |
 | -------------------- | ------------------------------------------------------------------ |
-| `VULOS_CP_BASE_URL`  | Control-plane base URL (e.g. `https://cp.vulos.org`). Enables the `vk_` path. Unset → session-only. |
+| `VULOS_CP_BASE_URL`  | Control-plane base URL (e.g. `https://api.vulos.org`). Enables the `vk_` path. Unset → session-only. |
 | `VULOS_CP_TOKEN`     | Service token sent as `X-Relay-Auth` on the introspection call. Optional. |
 
 These are the **same** env vars the optional cloud billing seam uses, so a

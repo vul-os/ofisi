@@ -45,13 +45,14 @@ Deploy and write a `latest` pointer so CDN routing resolves the current SHA:
 
 Each deploy uploads to `<target>/<sha>/` in the bucket, served via Tigris static:
 
-| Target | CDN domain | Bucket path |
+| Target | Served under | Bucket path |
 |---|---|---|
-| office | office.vulos.org | `office/<sha>/` |
+| office | `app.vulos.org/office/` | `office/<sha>/` |
 
-Static files are served from `cdn.vulos.org` (Tigris, configured in your
-`fly.toml` or DNS CNAME). See [vulos-naming-and-urls](../vulos/docs/) for the
-canonical URL scheme.
+Static files are served under the Vulos app hub (`app.vulos.org`, Tigris-backed,
+configured in your `fly.toml` or DNS CNAME). Apps are reached by **path** under
+the app hub — there are no per-product subdomains. See
+[vulos-naming-and-urls](../vulos/docs/) for the canonical URL scheme.
 
 ## SPA Fallback
 
@@ -77,9 +78,9 @@ With `--latest`, the script writes the deployed SHA as a plain-text object at
 `<target>/latest` in the bucket. Your CDN router or Fly proxy can read this to
 resolve the current deployment without a full directory listing.
 
-## Tigris + cdn.vulos.org
+## Tigris + the app hub (`app.vulos.org`)
 
 Static assets are uploaded to Tigris (`fly.storage.tigris.dev`) and served
-through `cdn.vulos.org`. The Tigris bucket must have public static serving
+under the Vulos app hub (`app.vulos.org`). The Tigris bucket must have public static serving
 enabled. See the [Tigris docs](https://www.tigrisdata.com/docs/objects/static-website/)
 for bucket configuration.

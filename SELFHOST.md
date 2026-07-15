@@ -67,7 +67,7 @@ implements the same `seam` interfaces against the control plane. It is selected
 **only** when `VULOS_CP_BASE_URL` is set:
 
 ```sh
-export VULOS_CP_BASE_URL="https://cp.vulos.org"   # enables the cloud adapter
+export VULOS_CP_BASE_URL="https://api.vulos.org"   # enables the cloud adapter
 export VULOS_CP_TOKEN="<service token>"           # optional outbound auth
 export VULOS_ORG_ID="<org id>"                    # tenant scoping (also used by storage)
 ```
