@@ -21,7 +21,7 @@
 //   - Offline fallback: if a navigation request fails, serve the cached shell
 //     (index.html) so the SPA can render and show its own offline state.
 //
-// Security notes (mirror vulos-talk / vulos-workspace posture):
+// Security notes:
 //   - NEVER_CACHE below is the single source of truth for what must not be
 //     cached. src/sw.security.test.js asserts these prefixes stay excluded so a
 //     future edit can't silently start caching session data, a token, or a

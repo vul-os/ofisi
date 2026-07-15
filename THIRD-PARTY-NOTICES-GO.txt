@@ -4796,9 +4796,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-golang.org/x/crypto  v0.51.0
+golang.org/x/crypto  v0.52.0
 Licence declared by the component: BSD-3-Clause
-Source: https://cs.opensource.google/go/x/crypto/+/v0.51.0:LICENSE
+Source: https://cs.opensource.google/go/x/crypto/+/v0.52.0:LICENSE
 Ecosystem: Go
 ------------------------------------------------------------------------------
 Copyright 2009 The Go Authors.
@@ -4830,9 +4830,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-golang.org/x/image/font/gofont/goregular  v0.41.0
+golang.org/x/image/font/gofont/goregular  v0.43.0
 Licence declared by the component: BSD-3-Clause
-Source: https://cs.opensource.google/go/x/image/+/v0.41.0:LICENSE
+Source: https://cs.opensource.google/go/x/image/+/v0.43.0:LICENSE
 Ecosystem: Go
 ------------------------------------------------------------------------------
 Copyright 2009 The Go Authors.
@@ -4898,9 +4898,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-golang.org/x/sync/semaphore  v0.20.0
+golang.org/x/sync/semaphore  v0.21.0
 Licence declared by the component: BSD-3-Clause
-Source: https://cs.opensource.google/go/x/sync/+/v0.20.0:LICENSE
+Source: https://cs.opensource.google/go/x/sync/+/v0.21.0:LICENSE
 Ecosystem: Go
 ------------------------------------------------------------------------------
 Copyright 2009 The Go Authors.
@@ -4966,9 +4966,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-golang.org/x/text  v0.37.0
+golang.org/x/text  v0.38.0
 Licence declared by the component: BSD-3-Clause
-Source: https://cs.opensource.google/go/x/text/+/v0.37.0:LICENSE
+Source: https://cs.opensource.google/go/x/text/+/v0.38.0:LICENSE
 Ecosystem: Go
 ------------------------------------------------------------------------------
 Copyright 2009 The Go Authors.

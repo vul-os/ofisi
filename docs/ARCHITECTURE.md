@@ -14,28 +14,28 @@ Vulos Office is a collaborative document editing + e-signing service. It exposes
 > standalone widgets. Chat and video are third-party (Matrix/Element; Element Call /
 > Jitsi), not Vulos products. The Vulos OS is the shell that hosts the apps.
 
-> **Collaboration transport note:** Live co-editing is CRDT-based and runs over
-> **three complementary transports**, all wired today:
-> 1. **Server-mediated (SSE)** — `ServerCollabSession` streams ops over
->    `GET /v1/documents/:id/collab/stream` (down) + `POST …/collab/ops` (up),
->    ACL-gated and persisted authoritatively. This is the always-on account path;
->    it keeps a doc converging and saved even with zero peers. **Live presence**
->    (cursors + roster) rides the same path via `POST …/collab/presence`
->    (`VIEWER+`, identity-stamped server-side, **ephemeral / never persisted**),
->    so "who is here" + live carets work on the cloud path with **no p2p peer**.
->    Presence is fanned out strictly per-doc (no cross-doc leakage) and is merged
->    with the p2p roster so a peer is never double-counted.
-> 2. **Cloud P2P fabric (plaintext)** — `DocsCollabSession`/`GridSession`/
->    `TreeSession` fan ops over the Vulos peer fabric (WebRTC + relay fallback)
->    for low-latency co-editing when peers can connect.
-> 3. **E2E P2P (encrypted invite-link)** — `P2PCollabSession` seals ops with
->    AES-256-GCM (HKDF-derived room key carried in the URL fragment, never sent
->    to the server); the server path is suppressed while this is active so
->    encrypted ops never traverse a readable relay.
+> **Collaboration transport note:** Live co-editing is CRDT-based and runs
+> **entirely peer-to-peer — there is NO central document server.** The Office
+> binary hosts no op-relay, no doc-state hub, and no server-mediated collab
+> endpoint.
+> - **The document** rides an **end-to-end-encrypted room** as **Yjs** updates
+>   (`YP2PCollabSession`, `src/lib/crdt/yP2PSession.js`). Peers connect **directly**
+>   over WebRTC data channels (STUN-assisted); a **content-blind relay** circuit is
+>   used only as a hard-NAT fallback (per-session X25519 box — ciphertext only).
+>   Frames are sealed AES-256-GCM under an HKDF-derived room key carried in the URL
+>   **fragment** (`#vp2p=…`), which never reaches any server.
+> - **Presence** (cursors + roster) rides the **same E2E room**, so the host never
+>   learns who is in a room; it is ephemeral and never persisted. A read-only peer
+>   holds the decryption key but not the RW-authority MAC, so its writes are
+>   cryptographically refused.
+> - **The only server role** is content-blind peer **discovery** (signaling + ICE
+>   at `/api/peering/*`), provided by the host (Vulos OS / Relay) — never document
+>   content. A bare standalone binary mounts none of it, so collaboration stays
+>   **local-only** and autosaves; the UI reports "Offline" honestly.
 >
-> All three share the same idempotent/commutative `TextCRDT` (RGA) base, so ops
-> arriving from more than one transport converge without double-apply. Remote-op
-> ingress is validated **fail-closed** (malformed/oversized ops drop, never throw).
+> Ingress is validated **fail-closed**: every untrusted update is shadow-applied,
+> converted against the real schema, and image/link-clamped before it can touch
+> the live document (malformed/oversized/unrenderable updates drop, never throw).
 
 ## Component Map
 

@@ -66,7 +66,7 @@ Products never import each other — they are linked/embedded across clean seams
 | **Sheets** | Full spreadsheet grid via Fortune Sheet — formulas, number formats, conditional formatting, **data validation**, **charts** (column/bar/line/area/pie), **filters**, **pivot tables**, **named ranges**, freeze panes |
 | **Slides** | Presentation editor on a **from-scratch positioned-object canvas** — free drag/resize/rotate of text, shapes, and images in normalized slide space, per-element **animations**, **themes**, editable **master slides**, per-slide **transitions**, **presenter view** (notes + timer in a second window), template gallery, `.pptx`/`.odp` import. The full-screen *present* overlay uses Reveal.js only as the slide-transition host for those positioned objects |
 | **Signing** | View, **annotate** (text/draw/shapes), **fill interactive form fields** (AcroForm detection + one-click fill), and **sign** PDFs (draw/type/upload); multi-party signing envelopes (sequential or parallel) with a public signer page and a cryptographic audit trail; page reorder/rotate/insert/extract |
-| **Real-time collab** | Docs gets three CRDT transports: always-on **server-mediated (SSE, ACL-gated)**, low-latency **cloud P2P fabric**, and **E2E-encrypted P2P** via invite link. Sheets/Slides get live presence + cursors and CRDT content sync over the **cloud P2P fabric** when a peering host provides it (a standalone binary does not — content still saves normally, it just isn't live-synced between browsers); the server-mediated SSE path is Docs-only today |
+| **Real-time collab** | **Always peer-to-peer — there is no central document server.** Docs sync as **Yjs CRDT** updates inside an **end-to-end-encrypted** room: peers connect **directly** over WebRTC (STUN-assisted), with a **content-blind relay** only as a hard-NAT fallback. You share collaboration via an **invite link** (`#vp2p=`); the key rides the URL fragment and never reaches any server. Sheets/Slides get live presence + cursors and CRDT content sync over the same peer fabric. Collaboration needs a host that provides content-blind peer **discovery** (`/api/peering/*`, a Vulos OS / Relay deployment); a bare standalone binary has none, so editing stays **local-only** and autosaves — no silent "fake Live". See [docs/COLLABORATION.md](docs/COLLABORATION.md) |
 | **Import / Export** | Docs `.docx` / Markdown / HTML / PDF · Sheets `.xlsx` / `.csv` · Slides `.pptx` / PDF · PDF signing; browse-and-import from the server's own `~/Documents`, `~/Downloads`, `~/Desktop` (single-user self-host only — disabled in multi-user mode, since it would expose the operator's local files to every account) |
 | **Storage** | Local files + SQLite by default; optional PostgreSQL (schema `office`) for multi-user; optional S3-compatible object store |
 | **Auth** | Optional password / JWT login — off by default for local use; per-file ACLs when multi-user |
@@ -188,27 +188,37 @@ The cloud adapter lives in a **separate package** and is selected *only* when `V
 
 ## Real-time collaboration
 
-Co-editing is **CRDT-based**. Every surface diffs local edits into commutative
-CRDT ops (a RGA text CRDT for Docs — mirroring the Go `backend/crdt/text.go` —
-plus LWW grid, fractional-index tree, and comment/suggestion CRDTs). Ops fan out
-over **three complementary transports**, and because the CRDT apply is
-idempotent, ops arriving from more than one transport converge with no
-double-apply:
+Co-editing is **CRDT-based and always peer-to-peer — there is no central
+document server.** Docs sync as **Yjs** updates (structure-aware: bold, headings,
+tables, images all propagate correctly); Sheets and Slides use an LWW grid CRDT
+and a fractional-index tree CRDT. Because CRDT apply is idempotent + commutative,
+peers converge with no coordinating authority — which is exactly what lets the
+document ride an end-to-end-encrypted room where no server could rebase anything.
 
-| Transport | When | Notes |
-|-----------|------|-------|
-| **Server-mediated (SSE)** | Always-on account path | Ops **and live presence** stream over SSE, are ACL-gated, and (ops) persisted authoritatively — a doc converges and stays saved even with **zero peers**, and a late joiner catches up from the server. |
-| **Cloud P2P fabric** | When peers can connect | Low-latency WebRTC + relay-fallback over the Vulos peer fabric (plaintext). |
-| **E2E-encrypted P2P** | "Collaborate via link" | Ops sealed with AES-256-GCM; the room key is HKDF-derived and carried in the URL **fragment** (never sent to the server). While active, the server path is **suppressed** so encrypted ops never traverse a readable relay. |
+**How edits travel (in order):**
+
+| Path | When | Notes |
+|------|------|-------|
+| **Direct WebRTC data channel** | The default — whenever two peers can connect | Edits flow **browser-to-browser**, end-to-end-encrypted (AES-256-GCM). NAT traversal via host-provided **STUN/TURN**. Nothing in the middle. |
+| **Content-blind relay circuit** | Fallback only, when a peer pair can't hole-punch (hard NAT) | The relay routes **ciphertext it cannot read** (per-session X25519 box). Still no plaintext, still no document server. |
+| **Local-only** | No peering host / offline | You keep editing; your work **autosaves** to your own storage and syncs to peers when they're reachable. The UI says "Offline" honestly — no fake "Live". |
+
+You enter collaboration by sharing an **invite link**. Sharing mints a random
+32-byte room key; it is HKDF-derived into a content key + an RW-authority MAC key
++ a non-secret rendezvous id, and carried in the URL **fragment** (`#vp2p=…`),
+which **never reaches any server**. A read-write link and a read-only link are
+minted from the same key; ro peers hold the decryption key but not the RW MAC, so
+their writes are cryptographically refused.
+
+The only server role in collaboration is **content-blind peer discovery**
+(signaling + ICE at `/api/peering/*`, provided by a Vulos OS / Relay host) — it
+learns *that* some peers share a random room id, never any content.
 
 Live **presence** — avatar stack, roster, and **remote cursors/selections** —
-renders on top of whichever transport is active. Presence is **not p2p-only**:
-it also rides the server SSE path (`POST /collab/presence`, `VIEWER+`,
-identity-stamped server-side, **ephemeral / never persisted**), so "who is here"
-and live carets work on the account/cloud path even when **no relay or WebRTC
-peer is reachable**. The two transports are merged; a peer is never
-double-counted. A read-only **viewer** legitimately shows a caret and appears in
-the roster, but a viewer's content **ops** are still refused (`403`).
+rides the **same E2E-encrypted room** as the document, so the host never learns
+who is in a room. Presence is ephemeral and never persisted. A read-only
+**viewer** legitimately shows a caret and appears in the roster, but a viewer's
+content writes are cryptographically refused.
 
 ---
 

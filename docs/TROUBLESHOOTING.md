@@ -50,19 +50,18 @@ Vulos Office running → http://localhost:8080
 
 ---
 
-## 3. Document won't sync (account / server path)
+## 3. Document won't sync (peer-to-peer)
 
-The account path syncs Docs over SSE: `GET /v1/documents/:id/collab/stream` (down) and `POST /v1/documents/:id/collab/ops` (up). Check the Network tab for these.
+Collaboration is **peer-to-peer — there is no central document server** to check. Edits travel between browsers over an E2E-encrypted WebRTC room; the only server piece is content-blind peer **discovery** at `/api/peering/*`. In the Network tab you should see a WebSocket to `/api/peering/stream` (discovery) and a WebRTC connection — and **never** a `/v1/documents/*/collab/*` request (there is none).
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Editor shows degraded/not-live status; edits only appear after reload | The SSE stream can't stay open — a reverse proxy is **buffering** or timing out the `text/event-stream` response | Disable proxy buffering for `/v1/*` (nginx: `proxy_buffering off;` + long `proxy_read_timeout`); the client marks itself not-live if the stream can't reopen within ~8 s, and keeps retrying |
-| `POST …/collab/ops` returns `403` | You are a **viewer/commenter** — content ops require the *editor* role. This is enforcement, not a bug | Ask the owner to raise your role. Your caret/presence still shows; your edits are local-only |
-| Stream or ops return `404` | You lost access, the doc was deleted, or you were never granted — no-access is deliberately `404` (no existence leak) | Confirm the share with the owner (Settings → Admin → audit log shows grants/revokes) |
-| `401` on collab endpoints | Session expired (JWT lifetime = `auth.session_hours`), or SSO introspection failed **closed** (identity provider down/misconfigured) | Log in again; admins: check `[sso]` startup line, `IDENTITY_URL` reachability and `VULOS_CP_TOKEN` |
-| `429` on ops/saves | Per-IP write token bucket (burst 30, refill 10/s) — usually many users behind one NAT/proxy IP, or a script | Back off; put real client IPs in front of the limiter; trusted internal tooling can run the server with `--no-rate-limit-writes` |
-| Two people edit but never see each other, no errors | You're in an **E2E link session** (`#vp2p=` in the URL) — the server path is *deliberately suppressed* there, and E2E needs the peering fabric | Everyone must open the *same* invite link (fragment intact); or drop to account sharing, which always syncs via the server |
-| Sheets/Slides don't live-sync between users | Expected on a bare standalone server: live CRDT sync for Sheets/Slides rides the P2P fabric only (Docs additionally has the server SSE path) | Run Office behind a Vulos OS/Relay host that provides `/api/peering/*`; otherwise Sheets/Slides still autosave — reload to see others' saved changes |
+| Editor shows "Offline"; nobody else appears | This deployment has **no peering fabric** — a bare standalone Office binary does not mount `/api/peering/*`, so peers can't discover each other | Run Office behind a **Vulos OS / Relay host** that provides `/api/peering/*` (signaling + ICE). Your edits still autosave to your storage regardless |
+| An invite link opens but nobody connects | Discovery unreachable (proxy dropped the `/api/peering/stream` WebSocket) **or** both peers are behind hard NATs with no TURN | Forward `Upgrade`/`Connection` on the discovery WS and keep read timeouts long; ensure the host's ICE config includes a reachable STUN and, for hard NATs, a TURN server (see [ADMIN-GUIDE.md](ADMIN-GUIDE.md) §6) |
+| Two people edit the same doc but never see each other | They opened **different** rooms — each `#vp2p=` link is its own room/key | Everyone must open the **same** invite link with the fragment intact (the `#vp2p=…` part). Forwarding the link text (not a re-share) is fine |
+| A read-only peer's edits never land | Expected: the ro link holds the decryption key but **not** the RW-authority MAC, so rw peers cryptographically refuse its writes | Share the **read-write** link if the person should edit |
+| `404` opening the document itself | You lost access, the doc was deleted, or you were never granted — no-access is deliberately `404` (no existence leak). (This is account file access, not collaboration.) | Confirm the share with the owner (Settings → Admin → audit log shows grants/revokes) |
+| `429` on saves | Per-IP write token bucket (burst 30, refill 10/s) — usually many users behind one NAT/proxy IP, or a script | Back off; put real client IPs in front of the limiter; trusted internal tooling can run the server with `--no-rate-limit-writes` |
 
 ---
 
@@ -225,11 +224,11 @@ All verified against the code; hitting one of these is expected behavior, not a 
 
 ## 16. Quick diagnostic: which collaboration path am I on?
 
-Thirty seconds in DevTools → Network answers most collab tickets:
+Thirty seconds in DevTools → Network answers most collab tickets. (Collaboration is peer-to-peer — you should **never** see a `/v1/documents/*/collab/*` request; there is no document server.)
 
-1. **Open `collab/stream` request pending?** You're on the server path. Its status and the `collab/ops` POST results (`403` viewer, `404` no access, `429` rate limit) localize the problem.
-2. **WebSocket to `/api/peering/stream` connected?** The P2P fabric is active. If it's `404`, you're on a standalone server — no fabric, by design.
-3. **`#vp2p=` in the address bar?** E2E room: server ops are *suppressed on purpose*; only the fabric matters, and the invite fragment must be intact.
+1. **WebSocket to `/api/peering/stream` connected?** Peer discovery is up. If it's `404`, you're on a bare standalone server — no peering fabric, by design; collaboration is local-only until you run behind a Vulos OS/Relay host.
+2. **`#vp2p=` in the address bar?** You're in a collaboration room. Everyone must have the **same** link (fragment intact). A WebRTC connection should follow discovery — the document bytes travel inside it, not any HTTP request.
+3. **See a `/v1/documents/*/collab/*` request at all?** That's a **regression** — Office has no server-mediated collab endpoint. File an issue.
 4. **None of the above?** You're local-only: autosave + drafts still protect the work; check auth (`/api/auth/status`) and connectivity.
 
 ---

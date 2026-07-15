@@ -198,10 +198,9 @@ Related behavior to be aware of:
 
 ## 6. Running behind a reverse proxy
 
-Office serves everything — app, API, and real-time streams — on one port, so proxying is one location block. Two paths need special care:
+Office serves the app + API on one port, so proxying is one location block. Note: Office itself hosts **no** long-lived collaboration stream — collaboration is peer-to-peer with no central document server (see [COLLABORATION.md](COLLABORATION.md)). One path needs care, and only on a Vulos OS/Relay host:
 
-- **SSE** (`/v1/documents/*/collab/stream`): long-lived `text/event-stream` responses. Response buffering must be off and read timeouts long, or live collaboration degrades to "reconnecting" (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) §3).
-- **WebSocket** (`/api/peering/stream`): only exists when a Vulos OS/Relay host provides the peering fabric, but if you proxy such a deployment, `Upgrade`/`Connection` headers must be forwarded.
+- **WebSocket** (`/api/peering/stream`): the content-blind peer-discovery signaling channel. It only exists when a Vulos OS/Relay host provides the peering fabric; if you proxy such a deployment, `Upgrade`/`Connection` headers must be forwarded and read timeouts kept long, or peers fail to discover each other (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) §3).
 
 nginx sketch:
 
@@ -211,10 +210,9 @@ location / {
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header Upgrade $http_upgrade;      # websockets (peering fabric)
+    proxy_set_header Upgrade $http_upgrade;      # websockets (peering-fabric discovery)
     proxy_set_header Connection "upgrade";
-    proxy_buffering off;                          # SSE collab stream
-    proxy_read_timeout 1h;                        # keep streams open
+    proxy_read_timeout 1h;                        # keep the discovery WS open
 }
 ```
 

@@ -59,7 +59,6 @@ export function resetMock({ role = 'owner' } = {}) {
   mockState.comments = { doc1: [] }
   mockState.collaborators = { doc1: [] }
   mockState.suggestions = { doc1: [] }
-  mockState.collab = { doc1: { seq: 0, ops: [] } }
   // Account-share identity defaults: the caller is the owner of the seeded doc.
   mockState.me = 'you@vulos.test'
   mockState.owner = 'you@vulos.test'
@@ -398,38 +397,8 @@ export const handlers = [
   http.post('/api/upload', () =>
     HttpResponse.json({ url: 'http://localhost/uploaded.png' })),
 
-  // ── WAVE37: server-mediated collaboration relay (/v1, not /api) ────────────
-  // GET /collab/state — late-joiner bootstrap: authoritative snapshot + ops.
-  http.get('/v1/documents/:id/collab/state', ({ params }) => {
-    log('GET', `/v1/documents/${params.id}/collab/state`)
-    const c = mockState.collab[params.id] || { seq: 0, ops: [] }
-    return HttpResponse.json({ seq: c.seq, snap: null, ops: c.ops })
-  }),
-
-  // POST /collab/ops — push a batch of CRDT ops. Editor-gated (403 for viewers).
-  http.post('/v1/documents/:id/collab/ops', async ({ params, request }) => {
-    log('POST', `/v1/documents/${params.id}/collab/ops`)
-    if (!CAN_EDIT.has(mockState.role)) {
-      return HttpResponse.json(
-        { error: 'your role does not permit modifying content' },
-        { status: 403 },
-      )
-    }
-    const body = await request.json().catch(() => ({}))
-    const ops = Array.isArray(body.ops) ? body.ops : []
-    const c = (mockState.collab[params.id] ||= { seq: 0, ops: [] })
-    for (const op of ops) {
-      c.seq += 1
-      c.ops.push({ seq: c.seq, origin: body.origin, op })
-    }
-    return HttpResponse.json({ ok: true, accepted: ops.length, seq: c.seq })
-  }),
-
-  // GET /collab/stream — the SSE endpoint. jsdom's EventSource can't consume a
-  // streamed body under MSW, so the integration layer stubs EventSource itself;
-  // this handler exists only so an accidental fetch degrades gracefully (200).
-  http.get('/v1/documents/:id/collab/stream', ({ params }) => {
-    log('GET', `/v1/documents/${params.id}/collab/stream`)
-    return new HttpResponse('', { headers: { 'Content-Type': 'text/event-stream' } })
-  }),
+  // NOTE: there are deliberately NO /v1/documents/:id/collab/* handlers here.
+  // Office collaboration is peer-to-peer (Yjs over E2E-encrypted WebRTC); there
+  // is no central-server collab relay to mock. A test that sees any /collab/*
+  // request is a regression — the app must never call one.
 ]

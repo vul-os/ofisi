@@ -3,8 +3,7 @@
  *
  * A thin wrapper around the shared <AppsAndBots/> component from
  * @vulos/apps-ui, configured for THIS product (mode="product", product="office").
- * It is the same surface every Vulos product hosts and that Vulos Workspace
- * aggregates; here it lists/installs/manages the apps & bots that target Office.
+ * It lists/installs/manages the apps & bots that target Office.
  *
  * Auth: Office sessions live in an HttpOnly cookie (no JS-readable token), so we
  * inject a `fetcher` that sends credentials. The platform's management API

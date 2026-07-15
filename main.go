@@ -16,7 +16,6 @@ import (
 	"vulos-office/backend/billing"
 	"vulos-office/backend/config"
 	"vulos-office/backend/deploymode"
-	"vulos-office/backend/docsync"
 	"vulos-office/backend/handlers"
 	"vulos-office/backend/integration/cloud"
 	"vulos-office/backend/middleware"
@@ -384,11 +383,7 @@ func main() {
 	} else {
 		log.Printf("[v1] API-key path disabled (no %s); /v1 uses session auth only", apikey.EnvCPBaseURL)
 	}
-	// Server-collab op-log store (WAVE37) — shared between the /v1 doc handler
-	// (so DeleteDocument purges the op log) and the docsync realtime handler.
-	docSyncStore := newDocSyncStore()
-	v1Handler := handlers.NewV1Handler(store).WithDocSync(docSyncStore)
-	docSyncHandler := handlers.NewDocSyncHandler(store, docSyncStore)
+	v1Handler := handlers.NewV1Handler(store)
 	v1 := r.Group("/v1")
 	v1.Use(middleware.V1Auth(cfg, v1Introspector, sessionIntrospector))
 	// Reads.
@@ -396,33 +391,14 @@ func main() {
 	v1.GET("/documents/:id", v1Handler.GetDocument)
 	v1.GET("/documents/:id/content", v1Handler.GetContent)
 	v1.GET("/documents/:id/collaborators", v1Handler.ListCollaborators)
-	// ── Server-mediated real-time collaboration (WAVE37): reads ───────────────
-	// The CLOUD / account collab path: an ACL-gated hub that relays RGA CRDT ops
-	// between authorized editors AND persists them authoritatively (backend/
-	// docsync), so a document stays in sync + saved even with ZERO p2p peers, and
-	// a late joiner catches up from the server. This complements the p2p fabric
-	// (E2E-encrypted, room-gated) — the E2E path is NOT routed through this
-	// readable server. See backend/handlers/docsync.go.
-	//
-	// stream/state are VIEWER+ (read gate) and registered BEFORE the write
-	// token-bucket so the long-lived SSE stream is not rate-limited (mirrors
-	// Talk's /spaces/stream, which is a long-lived read).
-	v1.GET("/documents/:id/collab/stream", docSyncHandler.Stream)
-	v1.GET("/documents/:id/collab/state", docSyncHandler.State)
-	// Live presence (cursor/selection + roster): VIEWER+, ephemeral fan-out, NOT
-	// persisted. It is registered on its OWN token bucket (BEFORE the content
-	// write bucket below) because cursor moves are high-frequency and must not
-	// starve real content writes out of the shared content bucket — yet it still
-	// needs a bound so one tab cannot flood the hub. The client debounces to a
-	// few POSTs/sec; this bucket (60 burst / 30-per-sec refill) is generous for
-	// that while capping abuse. Identity is stamped server-side (no spoofing).
-	if !*noRateLimitWrites {
-		presenceGroup := v1.Group("")
-		presenceGroup.Use(middleware.NewTokenBucket(60, 30).Middleware())
-		presenceGroup.POST("/documents/:id/collab/presence", docSyncHandler.Presence)
-	} else {
-		v1.POST("/documents/:id/collab/presence", docSyncHandler.Presence)
-	}
+	// NOTE (collab architecture): Office collaboration is ALWAYS peer-to-peer —
+	// Yjs CRDT updates carried over WebRTC data channels (direct, STUN-assisted),
+	// end-to-end encrypted, with a content-blind relay only as a NAT-traversal
+	// fallback. There is deliberately NO central document server: this binary
+	// hosts no op-relay, no doc-state hub, and no server-mediated collab endpoint.
+	// The only server role in collaboration is lightweight, content-blind peer
+	// DISCOVERY (signaling + ICE), which the Vulos OS host supplies at
+	// /api/peering/* — never document content. See src/lib/crdt/yP2PSession.js.
 	// Writes (rate-limited alongside the rest of the write surface).
 	if !*noRateLimitWrites {
 		v1.Use(middleware.NewTokenBucket(30, 10).Middleware())
@@ -432,9 +408,6 @@ func main() {
 	v1.DELETE("/documents/:id", v1Handler.DeleteDocument)
 	v1.POST("/documents/:id/export", v1Handler.ExportDocument)
 	v1.POST("/documents/:id/collaborators", v1Handler.ShareDocument)
-	// Op ingest (publish): EDITOR+ (reuses the SAME requireEditor gate as PATCH),
-	// so a viewer/commenter cannot push ops. Rate-limited with the write surface.
-	v1.POST("/documents/:id/collab/ops", docSyncHandler.Publish)
 
 	uploadHandler := handlers.NewUploadHandler(cfg)
 	writes.POST("/upload", uploadHandler.Upload)
@@ -635,29 +608,6 @@ func appsDBPath() string {
 		return v
 	}
 	return "./data/apps.db"
-}
-
-// docSyncDBPath resolves the WAVE37 server-collab op-log SQLite DSN from env,
-// defaulting to a durable file under the data dir.
-func docSyncDBPath() string {
-	if v := strings.TrimSpace(os.Getenv("VULOS_DOCSYNC_DB")); v != "" {
-		return v
-	}
-	return "./data/docsync.db"
-}
-
-// newDocSyncStore opens the durable op-log store for the server-mediated collab
-// path. If the DB cannot be opened it falls back to an in-memory NullStore so
-// the app still boots (degraded: relay still works, op log does not persist
-// across restart) rather than crashing — matching the fail-soft posture of the
-// other sidecar stores (fileacl, apps).
-func newDocSyncStore() docsync.Store {
-	if st, err := docsync.NewSQLiteStore(docSyncDBPath()); err == nil {
-		return st
-	} else {
-		log.Printf("[docsync] op-log store unavailable (%s): %v; using in-memory store (no restart persistence)", docSyncDBPath(), err)
-		return docsync.NewNullStore()
-	}
 }
 
 // appsRegistryMode reports which registry implementation the apps place uses,

@@ -305,69 +305,9 @@ export const api = {
     return res.json()
   },
 
-  // ── WAVE37: server-mediated collaboration (the CLOUD / account path) ────────
-  // These target the public /v1 surface (not /api). The SSE stream URL is built
-  // synchronously from the cached endpoint selection so EventSource can consume
-  // it; auth rides the same session cookie (withCredentials).
-
-  /** Synchronous /v1 collab SSE stream URL for EventSource. */
-  docCollabStreamUrl: (docId) =>
-    `${currentEndpoint()}/v1/documents/${encodeURIComponent(docId)}/collab/stream`,
-
-  /** GET the authoritative current CRDT state (late-joiner bootstrap). */
-  docCollabState: async (docId) => {
-    const res = await fetch(
-      `${currentEndpoint()}/v1/documents/${encodeURIComponent(docId)}/collab/state`,
-      { credentials: 'include' },
-    )
-    if (!res.ok) throw new Error(`collab state failed: ${res.statusText}`)
-    return res.json()
-  },
-
-  /**
-   * POST a batch of CRDT ops (and/or a snapshot) to the server relay. Rejected
-   * with 403 for a viewer/commenter (editor-gated). Returns {ok, accepted, seq}.
-   */
-  docCollabPublish: async (docId, { origin, ops, snap }) => {
-    const res = await fetch(
-      `${currentEndpoint()}/v1/documents/${encodeURIComponent(docId)}/collab/ops`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ origin, ops, snap }),
-      },
-    )
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }))
-      throw Object.assign(new Error(err.error || 'collab publish failed'), { status: res.status, ...err })
-    }
-    return res.json()
-  },
-
-  /**
-   * POST live presence (cursor/selection + roster label) to the server relay so
-   * the OTHER authorized viewers can render "who is here" + "where they are".
-   * VIEWER+ (a read-only viewer legitimately shows a caret). Ephemeral: the
-   * server fans it out but never persists it. The producing account id is
-   * stamped server-side — the body's label/colour/cursor are cosmetic only.
-   * Best-effort: presence loss is never fatal, so callers may ignore rejections.
-   */
-  docCollabPresence: async (docId, { origin, displayName, color, cursor, gone } = {}) => {
-    const res = await fetch(
-      `${currentEndpoint()}/v1/documents/${encodeURIComponent(docId)}/collab/presence`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        keepalive: !!gone, // let a final "gone" beacon survive tab close
-        body: JSON.stringify({ origin, display_name: displayName, color, cursor, gone: !!gone }),
-      },
-    )
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }))
-      throw Object.assign(new Error(err.error || 'collab presence failed'), { status: res.status, ...err })
-    }
-    return res.json()
-  },
+  // NOTE: Office collaboration is peer-to-peer (Yjs over E2E-encrypted WebRTC,
+  // see src/lib/crdt/yP2PSession.js). There is deliberately NO server-mediated
+  // collab API here — no op relay, no doc-state hub, no server presence. The only
+  // server role in collab is content-blind peer discovery (signaling + ICE),
+  // handled by @vulos/relay-client against the host's /api/peering/* endpoints.
 }

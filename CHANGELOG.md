@@ -8,28 +8,48 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added — Server-mediated live presence (cloud collab path)
+### Changed — Collaboration is now ALWAYS peer-to-peer (no central document server)
 
-- **Live presence over the account/cloud path.** Presence (avatar roster + remote
-  cursors/selections) previously rode the p2p fabric only, so "who is here" and
-  live carets went dark whenever no relay/WebRTC peer was reachable. Presence now
-  also streams over the server SSE path: new `POST /v1/documents/:id/collab/presence`
-  fans a cursor/roster frame out through the realtime hub to the other authorized
-  viewers. `ServerCollabSession` gained `setPresence()` / `getRoster()` + a
-  `'presence'` event (debounced send, TTL-swept roster, heartbeat re-announce,
-  `keepalive` "gone" beacon on leave). DocsEditor merges the server roster with
-  the p2p one — a peer is never double-counted.
-- **Security (collab presence).** Presence is `VIEWER+` (a read-only viewer
-  legitimately shows a caret) — unlike op ingest, which stays `EDITOR`-gated. The
-  producing **account id is stamped server-side** (`requesterID`), never trusted
-  from the body, so a peer cannot occupy another account's roster slot. Presence
-  is **ephemeral** (fanned out, never persisted to the op log), fanned out
-  strictly per-doc (no cross-doc leakage), rate-limited on its own token bucket,
-  and the display label / cursor payload are length-bounded with the colour
-  validated to a safe CSS-colour shape (no `url()`/injection into the inline-style
-  caret sink). New backend tests: viewer-may-broadcast, stranger-404,
-  identity-stamped, no-cross-doc-leak, label-bounded, colour-sanitized; new
-  client + E2E tests for the roster + cursor broadcast.
+- **Removed the server-mediated collaboration path entirely.** Office's
+  differentiator is that co-editing is genuinely distributed peer-to-peer —
+  unlike Collabora/OnlyOffice, which route every edit through a central document
+  server. The codebase had grown a parallel **server-mediated** collab path (an
+  SSE op-relay + authoritative SQLite op-log + server presence) that quietly
+  became the default account path — a hidden central-document-server dependency
+  that contradicted the stated architecture. It is now **deleted**:
+  - **Backend:** removed `backend/docsync/` (op-log store), `backend/realtime/`
+    (the fan-out hub), `backend/handlers/docsync.go`, and the routes
+    `GET|POST /v1/documents/:id/collab/{stream,state,ops,presence}`. The V1
+    document handler no longer carries a `docSync` store.
+  - **Frontend:** removed `serverSession.js`, `yServerSession.js`,
+    `useServerCollab.js`, and the `api.docCollab*` methods. DocsEditor now
+    **hydrates the Y.Doc locally** from the document's own authoritative content
+    (deterministic content-derived seed) — saving your own file to your own
+    storage, never a collaboration server.
+- **What collaboration is now, in full:** the document rides an
+  **end-to-end-encrypted room** as **Yjs** updates (`yP2PSession.js`). Peers
+  connect **directly over WebRTC** data channels (STUN-assisted); a
+  **content-blind relay** circuit (per-session X25519 box — ciphertext only) is
+  used solely as a hard-NAT fallback. Presence rides the same E2E room. The only
+  server role is content-blind peer **discovery** (`/api/peering/*`), supplied by
+  the Vulos OS / Relay host — never document content. A bare standalone binary
+  mounts no discovery, so it stays **local-only** and autosaves, honestly showing
+  "Offline" instead of a fake "Live".
+- **Tests + docs:** `collabGate` now asserts co-editing ON makes **zero**
+  `/collab/*` requests; new `yP2PSession.multipeer` tests cover 3-peer mesh
+  convergence, late-joiner state-vector catch-up, and document-path wire opacity
+  (a captured frame never contains the plaintext). The `collab.e2e` smoke asserts
+  the app issues no server-collab request in the real browser. COLLABORATION.md,
+  ARCHITECTURE.md, ADMIN-GUIDE.md, TROUBLESHOOTING.md, USER-GUIDE.md, and README
+  rewritten to the serverless model.
+
+### Security — dependency bumps
+
+- `golang.org/x/crypto` `v0.51.0 → v0.52.0` and `golang.org/x/image`
+  `v0.41.0 → v0.43.0` (plus the `x/sync` / `x/text` they pull), clearing the
+  patchable advisories `govulncheck` flagged in required modules (non-breaking
+  minor bumps within `v0.x`). `govulncheck` reports **0 reachable**
+  vulnerabilities.
 
 ### Added — PDF interactive form fields (AcroForm fill)
 

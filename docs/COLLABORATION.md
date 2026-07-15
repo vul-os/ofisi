@@ -1,81 +1,57 @@
 # Vulos Office — How Collaboration Works
 
-This chapter explains real-time collaboration in Vulos Office end to end: how documents merge concurrent edits (CRDTs), the three transports edits travel over (server relay, peer-to-peer fabric, and end-to-end-encrypted rooms), what is and is not encrypted on each path, how rooms are gated, and what happens on conflicts. It is written for users who want to understand what they're trusting, and for admins who need to know what their server can and cannot see. Everything here describes the actual implementation in this repository.
+This chapter explains real-time collaboration in Vulos Office end to end: how documents merge concurrent edits (CRDTs), how edits travel **peer-to-peer** with no central document server, what is and is not encrypted, how rooms are gated, and what happens on conflicts. It is written for users who want to understand what they're trusting, and for admins who need to know what their server can and cannot see. Everything here describes the actual implementation in this repository.
 
 ---
 
 ## 1. The one-minute model
 
-- Every edit is turned into a small **CRDT operation** (op). Ops are commutative and idempotent: peers can receive them in any order, more than once, over more than one channel, and still converge to the same document.
-- Ops fan out over up to **three transports at once**. Because applying an op twice is a no-op, using several transports simultaneously is safe — it only adds redundancy, never corruption.
-- The document you see is always your **local** copy. Collaboration never blocks typing: if nothing is reachable, edits apply locally and sync later.
+- Collaboration in Office is **always peer-to-peer**. There is **no central document server** — no server ever stores, relays, or reads your document's collaborative edits. This is the defining difference from server-mediated office suites (Collabora, OnlyOffice), where every keystroke passes through a document server.
+- Every edit becomes a small **CRDT update**. CRDT updates are commutative and idempotent: peers can receive them in any order, more than once, over more than one channel, and still converge to the same document.
+- The document you see is always your **local** copy, hydrated from your own saved content. Collaboration never blocks typing: if no peer is reachable, you keep editing locally and your changes autosave to your own storage.
+- When you collaborate, edits ride an **end-to-end-encrypted peer-to-peer room**. Peers connect **directly** to each other over WebRTC; a relay is used only as a last-resort fallback for hard NATs, and even then it is **content-blind** (it moves ciphertext it cannot read).
 
-| Transport | When it's used | Who can read content |
-|-----------|----------------|----------------------|
-| **Server-mediated (SSE)** | Always, on the account path | The Office server (it persists ops) — gated by per-file ACL |
-| **Cloud P2P fabric** | When a peering backend is reachable | Peers in the session; the relay sees plaintext frames |
-| **E2E-encrypted P2P room** | "Collaborate via link" / opening a `#vp2p=` invite | Only holders of the invite link's key — relay and server are content-blind |
+| What travels | Where it goes | Who can read it |
+|--------------|---------------|-----------------|
+| Your document's collaborative edits | Directly between peers (WebRTC), E2E-encrypted | Only peers holding the invite key |
+| Fallback when peers can't connect directly | A content-blind relay circuit (ciphertext only) | Nobody but the peers — the relay is blind |
+| Peer discovery (rendezvous) | The host's signaling + ICE endpoints | The host learns *that* peers share a room (a random id) — never content |
+| Your own saved copy | Your own file storage (your box) | You (and whomever you grant account access) |
 
 ---
 
 ## 2. The CRDTs
 
-All CRDT code lives in `src/lib/crdt/` (frontend) with a mirrored text CRDT on the Go side for server-side awareness.
+All CRDT code lives in `src/lib/crdt/` (frontend).
 
-- **Docs text** — an RGA (Replicated Growable Array) **text CRDT** (`text.js`). Local edits are diffed (`diffToOps`) into insert/delete ops identified by `{replica, counter}` pairs. Apply is idempotent — ops are deduplicated by id — and commutative, so concurrent edits at the same position interleave deterministically instead of conflicting. Character-level merging: two people editing different words of the same paragraph both keep their edits.
-- **Sheets grid** — a **last-writer-wins grid CRDT** (`grid.js`): concurrent writes to the *same cell* resolve to the later writer; writes to different cells merge cleanly. Charts, pivots, and conditional-formatting rules are broadcast as their own ops so collaborators merge the same descriptors.
+- **Docs** — a **Yjs** document (`ydoc.js`). The ProseMirror/TipTap document is kept in lock-step with a `Y.XmlFragment` by y-prosemirror. Remote changes arrive as Yjs updates and become ProseMirror transactions with real positions — so **formatting and structure** (bold, headings, tables, lists, images, links) propagate correctly, and a remote change can never land at a wrong text offset. Yjs is a CRDT, so peers converge with **no central authority** — exactly what a serverless model requires.
+- **Sheets grid** — a **last-writer-wins grid CRDT** (`grid.js`): concurrent writes to the *same cell* resolve to the later writer; writes to different cells merge cleanly. Charts, pivots, and conditional-formatting rules broadcast as their own ops.
 - **Slides tree** — a **fractional-index tree CRDT** (`tree.js`) for slide/object ordering and object properties.
-- **Comments and suggestions** have their own CRDTs (`comments.js`, `suggestions.js`) so annotation edits merge like content does.
+- **Comments and suggestions** have their own CRDTs (`comments.js`, `suggestions.js`).
 
-Ingress is fail-closed: remote text ops are validated (codepoint bounds, no lone UTF-16 surrogates) before apply and silently dropped on failure, so a malformed or hostile op cannot crash the editor.
-
----
-
-## 3. Transport 1 — server-mediated relay (the account path)
-
-This is the always-available path, and the only one that **persists** ops. Implementation: `src/lib/crdt/serverSession.js` + `src/apps/docs/useServerCollab.js` (client), `backend/handlers/docsync.go` + `backend/realtime/hub.go` + `backend/docsync/` (server).
-
-Endpoints (all under `/v1`, ACL-gated):
-
-| Endpoint | Access required | Purpose |
-|----------|-----------------|---------|
-| `GET /v1/documents/:id/collab/stream` | read (viewer+) | SSE stream of other editors' ops + presence events |
-| `GET /v1/documents/:id/collab/state` | read (viewer+) | Bootstrap snapshot + trailing ops for late joiners |
-| `POST /v1/documents/:id/collab/ops` | **editor** | Publish local ops; persisted authoritatively, fanned out |
-| `POST /v1/documents/:id/collab/presence` | read (viewer+) | Ephemeral presence/cursor announcement |
-
-Behavior worth knowing:
-
-- **Durability with zero peers**: ops are persisted server-side, so a document converges and stays saved even if no other browser is open, and a late joiner catches up from `/collab/state`.
-- **Viewer enforcement**: a viewer can subscribe and show a live caret, but their op `POST` is rejected `403` — the client surfaces read-only mode and stops publishing.
-- **No existence leak**: requesting collab on a document you can't read returns `404`, the same as any other inaccessible file.
-- **Presence is ephemeral**: presence rides the same hub but is *never written* to the op log; the roster expires entries after ~15 s without a heartbeat (client heartbeats every ~8 s).
-- **Batching and limits**: keystroke ops are coalesced client-side (~250 ms) and cursor moves (~120 ms); the server's write/collab endpoints share a per-IP token bucket (burst 30, refill 10/s), so a hot loop can see `429`.
-- **Degraded is graceful**: if the SSE stream drops and can't reconnect within ~8 s, the editor shows a degraded status; edits keep applying locally and are re-synced later.
-- **Honesty note (from the source itself)**: this is server-mediated *relay + persistence* of CRDT ops, not an operational-transform engine. Convergence comes from the CRDT; the server adds durability, per-document ordering, and fan-out.
-
-**What the server sees on this path: everything.** Ops are plaintext to the Office server — that's what lets it persist and serve them. Access is controlled by the per-file ACL (owner / editor / commenter / viewer), not by encryption.
-
-The server-mediated text-op path is currently wired into **Docs**. Sheets and Slides sync their CRDTs over the peer fabric (below) and persist through normal document saves.
+**Ingress is fail-closed.** Every inbound update is untrusted (an invite link can be forwarded to anyone). It is decoded, applied to a **shadow document** first, converted to a ProseMirror document against the real schema, and checked (renderable? image/link clamps?) before it is allowed to touch the live document. A rejected update is dropped and counted; it never throws, never half-applies, and never reaches the renderer.
 
 ---
 
-## 4. Transport 2 — the cloud P2P fabric (plaintext, low-latency)
+## 3. The transport — direct peer-to-peer first, content-blind relay only as fallback
 
-Docs (`DocsCollabSession` in `src/lib/crdt/index.js`), Sheets, and Slides (via `src/lib/collab/useCollabFabric.js`) can also connect a `FabricClient` from `@vulos/relay-client`: WebRTC with relay fallback, using these same-origin endpoints for rendezvous:
+Office uses a `FabricClient` from `@vulos/relay-client` to move CRDT updates between peers. Its connection strategy, in order:
 
-- Signaling: `wss://<host>/api/peering/stream`
-- ICE config: `GET /api/peering/ice`
+1. **Direct WebRTC data channel (the default).** For each peer, the client negotiates an `RTCPeerConnection` and opens a data channel. Once connected (`connectionState === 'connected'`), edits flow **directly browser-to-browser** — nothing in the middle. NAT traversal uses **ICE/STUN** servers the host provides.
+2. **Content-blind relay circuit (fallback only).** If the direct connection *fails* (symmetric NAT, restrictive firewall — the ~10–20 % of pairs that can't hole-punch), the client falls back to a relay circuit. Payloads on this path are sealed with a per-session X25519 box, so the relay **routes ciphertext it cannot read**. This fallback is the *only* time a relay is involved, and it still never sees plaintext.
 
-**Important:** the standalone Office binary does **not** serve `/api/peering/*`. Those endpoints exist when Office runs behind a host that provides the Vulos peering fabric (a Vulos OS / Vulos Relay deployment). On a bare standalone server the fabric client simply fails to configure and the editor stays on the server path (Docs) or local-only with autosave (Sheets/Slides). This is by design — the hook "fails graceful" and no error escapes.
+The only always-needed server pieces are **lightweight, content-blind peer discovery**:
 
-On this path, frames are **not** end-to-end encrypted: transport is TLS, but a relay in the path can read the frames. Session membership is keyed by file id and gated by the same login/ACL context as the app. Presence (avatar roster, live cursors) rides this fabric too, and is merged with server-side presence so nobody is double-counted.
+- Signaling (rendezvous): `wss://<host>/api/peering/stream` — exchanges WebRTC offer/answer/ICE candidates so two peers can find each other. It carries no document content.
+- ICE config: `GET /api/peering/ice` — returns the STUN/TURN servers to use for NAT traversal.
+
+**Important:** the standalone Office binary does **not** serve `/api/peering/*`. Those endpoints are provided by the **host** — a Vulos OS / Vulos Relay deployment. On a bare standalone server with no host fabric, peers cannot discover each other, so collaboration stays **local-only** (you keep editing; your work autosaves) and the UI says so honestly rather than showing a false "Live". Self-hosting the discovery + a STUN/TURN server (e.g. coturn) is enough to get direct P2P working for your own users; it stores nothing and reads nothing.
 
 ---
 
-## 5. Transport 3 — E2E-encrypted rooms ("Collaborate via link")
+## 4. E2E-encrypted rooms ("Collaborate via link")
 
-This is the privacy-maximal path, implemented in `src/lib/crdt/p2pRoom.js` (crypto) and `src/lib/crdt/p2pSession.js` (session), used by Docs (`useP2PCollab.js`, `P2PShareModal`).
+Collaboration is entered by sharing an **invite link**. Implementation: `src/lib/crdt/p2pRoom.js` (crypto), `src/lib/crdt/yP2PSession.js` (the Yjs document over the room), `src/apps/docs/useP2PCollab.js` + `P2PShareModal` (Docs UI).
 
 ### Room creation and invites
 
@@ -87,167 +63,148 @@ This is the privacy-maximal path, implemented in `src/lib/crdt/p2pRoom.js` (cryp
 
 From the single room key, HKDF-SHA256 (WebCrypto, no third-party crypto JS) derives three independent values:
 
-| Derived value | Label | Held by | Purpose |
-|---------------|-------|---------|---------|
-| `encKey` | `vulos-office-p2p/enc` | rw + ro peers | AES-256-GCM content key — seals every op/snapshot/presence frame |
-| `macKeyRw` | (rw label) | **rw peers only** | HMAC proving read-write authority on op frames |
-| `roomId` | (room-id label) | everyone incl. relay | Non-secret rendezvous id |
+| Derived value | Held by | Purpose |
+|---------------|---------|---------|
+| `encKey` | rw + ro peers | AES-256-GCM content key — seals every update/presence frame |
+| `macKeyRw` | **rw peers only** | HMAC proving read-write authority on document frames |
+| `roomId` | everyone incl. relay | Non-secret rendezvous id |
 
 Every frame on the wire is `magic "VP2P1" ‖ flags ‖ 12-byte fresh nonce ‖ AES-256-GCM(ciphertext‖tag)`, with authenticated associated data. The fabric session id is the derived `roomId` — **knowing the roomId admits nothing**; without `encKey` you cannot produce or read a single valid frame.
 
-### What this actually guarantees (and what it doesn't)
+### What this guarantees (and what it doesn't)
 
-Encrypted: document content ops, snapshots, and presence frames. The relay and the Office server are **content-blind**.
+Encrypted: document updates, snapshots (state-vector deltas), and presence frames. The relay and the host are **content-blind**.
 
-- While an E2E session is active, the server-mediated path is **suppressed** (`useServerCollab` is disabled when `e2eActive`), so encrypted-room edits never traverse the readable server relay — this is enforced in code, not just policy.
-- Not hidden: the fact that *some* peers share a room (the relay sees `roomId`, peer count, timing, and IP addresses). This is metadata privacy, not anonymity.
 - **The link is the key.** Anyone who obtains a link — from a chat log, a forwarded email, a shoulder-surf — has full access at that link's capability. There is no per-person identity inside the room. Treat rw links like passwords.
 - **Revocation = rotation.** "Rotate" mints a brand-new room + key and re-shares; old links go dead. There is no finer-grained revocation.
-- Read-only is enforced cryptographically at the "authority" level: ro sessions never receive `macKeyRw` (it is stripped before the session is constructed), so an ro peer's op frames carry no RW MAC and rw peers reject them. An ro peer *can* decrypt content (it holds `encKey`) — read-only means "cannot write", not "cannot read".
-- A malformed or tampered invite **fails closed**: the join throws, the editor logs `[p2p] join from link failed: …` to the console, and stays in normal local/cloud mode.
-- Persistence: each participant's browser snapshots the CRDT to `localStorage` (`vulos_p2p_snap_…`, debounced ~3 s). The room itself stores nothing server-side. Each participant's own copy of the document still autosaves through their normal document save path.
+- **Read-only is enforced cryptographically.** ro sessions never receive `macKeyRw` (it is stripped before the session is constructed), so an ro peer's update frames carry no RW MAC and rw peers reject them. An ro peer *can* decrypt content (it holds `encKey`) — read-only means "cannot write", not "cannot read".
+- **Not hidden:** the fact that *some* peers share a room (the discovery service sees `roomId`, peer count, timing, IPs). This is metadata, not content.
+- A malformed or tampered invite **fails closed**: the join throws, the editor logs `[p2p] join from link failed: …`, and stays in local mode.
+- **Persistence is yours.** The room stores nothing anywhere central. Each participant's own copy autosaves through their normal document save path (to their own storage); a browser-local snapshot aids offline recovery.
 
 ---
 
-## 6. The life of an edit (timings that explain what you see)
+## 5. The life of an edit
 
-What actually happens between a keystroke and your collaborator's screen, with the real constants from the code:
-
-1. **Keystroke** — the editor updates instantly; the change is diffed against the previous text into CRDT ops. Read-only sessions stop here (op production is a no-op for `ro`).
-2. **Local persistence** — the session debounces a CRDT snapshot to `localStorage` every **~3 s** (`vulos_srv_snap_*` for the server session, `vulos_p2p_snap_*` for E2E rooms), and the document store writes an IndexedDB draft before every network save.
-3. **Publish** — server path: ops are coalesced for **~250 ms** and POSTed in one batch (bounding request rate under the per-IP token bucket). P2P paths: ops are sealed and sent frame-by-frame.
-4. **Fan-out** — the server hub relays to every SSE subscriber of that one document (strictly per-doc; no cross-document leakage). A subscriber that can't keep up (slow consumer) is dropped and its client transparently reconnects and re-bootstraps from `/collab/state`.
-5. **Apply** — receiving peers validate then apply the ops; duplicates (same op over two transports) are no-ops.
-6. **Presence** — cursor moves are coalesced to at most one POST per **~120 ms**; every client re-announces itself every **~8 s**; a roster entry not heard from for **~15 s** is dropped (that's how a crashed tab disappears). Presence is never persisted.
-7. **Reconnect** — if the SSE stream drops and cannot reopen within **~8 s**, the editor reports itself not-live (degraded), keeps applying edits locally, and converges when the stream returns.
+1. **Keystroke** — the editor updates instantly; the change becomes a Yjs update. Read-only sessions stop here (they produce no authoritative updates).
+2. **Seal + send** — the update is sealed (AES-256-GCM, fresh nonce) and sent over the room: directly to each connected peer's WebRTC data channel, or over the content-blind relay circuit if direct failed.
+3. **Apply** — receiving peers run the update through the fail-closed ingress (shadow-apply → validate → live-apply). Duplicates are no-ops (Yjs dedups by `(client, clock)`).
+4. **Late joiners & reconnects** — on join (and after any reconnect) a peer sends its **state vector**; peers answer with exactly the delta it lacks. Two peers who both edited offline both keep their edits — a union merge, never "whoever has more wins".
+5. **Presence** — cursor moves are coalesced (~120 ms); a roster entry not heard from for ~15 s is dropped (that's how a crashed tab disappears). Presence rides the same E2E room; it is never persisted.
+6. **Autosave** — independently, your own copy autosaves to your storage with a crash-safe IndexedDB draft, and every save leaves a restorable version snapshot.
 
 ### A worked example
 
-Alice (editor) and Bob (editor) both have `Q3 Plan` open; Carol (viewer) is watching.
+Alice (rw) shares a `#vp2p=` link with Bob (rw); Carol opens the ro link.
 
-- Alice types "risks" into paragraph 2 while Bob deletes a sentence in paragraph 4 — both see their own change instantly, and each other's within a network round-trip. The RGA merge keeps both; no dialog, no lock.
-- Carol's caret is visible to both (presence), but if her client somehow POSTs an op it is refused `403` server-side.
-- Bob's laptop sleeps. Alice keeps editing. Bob wakes 10 minutes later: his session re-opens the stream, bootstraps from `/collab/state`, replays Alice's ops, and pushes his buffered ones. Both converge.
-- That evening, Alice opens the doc on her tablet, edits *without* live collab, and saves. Meanwhile her desktop tab (stale) tries to save the old revision — the server answers `409 Conflict` and the desktop reconciles against the current revision before retrying. Nothing is clobbered; every save also left a restorable version snapshot.
-
----
-
-## 7. Conflict behavior — what happens when edits collide
-
-**Live collaboration (character level):** no locking, no "someone else is editing" dialogs. Concurrent inserts/deletes merge via the RGA CRDT; both sides' edits survive. In Sheets, two simultaneous writes to the *same cell* resolve last-writer-wins; different cells always both apply.
-
-**Duplicate delivery:** an op arriving over both the fabric and the server (or twice over one) applies once — dedup by op id.
-
-**Offline divergence:** each side keeps editing locally; buffered ops exchange on reconnect (`snap-req`/`snap` on the p2p path, `/collab/state` bootstrap on the server path) and converge. Nothing is discarded.
-
-**Whole-document saves (revision CAS):** independent of live collab, every file save carries the revision it was based on. A stale save gets `409 Conflict` with the current server copy instead of clobbering it — the client store reconciles (`onConflict`) and retries against the current revision. This protects the "two devices, no live session" case.
-
-**Undo:** undo operates on your local history; a remote peer's edits are not undone by your `Mod+Z`.
-
-**Version history as the backstop:** every save produces restorable version snapshots with diffs, so even a merge that is *semantically* wrong (both of you renamed the same heading differently) is recoverable by a human.
+- Alice types "risks" into paragraph 2 while Bob deletes a sentence in paragraph 4 — both see their own change instantly, and each other's within a WebRTC round-trip. Yjs keeps both; no dialog, no lock.
+- Carol's caret is visible (presence), but her write frames carry no RW MAC, so Alice and Bob discard them — she reads live, cannot write.
+- Bob's laptop sleeps. Alice keeps editing. Bob wakes 10 minutes later: his session reconnects and sends its state vector; Alice's peer answers with exactly the edits he missed. Both converge — with no server involved.
 
 ---
 
-## 8. Room gating and access control — admin summary
+## 6. Conflict behavior
 
-Three distinct gates, one per transport:
+**Live collaboration:** no locking, no "someone else is editing" dialogs. Concurrent edits merge via Yjs; both sides' edits survive. In Sheets, two simultaneous writes to the *same cell* resolve last-writer-wins; different cells always both apply.
 
-1. **Server path** — the per-file ACL (`backend/fileacl/`): roles `viewer` < `commenter` < `editor`, plus `owner`. Grants are owner-gated server-side, changes land in the append-only **audit log** (visible in the admin panel), and no-access responses are `404` to avoid existence leaks. Read-only **share links** (256-bit token, optional bcrypt-hashed password, expiry capped at one year) reach *only* the read path.
-2. **Cloud fabric** — available only where an admin has deployed the peering backend (Vulos OS / Relay). No fabric backend ⇒ no plaintext p2p, automatically.
-3. **E2E rooms** — possession of the invite fragment. The server cannot enumerate, join, or read rooms; it also cannot audit them. If your compliance posture requires all collaboration to be server-auditable, the E2E path is the one to communicate policy about — it is a deliberate user-controlled escape hatch.
+**Duplicate delivery:** an update arriving over both a direct channel and the relay applies once — dedup by `(client, clock)`.
 
-Rate limiting: collab writes share the global write token bucket (per-IP, burst 30, refill 10/s); presence has its own generous bucket. Both can be disabled with the server flag `--no-rate-limit-writes` for trusted internal tooling.
+**Offline divergence:** each side keeps editing locally; on reconnect the state-vector exchange fetches exactly what each side missed and converges. Nothing is discarded.
 
----
+**Whole-document saves (revision CAS):** independent of live collab, every file save carries the revision it was based on. A stale save gets `409 Conflict` with the current copy instead of clobbering it — the client reconciles and retries. This protects the "two devices, no live session" case.
 
-## 9. Presence and cursors
+**Undo:** undo operates on your own edits (the Yjs UndoManager is user-scoped); a remote peer's edit is not undone by your `Mod+Z`.
 
-- The presence bar shows everyone in the document (avatar stack + roster); remote carets/selections render in the text with per-user colors.
-- Presence is transport-merged: p2p roster and server roster fold together keyed by account, so a peer reachable both ways appears once.
-- Server-side presence is **identity-stamped by the server** (a client cannot claim to be someone else on the account path) and never persisted.
-- On the E2E path, presence frames are sealed like everything else — the server does not learn who is in an encrypted room.
+**Version history as the backstop:** every save produces restorable version snapshots with diffs, so even a semantically-wrong merge is recoverable by a human.
 
 ---
 
-## 10. Verifying it yourself (admins)
+## 7. Access control — admin summary
 
-You can watch every layer from the outside:
+- **Account sharing (the ACL)** — `backend/fileacl/`: roles `viewer` < `commenter` < `editor`, plus `owner`. Grants are owner-gated server-side, land in the append-only **audit log**, and no-access responses are `404` to avoid existence leaks. Read-only **share links** (256-bit token, optional bcrypt-hashed password, expiry capped at one year) reach *only* the anonymous read path. This governs who may open the document from **your storage** — it does **not** put a server in the live-collaboration path.
+- **Live collaboration** — possession of the invite fragment. The host cannot enumerate, join, or read rooms; it also cannot audit their content. If your compliance posture requires all collaboration to be server-auditable, note that Office's collaboration is deliberately end-to-end and peer-to-peer — auditing happens at the account-save and version-history layer, not in the wire.
+- **Peer discovery** is available only where a host provides the peering fabric (Vulos OS / Relay). No fabric ⇒ no live P2P, automatically — the editor stays local-only.
+
+---
+
+## 8. Presence and cursors
+
+- The presence bar shows everyone in the room (avatar stack + roster); remote carets/selections render in the text with per-user colors.
+- Presence rides the E2E-encrypted room like everything else — the host does not learn who is in a room.
+- Presence is ephemeral: it is never persisted anywhere.
+
+---
+
+## 9. Verifying it yourself (admins)
+
+You can confirm the serverless property from the outside:
 
 ```bash
-# 1. Is the server relay alive for a doc you can read? (SSE — leave it running)
-curl -N -H "Authorization: Bearer <session-jwt>" \
-  "https://office.example.org/v1/documents/<id>/collab/stream"
+# 1. There is NO server-mediated collab endpoint. These must 404:
+curl -i "https://office.example.org/v1/documents/<id>/collab/stream"   # expect 404
+curl -i "https://office.example.org/v1/documents/<id>/collab/ops"      # expect 404
 
-# 2. Bootstrap state a late joiner would receive
-curl -H "Authorization: Bearer <session-jwt>" \
-  "https://office.example.org/v1/documents/<id>/collab/state"
-
-# 3. Confirm viewer enforcement: publish ops with a viewer token → expect 403
-curl -X POST -H "Authorization: Bearer <viewer-jwt>" -H 'Content-Type: application/json' \
-  -d '{"ops":[]}' "https://office.example.org/v1/documents/<id>/collab/ops"
-
-# 4. Is the peering fabric present? (host-provided, not the Office binary)
-curl -i "https://office.example.org/api/peering/ice"    # 404 ⇒ standalone, no P2P
+# 2. Is the peering fabric present? (host-provided, not the Office binary)
+curl -i "https://office.example.org/api/peering/ice"   # 404 ⇒ standalone, no P2P discovery
 ```
 
-In the browser, DevTools → Network shows exactly which of the three paths is live: an open `collab/stream` request (server), a WebSocket to `/api/peering/stream` (fabric), and — for E2E rooms — a `#vp2p=` fragment in the address bar with *no* `collab/ops` traffic.
+In the browser, DevTools → Network shows the truth: opening a `#vp2p=` link opens a **WebSocket to `/api/peering/stream`** (discovery only) and then a **WebRTC data channel** — and **no `collab/*` request ever appears**, because there is no document server to call. The document bytes travel inside the encrypted data channel, not any HTTP request.
 
 ---
 
-## 11. Frequently asked questions
+## 10. Frequently asked questions
 
-**Can the admin read my E2E room?** No — frames are AES-256-GCM sealed under a key that only exists in invite links (URL fragments never reach the server). The admin *can* see that a room exists (its derived id, peer count, timing, IPs) if the relay is theirs.
+**Does my document ever touch a central server during collaboration?** No. Collaborative edits travel peer-to-peer, end-to-end-encrypted. The only server role is content-blind peer discovery (a rendezvous id and ICE config). Your saved copy lives in *your* storage.
 
-**Can the admin read normal shared documents?** Yes. The account path is server-persisted plaintext, gated by ACLs — that's what makes durability, late-join, and audit possible. If you need the server blind, use *Collaborate via link*.
+**Can the admin read what we're editing live?** No — frames are AES-256-GCM sealed under a key that only exists in invite links (URL fragments never reach the server). The admin *can* see that a room exists (its derived id, peer count, timing, IPs) if the discovery service and relay are theirs.
 
-**Why does my read-only link let people read but "read-only" is called enforcement?** Two different mechanisms: on the server path, roles are enforced by the server (`403` on viewer writes). In E2E rooms, ro peers hold the decryption key but not the RW MAC key, so their write frames are unauthenticated and rw peers discard them.
+**Can the admin read my saved document?** They can read what your storage holds, gated by the account ACL — that is ordinary file access, not collaboration. Collaboration itself is content-blind.
 
-**Is there a maximum number of collaborators?** No explicit cap in the collab code; the practical bounds are the per-IP write token bucket (burst 30, 10/s refill) and SSE fan-out capacity of your deployment.
+**Why is read-only "enforcement" if ro users can still read?** ro peers hold the decryption key but not the RW MAC key, so their write frames are unauthenticated and rw peers discard them. Read-only means "cannot write".
 
-**Does collaboration work across two different Office servers?** Not for the server path — ops persist on the server that owns the document. Cross-instance sharing goes through account-scoped sharing on one instance, a read-only share link, or an E2E room whose peers can all reach the same peering fabric. (`/v1` sharing to a recipient on another cell responds with an explicit "recipient is not on this cell; share via peering" error.)
+**Is there a maximum number of collaborators?** No explicit cap in the collab code; the practical bound is WebRTC mesh fan-out (each peer connects to the others) and your discovery/relay capacity.
 
-**What happens if two people paste huge different texts simultaneously?** Both op sets apply; the RGA interleaves deterministically by op identity. The result is both texts present (order decided by the CRDT), never a corrupted mix of half of each.
+**Does collaboration work across two different Office servers?** Yes, as long as the peers can reach the same peering fabric — collaboration is between *browsers*, not servers. The document does not live on either server for the purpose of the live session.
+
+**What happens with no network at all?** You keep editing; the CRDT applies locally and an IndexedDB draft protects your work. It syncs to peers when you reconnect, and autosaves to your storage.
 
 ---
 
-## 12. What is stored where
-
-Collaboration touches four kinds of state; knowing which is which explains most recovery questions:
+## 11. What is stored where
 
 | State | Location | Lifetime |
 |-------|----------|----------|
-| The document itself | Server document store (`data/<id>.json` or Postgres schema `office`) | Until deleted; every save also snapshots into version history |
-| Server collab op log | `backend/docsync` store on the server (durable, per-document ordered) | Authoritative record of the account path's ops |
-| Presence (who's here, cursors) | In-memory hub only | Seconds — never written anywhere |
-| E2E room state | Participants' browsers only: `localStorage` CRDT snapshots (`vulos_p2p_snap_*`) + each user's own account saves | Per-browser; the server holds nothing for the room |
+| The document itself | **Your** file storage (`data/<id>.json` or Postgres schema `office`) | Until deleted; every save also snapshots into version history |
+| Live collaboration edits | **Nowhere central** — only in the peers' browsers, in transit E2E-encrypted | The session; the host holds nothing |
+| Presence (who's here, cursors) | In the peers' browsers only | Seconds — never written anywhere |
+| Room recovery snapshot | Participant's browser `localStorage` | Per-browser; the server holds nothing for the room |
 | Crash-safety drafts | Browser IndexedDB (`vulos-office-drafts`) | Until the next successful save |
-| Server session snapshots | Browser `localStorage` (`vulos_srv_snap_*`) | Rolling, debounced ~3 s |
 
-Consequences: server backups capture all account-path collaboration; they never capture E2E room traffic (there is nothing to capture); clearing a browser's site data erases drafts and local snapshots but never the saved document.
+Consequences: server backups capture your saved documents and version history; they never capture live collaboration traffic (there is nothing to capture). Clearing a browser's site data erases drafts and local snapshots but never the saved document.
 
 ---
 
-## 13. Glossary
+## 12. Glossary
 
 - **CRDT** — Conflict-free Replicated Data Type: a data structure whose operations commute, so replicas converge without coordination or locks.
-- **RGA** — Replicated Growable Array, the text CRDT used for Docs.
-- **Op** — one atomic CRDT change (e.g. "insert char with id {replica,counter} after X").
-- **SSE** — Server-Sent Events; the one-way HTTP stream carrying ops/presence down from the server.
-- **Fabric** — the Vulos peering transport (`@vulos/relay-client`): WebRTC with relay fallback, rendezvous via `/api/peering/stream`.
+- **Yjs** — the CRDT library backing the Docs document; carries structure and formatting, not just text.
+- **Update** — one atomic Yjs change, carried as an envelope `{ y:1, u:<base64> }`.
+- **Fabric** — the Vulos peering transport (`@vulos/relay-client`): direct WebRTC first, content-blind relay fallback, discovery via `/api/peering/*`.
 - **Room** — an E2E-encrypted collaboration session identified by a key-derived `roomId`; membership = possession of the invite key.
 - **Capability (`rw`/`ro`)** — what an invite link grants; `rw` links carry MAC authority to write, `ro` links can only decrypt.
 - **Rotation** — minting a fresh room + key to revoke all previously shared links.
+- **STUN / TURN** — NAT-traversal helpers; STUN discovers your public address for a direct connection, TURN relays (content-blind here) when direct fails.
 
 ---
 
-## 14. Quick reference — "which path am I on?"
+## 13. Quick reference — "what can the server see?"
 
-| You did… | Path | Server can read content? |
-|----------|------|--------------------------|
-| Shared with a teammate's account, both editing | Server SSE (+ fabric if available) | **Yes** (ACL-gated, persisted) |
-| Opened a doc on a Vulos OS box with Relay | Fabric + server SSE | **Yes** |
-| Clicked *Collaborate via link* / opened a `#vp2p=` link | E2E room only (server path suppressed) | **No** — content-blind |
-| Created a read-only share link | Anonymous read endpoint | Yes (it serves the content) |
+| You did… | Live path | Server can read live edits? |
+|----------|-----------|-----------------------------|
+| Clicked *Collaborate via link* / opened a `#vp2p=` link, peers connect directly | Direct WebRTC, E2E | **No** — content-blind, and no server is even in the path |
+| Same, but a peer pair can't hole-punch | Content-blind relay fallback, E2E | **No** — the relay routes ciphertext |
+| No peering fabric on the host (bare standalone) | Local-only (autosave) | n/a — nothing is sent |
+| Created a read-only share link | Anonymous read endpoint | Yes (it serves your saved copy) |
 | No network at all | Local CRDT + IndexedDB draft | n/a — syncs when back |
 
 For symptoms and fixes (peers not connecting, docs not syncing), see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).

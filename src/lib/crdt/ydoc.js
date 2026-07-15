@@ -15,26 +15,25 @@
  * document by y-prosemirror's ySyncPlugin. Remote changes arrive as Yjs updates
  * and are turned into ProseMirror TRANSACTIONS with real positions — never text
  * offsets — so formatting and structure propagate, and a remote change can never
- * be applied at a wrong offset. Yjs is a CRDT, so it converges with no central
- * authority, which is what lets the SAME document format ride both transports:
- * the ACL-gated server relay AND the E2E-encrypted p2p room (where the server is
- * content-blind and could not possibly rebase anything).
+ * be applied at a wrong offset. Yjs is a CRDT, so it converges with NO central
+ * authority — which is exactly what Office's collaboration model requires: the
+ * document rides the E2E-encrypted peer-to-peer room (yP2PSession.js) where any
+ * relay is content-blind and could not possibly rebase anything.
  *
  * (ProseMirror steps — prosemirror-collab — were the alternative. They need a
- * central authority to assign versions and rebase concurrent steps. Our op log
- * (backend/docsync) is an opaque append-only store with no document model, and
- * the p2p path has no authority at all: it is encrypted end-to-end. Steps would
- * mean writing an OT server per document AND would still leave the p2p path
- * unsynced. Yjs needs neither.)
+ * central authority to assign versions and rebase concurrent steps. Office has
+ * no central document server at all: the p2p path is encrypted end-to-end, so
+ * there is nowhere to run an authority. Steps would mean writing an OT server
+ * per document — the very thing Office deliberately does not have. Yjs needs
+ * none of it: peers converge on their own.)
  *
- * WIRE FORMAT (v1) — an "op" on the existing transports is now the envelope:
+ * WIRE FORMAT (v1) — a peer-to-peer document update is the envelope:
  *
  *     { y: 1, u: "<base64 Yjs update>" }
  *
- * The server op log (backend/docsync) stores ops as opaque JSON, so no server
- * change is needed. The `y` version tag is what makes the format explicit and
- * lets a reader tell a Yjs envelope from a legacy RGA TextOp ({k,id,p,v,t}) —
- * see isYEnvelope / isLegacyTextOp and the migration in yServerSession.js.
+ * The `y` version tag makes the format explicit and lets a reader tell a Yjs
+ * envelope from a legacy RGA TextOp ({k,id,p,v,t}) — see isYEnvelope /
+ * isLegacyTextPayload and the local seed/hydration in DocsEditor.jsx.
  *
  * SECURITY — every byte here is UNTRUSTED
  * ---------------------------------------
@@ -80,10 +79,12 @@ export const REMOTE_ORIGIN = 'vulos-remote'
 export const SEED_ORIGIN = 'vulos-seed'
 
 // ── Bounds (fail-closed) ────────────────────────────────────────────────────
-// A single update must fit well inside the server's per-op cap (256 KiB, see
-// backend/handlers/docsync.go maxOpBytes) once base64-inflated (+33%).
+// A single peer-to-peer update must fit well inside the fabric's per-frame data
+// cap (256 KiB, see @vulos/relay-client MAX_PAYLOAD_BYTES) once base64-inflated
+// (+33%). Oversized frames are dropped by the transport, so we bound here first.
 export const MAX_UPDATE_BYTES = 128 * 1024
-// A snapshot is the whole compacted document; the server caps it at 2 MiB.
+// A snapshot is the whole compacted document; bounded so a state-vector resync
+// answer stays within the transport's payload cap.
 export const MAX_SNAPSHOT_BYTES = 1024 * 1024
 // Structural ceilings on a document an untrusted peer may hand us. Generous for
 // any real document; they exist so a hostile peer cannot ship a billion-node
@@ -142,7 +143,7 @@ export function isYEnvelope(o) {
 /**
  * True iff `o` is a LEGACY RGA TextOp ({k,id,p,v,t}) or a legacy CRDT snapshot
  * ({nodes:[…]}) — the pre-Yjs format. Used by the migration path to recognise
- * (and deliberately ignore) an old op log. See yServerSession._bootstrap.
+ * (and deliberately ignore) a pre-Yjs op log when hydrating a legacy document.
  */
 export function isLegacyTextPayload(o) {
   if (!o || typeof o !== 'object') return false

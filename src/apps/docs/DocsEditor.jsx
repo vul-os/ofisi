@@ -61,9 +61,11 @@ import CommentsPanel from '../../components/CommentsPanel'
 import SuggestionPanel from '../../components/SuggestionPanel'
 import ActivityFeed from '../../components/ActivityFeed'
 import { useP2PCollab } from './useP2PCollab.js'
-import { useServerCollab } from './useServerCollab.js'
 import { docsCollabEnabled, DOCS_COLLAB_OFF_NOTICE } from '../../lib/flags.js'
-import { Y, createYContext, Y_FRAGMENT } from '../../lib/crdt/ydoc.js'
+import {
+  Y, createYContext, Y_FRAGMENT,
+  seedUpdateFromPMJSON, isFragmentEmpty, SEED_ORIGIN,
+} from '../../lib/crdt/ydoc.js'
 import { YCollab } from './collabExtension.js'
 import { useCollabFabric } from '../../lib/collab/useCollabFabric.js'
 import P2PShareModal from './components/P2PShareModal.jsx'
@@ -145,7 +147,7 @@ function isRemoteTransaction(tr) {
 
 /**
  * The document's authoritative content as ProseMirror JSON, for seeding the
- * Y.Doc on first open (see yServerSession.js — this is the whole migration).
+ * Y.Doc locally on first open (deterministic content-derived seed; see ydoc.js).
  *
  * `content` is what the document has always been saved as: TipTap JSON, or an
  * imported `_html` string (already sanitised by resolveContent). Page setup and
@@ -292,7 +294,7 @@ export default function DocsEditor() {
   const navigate = useNavigate()
   const { showToast, toast } = useToast()
   // ── Live co-editing gate (see lib/flags.js) ───────────────────────────────
-  // When OFF, Docs opens NO sync transport (no server relay, no p2p fabric, no
+  // When OFF, Docs opens NO sync transport (no p2p fabric, no
   // invite-link join) and every collaboration affordance is hidden or explicitly
   // labelled unavailable. Read once per mount — it is a build-time constant.
   const collabEnabled = useMemo(() => docsCollabEnabled(), [])
@@ -406,26 +408,42 @@ export default function DocsEditor() {
     )
   }, [p2p.peeringUnavailable, showToast])
 
-  // Server-mediated collab (the CLOUD / account path). Complements the p2p
-  // fabric — keeps two editors in sync + persisted even when no p2p peer is
-  // reachable, and gives a late joiner current state from the server. Suppressed
-  // while the E2E p2p session is active (encrypted updates must not hit the
-  // readable server) via e2eActive. Both transports carry Yjs updates into the
-  // SAME Y.Doc; Yjs merges are idempotent + commutative, so an update that
-  // arrives over both never double-applies.
-  const server = useServerCollab({
-    fileId: id,
-    ctx: yctx,
-    seedJSON,
-    e2eActive: p2p.active,
-    enabled: collabEnabled,
-  })
+  // Local hydration of the collaborative Y.Doc from the document's authoritative
+  // content (models.File.Content, always persisted as TipTap JSON). There is NO
+  // central document server: collaboration is peer-to-peer (see useP2PCollab /
+  // yP2PSession). So the Y.Doc is seeded HERE, locally and deterministically,
+  // from the document's own content — sovereign storage, not a collab server.
+  //
+  //   • A solo editor opens their document seeded from its own content.
+  //   • A P2P sharer's seeded Y.Doc propagates to joiners over the E2E room.
+  //   • A P2P joiner (e2eActive) seeds from whatever local copy it has, then the
+  //     room's state-vector resync folds in the peers' edits (a union merge, so
+  //     nothing is dropped). The seed is content-derived (hash31), so identical
+  //     content merges to one copy.
+  //
+  // Until the doc is hydrated the editor stays read-only: typing into a document
+  // about to be seeded would fork it. When collab is off there is nothing to wait
+  // for. The seed is applied once (guarded by isFragmentEmpty).
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => {
+    if (!collabEnabled) { setHydrated(false); return }
+    if (!yctx || !yctx.ydoc || !yctx.schema || seedJSON == null) return
+    if (hydrated) return
+    try {
+      if (isFragmentEmpty(yctx.ydoc)) {
+        const update = seedUpdateFromPMJSON(yctx.schema, seedJSON)
+        Y.applyUpdate(yctx.ydoc, update, SEED_ORIGIN)
+      }
+    } catch (err) {
+      console.warn('[collab] local seed failed (editor stays usable):', err?.message)
+    }
+    setHydrated(true)
+  }, [collabEnabled, yctx, seedJSON, hydrated])
 
-  // The collaborative document is HYDRATED once the server session has
-  // bootstrapped (or seeded, or honestly degraded to local-only). Until then the
-  // editor must stay read-only: typing into a document that is about to be
-  // hydrated would fork it. When collab is off there is nothing to wait for.
-  const collabReady = !collabEnabled || server.ready
+  // The collaborative document is HYDRATED once its Y.Doc has been seeded from the
+  // authoritative content. Until then the editor must stay read-only. When collab
+  // is off there is nothing to wait for.
+  const collabReady = !collabEnabled || hydrated
 
   // Subscribe to save state changes for this file
   useEffect(() => {
@@ -608,7 +626,6 @@ export default function DocsEditor() {
       if (!collabEnabledRef.current) return
       const { from, to } = ed.state.selection
       if (broadcastDocCursorRef.current) broadcastDocCursorRef.current(from, to)
-      if (broadcastServerCursorRef.current) broadcastServerCursorRef.current(from, to)
     },
   })
 
@@ -660,11 +677,10 @@ export default function DocsEditor() {
   // ── Seed the collaborative document from its authoritative content ────────
   // The document's content has always been persisted as TipTap JSON on the file
   // itself (models.File.Content) — that is what the editor has always opened, and
-  // the only representation that ever held the formatting and structure. It is
-  // therefore also the migration path: a document whose server op log is still in
-  // the legacy text-CRDT format is seeded from HERE, and the legacy log is dropped
-  // (see lib/crdt/yServerSession.js). The session uses this only if the server
-  // holds no Yjs state for the document.
+  // the only representation that ever held the formatting and structure. The
+  // collaborative Y.Doc is seeded from HERE (see the local-hydration effect
+  // above), which is also the legacy-document upgrade path: an old doc whose
+  // content is plain TipTap JSON simply becomes the deterministic Yjs seed.
   useEffect(() => {
     if (!collabEnabled || !editor || !id) return
     if (seedJSON !== null) return               // already computed for this doc
@@ -923,8 +939,8 @@ export default function DocsEditor() {
     } catch { localCursorIdentity.current = { accountId: 'local', displayName: 'Me' } }
   }
   // The peering fabric carries live cursors + the presence roster. The DOCUMENT
-  // no longer rides it (that is Yjs over the server relay / the E2E p2p room) —
-  // this is presence only, which is exactly what the shared hook provides (the
+  // rides the E2E-encrypted p2p room (Yjs, see yP2PSession) — this hook is
+  // presence only, which is exactly what the shared hook provides (the
   // same one Sheets and Slides use). It probes reachability first, so a
   // standalone server yields an honest empty roster rather than a false "Live".
   const localPeerId = useMemo(() => getOrCreatePeerId(), [])
@@ -952,57 +968,17 @@ export default function DocsEditor() {
   const broadcastDocCursorRef = useRef(null)
   broadcastDocCursorRef.current = broadcastDocCursor
 
-  // ── Server-mediated presence (CLOUD path) ─────────────────────────────────
-  // The p2p fabric above carries presence when a relay/peer is reachable. When
-  // it is NOT (the fabric's degrade-to-local-only gap), presence would be empty
-  // — so we ALSO ride the server collab session's presence relay, which is ACL-
-  // gated + identity-stamped server-side. The two are merged: p2p wins when
-  // present (E2E), the server fills the gap otherwise. This is what makes "who
-  // is here" + live cursors work on the account/cloud path, not just p2p.
-  const localColor = localCursorIdentity.current
-    ? (() => { let h = 0; for (const c of localCursorIdentity.current.accountId) { h = (h << 5) - h + c.charCodeAt(0); h |= 0 } return `hsl(${Math.abs(h) % 360},65%,50%)` })()
-    : '#6366f1'
-  const broadcastServerCursorRef = useRef(null)
-  broadcastServerCursorRef.current = (from, to) => {
-    server.broadcastPresence?.({
-      displayName: localCursorIdentity.current?.displayName || 'Me',
-      color: localColor,
-      cursor: { type: 'doc', from, to },
-    })
-  }
-
-  // Merge p2p + server presence into a single remoteCursors Map + roster. p2p
-  // entries take precedence (E2E/local-first); server entries fill peers the
-  // fabric can't reach. Keyed by accountId so the same peer never double-counts.
-  const mergedRemoteCursors = useMemo(() => {
-    const merged = new Map(remoteCursors || [])
-    for (const p of server.roster || []) {
-      if (!p?.accountId || merged.has(p.accountId)) continue
-      const cur = p.cursor || {}
-      if (cur.type !== 'doc' || typeof cur.from !== 'number') continue
-      merged.set(p.accountId, {
-        accountId: p.accountId,
-        displayName: p.displayName || 'Guest',
-        color: p.color || '#6366f1',
-        type: 'doc',
-        from: cur.from,
-        to: typeof cur.to === 'number' ? cur.to : cur.from,
-      })
-    }
-    return merged
-  }, [remoteCursors, server.roster])
-
+  // ── Presence (peer-to-peer) ───────────────────────────────────────────────
+  // Presence + live cursors ride the SAME E2E-encrypted P2P fabric as the
+  // document itself (see useCollabFabric / the p2p session). There is no
+  // server-mediated presence relay — "who is here" is derived entirely from the
+  // peers connected over WebRTC.
+  const mergedRemoteCursors = remoteCursors || new Map()
   const mergedRoster = useMemo(() => {
-    // Start from the p2p roster (already includes the local user); fold in any
-    // server-only peers so the avatar bar reflects everyone on either transport.
     const byId = new Map()
     for (const r of roster || []) if (r?.accountId) byId.set(r.accountId, r)
-    for (const p of server.roster || []) {
-      if (!p?.accountId || byId.has(p.accountId)) continue
-      byId.set(p.accountId, { accountId: p.accountId, displayName: p.displayName || 'Guest', color: p.color })
-    }
     return [...byId.values()]
-  }, [roster, server.roster])
+  }, [roster])
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
@@ -1318,25 +1294,6 @@ export default function DocsEditor() {
                 >
                   <Users size={11} />
                   Live co-editing off
-                </span>
-              </Tooltip>
-            )}
-            {/* Co-editing is ON but we could not reach the sync service (offline,
-                or a deployment without the collab route). The document still
-                saves, but nothing is syncing — and a user must never be left
-                believing their co-editing works when it doesn't. Say it. */}
-            {collabEnabled && server.degraded && (
-              <Tooltip label={
-                "Couldn't reach the collaboration service, so live co-editing is not " +
-                'running for this session. Your changes are still being saved — reload ' +
-                'once you are back online to sync up.'
-              }>
-                <span
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-pill bg-warning-bg text-warning border border-line"
-                  data-testid="collab-degraded-pill"
-                >
-                  <AlertCircle size={11} />
-                  Not syncing
                 </span>
               </Tooltip>
             )}

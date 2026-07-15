@@ -10,8 +10,12 @@
  *   • OFF  → the editor opens NO sync transport (zero /collab/* traffic, in or
  *            out), typing never publishes an op, and the UI SAYS co-editing is
  *            off (pill + share-dialog notice). No silent degradation.
- *   • ON   → the transport is opened (the bootstrap is fetched) and the "off"
- *            copy is gone.
+ *   • ON   → the document hydrates and is editable, and the "off" copy is gone.
+ *            Collaboration is peer-to-peer (Yjs over E2E-encrypted WebRTC), so
+ *            there is NO central-server collab traffic in EITHER state — an ON
+ *            editor still makes ZERO /collab/* server calls. The one server role
+ *            in collab is content-blind peer discovery (/api/peering/*), which is
+ *            never mounted in this test host.
  *
  * The editor itself must be perfectly usable in both states.
  */
@@ -72,7 +76,6 @@ describe('Docs live co-editing gate — OFF (default)', () => {
     await userEvent.keyboard('hello collab')
     await new Promise((r) => setTimeout(r, 400)) // past the publish debounce
     expect(collabCalls()).toEqual([])
-    expect(mockState.collab.doc1.ops).toHaveLength(0)
   })
 
   it('SAYS co-editing is off rather than showing an empty roster', async () => {
@@ -108,13 +111,22 @@ describe('Docs live co-editing gate — ON', () => {
     collabEnabled.mockReturnValue(true)
   })
 
-  it('opens the sync transport (bootstraps from the server) and drops the "off" copy', async () => {
+  it('hydrates the document, is editable, and drops the "off" copy — with ZERO central-server collab traffic', async () => {
     mountEditor()
     await waitFor(() => expect(document.querySelector('.ProseMirror')).toBeTruthy())
-    await waitFor(
-      () => expect(collabCalls().some((c) => c.includes('/collab/state'))).toBe(true),
-      { timeout: 3000 },
-    )
-    expect(screen.queryByTestId('collab-off-pill')).toBeNull()
+    // The "off" affordance must be gone once co-editing is on.
+    await waitFor(() => expect(screen.queryByTestId('collab-off-pill')).toBeNull())
+
+    // Collaboration is peer-to-peer: NO document content, ops, state, or presence
+    // ever traverse a central server. Even with co-editing ON, the editor makes
+    // zero /collab/* server calls (the P2P fabric would use /api/peering/*, which
+    // this host does not mount, so it stays local — the honest degrade).
+    const pm = document.querySelector('.ProseMirror')
+    await userEvent.click(pm)
+    await userEvent.keyboard('collaborative text')
+    await new Promise((r) => setTimeout(r, 400)) // past any publish/presence debounce
+    expect(collabCalls()).toEqual([])
+    // The locally-hydrated document is fully editable.
+    expect(pm.textContent).toContain('collaborative text')
   })
 })

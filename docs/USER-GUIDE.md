@@ -145,7 +145,7 @@ On an instance with accounts, use **Share** on a file to grant access to another
 
 Only the **owner** can grant, change, or revoke roles. Shared files appear in the recipient's *Shared with me*. Every grant/change/revoke is recorded in the instance's audit log.
 
-When two editors have the same document open, edits sync live: the server relays each participant's changes to everyone with access, and a presence bar shows **who is in the document, with live remote cursors and selections**. A viewer appears in the roster and shows a caret, but their edits are refused by the server.
+Account sharing controls **who may open the document from your storage**. Live co-editing itself is **peer-to-peer** (see §6.3 and [COLLABORATION.md](COLLABORATION.md)): when collaborators have the same document open through a collaboration link, their edits sync **directly between browsers**, end-to-end encrypted, and a presence bar shows **who is in the document, with live remote cursors and selections**. There is no central document server in the live path.
 
 ### 6.2 Read-only share links
 
@@ -162,7 +162,7 @@ For Docs, **Collaborate via link** starts an end-to-end encrypted peer session:
 
 - You get two links: a **read-write** link and a **read-only** link. Send the right one to the right people.
 - The secret key travels in the **URL fragment** (`#vp2p=…`) — it is never sent to any server. Anyone who has the link has the key, so share it over a channel you trust.
-- While an encrypted session is active, your edits go **only** to the encrypted peer channel — they are deliberately not relayed through the readable server path.
+- Your edits go **only** to the encrypted peer channel — peers connect directly (WebRTC), and there is no server in the path that could read them.
 - **Rotate** mints a brand-new room and links; the old links stop working. Use it to cut off previously shared links.
 - Read-only peers see live edits but cannot make authoritative changes.
 - A tampered or malformed invite link simply fails to join — the editor stays in normal local mode.
