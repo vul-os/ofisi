@@ -268,28 +268,23 @@ using the same identity service as mail.
 
 ## Bundling decision
 
-**Office is bundled from Starter and up.** There is no standalone Office tier. The Vulos Mail
-tier (R19/user) is mail-only; from Starter (R39/user) and up, the full Vulos Workspace —
-Office (documents), Talk, and Meet — is included in the tier price with no separate line item.
+**Office ships with the suite; it is not a separately-priced tier.** There are no
+per-active-user pricing tiers and no "mail tier" — mail is an experimental **connector**
+(bring your own Gmail/Outlook/IMAP), never a billed product. Billing is grounded in
+**compute + storage + relay** usage, not seats. Office installs by default alongside the
+other suite apps; self-hosting Office on your own box costs nothing.
 
-This is a deliberate product decision: Google Workspace refugees should not have to choose
-between mail and office — they are bundled together from the first paid tier above Vulos Mail.
-The messaging on the pricing page reflects this: "Office, Talk, Meet, and Mail (with Calendar +
-Contacts) are included from Starter and up."
-
-Cross-repo: see `vulos-cloud/ROADMAP.md` billing model section and `src/pages/Pricing.jsx` for
-the pricing copy that reflects this bundling.
+Cross-repo: see `vulos-cloud/ROADMAP.md` billing model section for the compute/storage/relay
+model.
 
 ---
 
-## BYO Mail support (in progress — parallel implementation)
+## Mail connector (Office is not involved)
 
-Vulos Office is not directly involved in the BYO Mail delivery flow (that is `vulos-mail` and
-`vulos-cloud`). However, Office (alongside the Talk and Meet products) is a bundled feature
-available to all BYO and hosted Mail customers at Starter and above. The Vulos OS install wizard
-installs vulos-office alongside vulos-mail when the user selects a Starter+ tier.
-
-Cross-repo: see `vulos-cloud/ROADMAP.md §BYO Mail support`.
+Vulos Office is not involved in mail at all — mail is a separate, experimental **connector**
+(`lilmail` + `@vulos/mail-ui`) that logs into your existing IMAP/SMTP mailbox. Office installs
+alongside the rest of the suite regardless of whether the mail connector is configured. There
+is no "Mail tier" gating Office.
 
 ---
 
