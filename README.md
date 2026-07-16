@@ -10,10 +10,10 @@ Documents, spreadsheets, slides, and whiteboards — **CRDT-native** and
 **real-time**, shipped as a single binary, running on **your own storage**.
 No cloud account, no telemetry, no lock-in.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-14B8A6.svg)](LICENSE)
-[![Self-hostable](https://img.shields.io/badge/self--hostable-single%20binary-2DD4BF)](SELFHOST.md)
-[![CRDT · real-time](https://img.shields.io/badge/CRDT-real--time%20P2P-0EA5E9)](docs/COLLABORATION.md)
-[![Tests](https://img.shields.io/badge/tests-passing-14B8A6)](docs/TESTING.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-D0471F.svg)](LICENSE)
+[![Self-hostable](https://img.shields.io/badge/self--hostable-single%20binary-E07A5F)](SELFHOST.md)
+[![CRDT · real-time](https://img.shields.io/badge/CRDT-real--time%20P2P-14B8A6)](docs/COLLABORATION.md)
+[![Tests](https://img.shields.io/badge/tests-passing-D0471F)](docs/TESTING.md)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev)
 
@@ -21,7 +21,7 @@ No cloud account, no telemetry, no lock-in.
 
 <br/>
 
-<img src="docs/screenshots/hero.png" alt="Ofisi — documents, sheets, slides, and whiteboards in one self-hosted suite" width="900" />
+<img src="docs/screenshots/home-light.png" alt="Ofisi — documents, sheets, slides, and whiteboards in one warm, self-hosted suite" width="900" />
 
 </div>
 
@@ -75,17 +75,28 @@ PDF signing. Chat, video, and mail are deliberately *not* part of it.
 
 ## Screenshots
 
+Ofisi wears a warm, **light-first** "Workshop" identity — an ember/terracotta
+accent, a paper-tinted canvas, Fraunces on the page and Hanken Grotesk in the
+chrome — with a full dark theme (and *System*) one click away.
+
 |  |  |
 | :---: | :---: |
-| **Documents** — rich text, tables, comments | **Spreadsheets** — formulas, charts, pivots |
-| <img src="docs/screenshots/docs-editor.png" alt="Documents" /> | <img src="docs/screenshots/sheets-editor.png" alt="Spreadsheets" /> |
-| **Slides** — themes, transitions, present | **Signing** — annotate & sign PDFs |
-| <img src="docs/screenshots/slides-editor.png" alt="Slides" /> | <img src="docs/screenshots/pdf-editor.png" alt="Signing" /> |
-| **Whiteboards** — Excalidraw canvas, P2P CRDT | **Home** — workspace & recent files |
-| <img src="docs/screenshots/whiteboard-editor.png" alt="Whiteboards" /> | <img src="docs/screenshots/home.png" alt="Home" /> |
+| **Documents** — the Fraunces "paper", comments & suggestions | **Spreadsheets** — formulas, formats, charts, pivots |
+| <img src="docs/screenshots/docs-editor-light.png" alt="Ofisi Documents editor" /> | <img src="docs/screenshots/sheets-editor-light.png" alt="Ofisi Spreadsheets editor" /> |
+| **Slides** — masters, themes, transitions, present | **Whiteboards** — Excalidraw canvas on the P2P CRDT engine |
+| <img src="docs/screenshots/slides-editor-light.png" alt="Ofisi Slides editor" /> | <img src="docs/screenshots/whiteboard-editor-light.png" alt="Ofisi Whiteboard editor" /> |
+| **Files** — your docs, sheets, slides & local drive | **Signing** — annotate & sign PDFs |
+| <img src="docs/screenshots/apphome-docs-light.png" alt="Ofisi Docs file list" /> | <img src="docs/screenshots/pdf-editor-light.png" alt="Ofisi PDF signing" /> |
+
+**Light &amp; dark** — every surface ships both, light-first:
+
+|  |  |
+| :---: | :---: |
+| <img src="docs/screenshots/home-dark.png" alt="Ofisi workspace, dark theme" /> | <img src="docs/screenshots/docs-editor-dark.png" alt="Ofisi Documents editor, dark theme" /> |
 
 > Regenerate anytime with `npm run screenshots` — it boots the app with seeded
-> demo data (no real backend or credentials needed). See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
+> demo data (no real backend or credentials needed) and captures every surface
+> in light **and** dark at retina. See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 
 ---
 

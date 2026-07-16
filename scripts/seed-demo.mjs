@@ -20,6 +20,13 @@ import { fileURLToPath } from 'node:url'
 
 export const DEMO_DATA_DIR = '/tmp/vulos-demo-data'
 
+// A sandboxed HOME for the screenshot/demo server. The backend's local-drive
+// scanner (backend/handlers/localfiles.go) walks $HOME/Documents, Downloads and
+// Desktop — so running the server with HOME pointed here keeps the "on your
+// computer" panel populated with fabricated demo files instead of leaking the
+// operator's real filesystem into committed screenshots.
+export const DEMO_HOME_DIR = '/tmp/vulos-demo-home'
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function ensureDir(p) {
@@ -386,12 +393,56 @@ export function seedStaticFiles() {
   console.log(`  wrote static seed files → ${DEMO_DATA_DIR}`)
 }
 
+// ── Local-drive demo files ──────────────────────────────────────────────────
+// Populate a sandboxed HOME so the "on your computer" scanner shows a tidy,
+// fabricated set of files. Content is a tiny placeholder string — the scanner
+// only reads name/size/mtime, never the bytes — so `.docx`/`.xlsx` etc. can be
+// plain text stubs.
+export function seedLocalDriveFiles(homeDir = DEMO_HOME_DIR) {
+  const stub = (label) =>
+    `Ofisi demo file — ${label}. Fabricated sample data for screenshots; not a real document.\n`
+
+  const layout = {
+    Documents: [
+      'Q3 Planning Notes.md',
+      'Onboarding Guide.docx',
+      'Product Roadmap.md',
+      'Revenue Model 2026.xlsx',
+      'Team Offsite Deck.pptx',
+      'Brand Guidelines.pdf',
+      'Release Checklist.md',
+      'Meeting Notes — 2026-06-12.md',
+    ],
+    Downloads: [
+      'Partnership Agreement.pdf',
+      'Analytics Export.csv',
+      'Design Review.pptx',
+    ],
+    Desktop: [
+      'Scratchpad.txt',
+      'Invoice Template.xlsx',
+    ],
+  }
+
+  for (const [sub, files] of Object.entries(layout)) {
+    const dir = path.join(homeDir, sub)
+    ensureDir(dir)
+    for (const f of files) {
+      writeFileSync(path.join(dir, f), stub(f), 'utf8')
+    }
+  }
+
+  console.log(`  wrote local-drive demo files → ${homeDir}`)
+}
+
 // ── Main (standalone) ─────────────────────────────────────────────────────────
 async function main() {
   console.log('\nVulos Office — demo seeder')
   console.log(`  data dir : ${DEMO_DATA_DIR}`)
+  console.log(`  home dir : ${DEMO_HOME_DIR}`)
 
   seedStaticFiles()
+  seedLocalDriveFiles()
 
   console.log('\nSeed done.\n')
 }

@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { spawn, execSync } from 'node:child_process'
 
-import { seedStaticFiles, DEMO_DATA_DIR } from './seed-demo.mjs'
+import { seedStaticFiles, seedLocalDriveFiles, DEMO_DATA_DIR, DEMO_HOME_DIR } from './seed-demo.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT       = path.resolve(__dirname, '..')
@@ -44,9 +44,11 @@ const SCREENSHOT_BASE = EXTERNAL_URL ?? LOCAL_BASE
 const API_SEED_BASE   = EXTERNAL_URL ?? LOCAL_BASE
 
 // ── Routes to capture ─────────────────────────────────────────────────────────
+// Every surface is shot in BOTH light and dark (Ofisi is light-first) at retina
+// (deviceScaleFactor 2) into `<name>-light.png` / `<name>-dark.png`.
 const ROUTES = [
-  { name: 'hero',          path: '/',               description: 'Home (hero shot)' },
-  { name: 'home',          path: '/',               description: 'Home / file list' },
+  { name: 'home',          path: '/',               description: 'Home / workspace' },
+  { name: 'apphome-docs',  path: '/docs',           description: 'Docs — file list' },
   {
     name: 'docs-editor',
     path: '/docs/demo',
@@ -114,8 +116,11 @@ async function waitForHTTP(url, maxMs = 45_000) {
 async function startLocalServer() {
   console.log('\n  setting up demo environment …')
 
-  // 1. Write static JSON seed files (docs / sheets / slides)
+  // 1. Write static JSON seed files (docs / sheets / slides) + a sandboxed HOME
+  //    of fabricated local-drive files (so the "on your computer" scanner never
+  //    photographs the operator's real Documents/Downloads/Desktop).
   seedStaticFiles()
+  seedLocalDriveFiles()
 
   // 2. Ensure the frontend is built (dist/ must exist with index.html)
   if (!existsSync(path.join(ROOT, 'dist', 'index.html'))) {
@@ -145,10 +150,12 @@ async function startLocalServer() {
     '  type: "local"',
   ].join('\n') + '\n')
 
-  // 5. Start the Go server (it serves both API + embedded frontend)
+  // 5. Start the Go server (it serves both API + embedded frontend).
+  //    HOME/USERPROFILE are pinned to the sandboxed demo home so the local-drive
+  //    scanner (os.UserHomeDir) walks the fabricated files, not the real ones.
   serverProc = spawn(binPath, [], {
     cwd: tmpWD,
-    env: { ...process.env },
+    env: { ...process.env, HOME: DEMO_HOME_DIR, USERPROFILE: DEMO_HOME_DIR },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   serverProc.stdout.on('data', d => process.stdout.write(`  [go] ${d}`))
@@ -169,9 +176,9 @@ function stopLocalServer() {
 
 // ── Screenshot capture ────────────────────────────────────────────────────────
 
-async function capture(page, route) {
+async function capture(page, route, theme) {
   const url = `${SCREENSHOT_BASE}${route.path}`
-  console.log(`  → ${route.description}`)
+  console.log(`  → [${theme}] ${route.description}`)
 
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 })
@@ -195,14 +202,33 @@ async function capture(page, route) {
     // paints asynchronously — e.g. the whiteboard — can ask for a longer settle).
     await page.waitForTimeout(route.settleMs || 800)
 
-    const outPath = path.join(OUT, `${route.name}.png`)
+    const outPath = path.join(OUT, `${route.name}-${theme}.png`)
     await page.screenshot({ path: outPath, fullPage: false })
     console.log(`     saved ${path.relative(ROOT, outPath)}`)
-    return { name: route.name, status: 'ok', path: outPath }
+    return { name: route.name, theme, status: 'ok', path: outPath }
   } catch (err) {
     console.warn(`     FAILED: ${err.message}`)
-    return { name: route.name, status: 'failed', error: err.message }
+    return { name: route.name, theme, status: 'failed', error: err.message }
   }
+}
+
+// A theme-pinned browser context at retina scale. The app resolves its palette
+// from `[data-theme]`, driven by localStorage 'ofisi.theme' (set before any page
+// script runs) and backstopped by the OS-level colorScheme.
+async function makeThemeContext(browser, theme) {
+  const ctx = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 2,
+    colorScheme: theme,
+    locale: 'en-US',
+  })
+  await ctx.addInitScript((t) => {
+    try {
+      localStorage.setItem('ofisi.theme', t)
+      localStorage.setItem('vulos.theme', t) // legacy key, still honoured
+    } catch {}
+  }, theme)
+  return ctx
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -215,7 +241,7 @@ async function main() {
   console.log('\nVulos Office screenshotter')
   console.log(`  screenshots → ${SCREENSHOT_BASE}`)
   console.log(`  output      : ${path.relative(ROOT, OUT)}/`)
-  console.log(`  viewport    : 1440×900`)
+  console.log(`  viewport    : 1440×900 @2x (retina), light + dark`)
   console.log(`  seed mode   : ${usingExternal ? (FORCE_SEED ? 'forced (--seed)' : 'skipped') : 'auto (local server)'}`)
 
   if (!usingExternal) {
@@ -226,53 +252,19 @@ async function main() {
   }
 
   const browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
-    colorScheme: 'dark',
-    locale: 'en-US',
-  })
-  const page = await context.newPage()
-  page.on('console', () => {})
-  page.on('pageerror', () => {})
 
+  // Light-first: capture the light gallery, then the dark gallery. Each theme
+  // gets its own retina context so the palette resolves cleanly from the start.
   const results = []
-  for (const route of ROUTES) {
-    const result = await capture(page, route)
-    results.push(result)
-  }
-
-  // ── LIGHT-mode spot captures (temporary; for design review) ───────────────
-  // A second context that forces the app's light theme via localStorage before
-  // any page script runs, so we can eyeball light mode for `home`/`docs-editor`.
-  if (process.env.CAPTURE_LIGHT === '1') {
-    const lightCtx = await browser.newContext({
-      viewport: { width: 1440, height: 900 },
-      colorScheme: 'light',
-      locale: 'en-US',
-    })
-    await lightCtx.addInitScript(() => {
-      try { localStorage.setItem('vulos.theme', 'light') } catch {}
-    })
-    const lightPage = await lightCtx.newPage()
-    const lightRoutes = ROUTES.filter(r => ['home', 'docs-editor'].includes(r.name))
-    for (const route of lightRoutes) {
-      const url = `${SCREENSHOT_BASE}${route.path}`
-      console.log(`  → [light] ${route.description}`)
-      try {
-        await lightPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 })
-        if (route.waitFor) {
-          try { await lightPage.waitForSelector(route.waitFor, { timeout: 10_000 }) }
-          catch { await lightPage.waitForTimeout(3_000) }
-        }
-        await lightPage.waitForTimeout(900)
-        const outPath = path.join(OUT, `${route.name}-light.png`)
-        await lightPage.screenshot({ path: outPath, fullPage: false })
-        console.log(`     saved ${path.relative(ROOT, outPath)}`)
-      } catch (err) {
-        console.warn(`     [light] FAILED: ${err.message}`)
-      }
+  for (const theme of ['light', 'dark']) {
+    const context = await makeThemeContext(browser, theme)
+    const page = await context.newPage()
+    page.on('console', () => {})
+    page.on('pageerror', () => {})
+    for (const route of ROUTES) {
+      results.push(await capture(page, route, theme))
     }
-    await lightCtx.close()
+    await context.close()
   }
 
   await browser.close()
@@ -292,12 +284,13 @@ async function main() {
     '# docs/screenshots',
     '',
     'Generated by `npm run screenshots` (scripts/screenshots.mjs).',
-    'Populated with realistic demo data from `scripts/seed-demo.mjs`.',
+    'Every surface is captured in **light and dark** at retina (1440×900 @2x),',
+    'populated with realistic demo data from `scripts/seed-demo.mjs`.',
     '',
     '| File | Surface | Status |',
     '|------|---------|--------|',
     ...results.map(r =>
-      `| ${r.name}.png | ${ROUTES.find(rt => rt.name === r.name)?.description ?? r.name} | ${r.status === 'ok' ? 'populated' : 'needs live instance'} |`
+      `| ${r.name}-${r.theme}.png | ${ROUTES.find(rt => rt.name === r.name)?.description ?? r.name} | ${r.status === 'ok' ? 'populated' : 'needs live instance'} |`
     ),
     '',
     'To regenerate: `npm run screenshots`',
@@ -307,7 +300,7 @@ async function main() {
     '',
     '- **Docs** `demo`: "Q2 2026 Product Update" — prose, table, bullet lists',
     '- **Sheets** `demo-sheet`: "Revenue Tracker H1 2026" — 6 months, SUM + margin formulas, 2 sheets',
-    '- **Slides** `demo-slides`: "Vulos Office Product Overview" — 5 slides, Reveal.js obsidian theme',
+    '- **Slides** `demo-slides`: "Ofisi Product Overview" — 5 slides',
   ].join('\n')
 
   writeFileSync(path.join(OUT, 'README.md'), notes + '\n')

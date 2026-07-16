@@ -29,7 +29,9 @@ The screenshotter is self-contained — it:
 1. Writes demo data files to `/tmp/vulos-demo-data/` (never touches `./data`)
 2. Builds the Go binary (which embeds the frontend via `//go:embed`)
 3. Starts the binary on port 8083 pointed at the demo data dir
-4. Captures all surfaces at 1440×900 (dark mode)
+4. Captures every surface at 1440×900 @2x (retina), in **light and dark** —
+   Ofisi is light-first, so each surface is shot as both `<name>-light.png`
+   and `<name>-dark.png`
 5. Stops the server
 
 To capture against a deployed instance:
@@ -55,55 +57,77 @@ Demo data is committed in `scripts/seed-demo.mjs` and never touches `./data` —
 
 ## Route list
 
-| File | Route | Surface | Populated? |
-|------|-------|---------|------------|
-| `hero.png` | `/` | Home / file list | Yes — shows seeded docs/sheets/slides |
-| `home.png` | `/` | Home | Yes — shows seeded docs/sheets/slides |
-| `docs-editor.png` | `/docs/demo` | Documents editor | Yes — Q2 Product Update with prose + table |
-| `sheets-editor.png` | `/sheets/demo-sheet` | Spreadsheets editor | Yes — Revenue Tracker with formulas |
-| `slides-editor.png` | `/slides/demo-slides` | Presentations editor | Yes — 5-slide product overview |
-| `whiteboard-editor.png` | `/whiteboards/demo-board` | Whiteboard editor (Excalidraw) | Yes — architecture sketch on the real canvas |
-| `pdf-editor.png` | `/pdf/demo` | PDF viewer/annotator | Partial — UI shell (no PDF pre-loaded) |
+Each route is captured twice — `<name>-light.png` and `<name>-dark.png`.
+
+| File (light / dark) | Route | Surface | Populated? |
+|---------------------|-------|---------|------------|
+| `home-*.png` | `/` | Home / workspace | Yes — seeded recents + "Start something new" |
+| `apphome-docs-*.png` | `/docs` | Docs file list | Yes — seeded docs + local-drive scan |
+| `docs-editor-*.png` | `/docs/demo` | Documents editor | Yes — Q2 Product Update with prose + table |
+| `sheets-editor-*.png` | `/sheets/demo-sheet` | Spreadsheets editor | Yes — Revenue Tracker with formulas |
+| `slides-editor-*.png` | `/slides/demo-slides` | Presentations editor | Yes — 5-slide product overview |
+| `whiteboard-editor-*.png` | `/whiteboards/demo-board` | Whiteboard editor (Excalidraw) | Yes — architecture sketch on the real canvas |
+| `pdf-editor-*.png` | `/pdf/demo` | PDF viewer/annotator | Partial — UI shell (open-a-PDF empty state) |
+| `settings-*.png` | `/settings` | Settings | Yes — account / storage / admin |
+
+The README hero uses `home-light.png`; the gallery leads with the light shots
+and shows a light/dark pair.
 
 ---
 
 ## Gallery
 
-### Home
+### Home / workspace
 
-![Home](screenshots/home.png)
+![Home — light](screenshots/home-light.png)
+![Home — dark](screenshots/home-dark.png)
 
-The Ofisi home screen showing the seeded file list (doc, sheet, slides), recent files, and navigation sidebar.
+The Ofisi workspace — "Start something new" launchers, seeded recents, and the
+local-drive scan — in the warm light theme and its dark counterpart.
+
+### Docs file list
+
+![Docs file list](screenshots/apphome-docs-light.png)
+
+The Docs app home: recent documents as cards plus the on-your-computer file scan.
 
 ### Docs Editor
 
-![Docs Editor](screenshots/docs-editor.png)
+![Docs Editor — light](screenshots/docs-editor-light.png)
+![Docs Editor — dark](screenshots/docs-editor-dark.png)
 
-The Documents editor (TipTap) open on "Q2 2026 Product Update" — headings, a metrics table, and bullet lists.
+The Documents editor (TipTap) open on "Q2 2026 Product Update" — the Fraunces
+"paper", headings, a metrics table, and bullet lists.
 
 ### Sheets Editor
 
-![Sheets Editor](screenshots/sheets-editor.png)
+![Sheets Editor](screenshots/sheets-editor-light.png)
 
 The Spreadsheets editor (Fortune Sheet) with the "Revenue Tracker H1 2026" — 6 months of revenue, expenses, profit (SUM formula), and margin % columns.
 
 ### Slides Editor
 
-![Slides Editor](screenshots/slides-editor.png)
+![Slides Editor](screenshots/slides-editor-light.png)
 
-The Presentations editor (Reveal.js) open on the 5-slide "Ofisi Product Overview" deck with the obsidian dark theme.
+The Presentations editor open on the 5-slide "Ofisi Product Overview" deck — masters, themes, transitions, and presenter view.
 
 ### Whiteboard Editor
 
-![Whiteboard Editor](screenshots/whiteboard-editor.png)
+![Whiteboard Editor](screenshots/whiteboard-editor-light.png)
 
 The Whiteboard editor — the MIT [Excalidraw](https://github.com/excalidraw/excalidraw) canvas mounted on Ofisi's own distributed peer-to-peer collab engine (the same Yjs/E2E-encrypted room Docs uses, no central whiteboard server). Shown open on the seeded "Architecture Sketch". Note the "Excalidraw · MIT" attribution in the top bar.
 
 ### PDF Editor
 
-![PDF Editor](screenshots/pdf-editor.png)
+![PDF Editor](screenshots/pdf-editor-light.png)
 
-The PDF viewer with annotation and signing tools. (A PDF file must be opened or uploaded to show content — the seed data does not include a pre-loaded PDF.)
+The PDF viewer with annotation and signing tools, shown on its open-a-PDF empty state. (A PDF file must be opened or uploaded to show content — the seed data does not include a pre-loaded PDF.)
+
+### Settings
+
+![Settings](screenshots/settings-light.png)
+
+Standalone settings — account, storage, theme (light / dark / system), and admin.
 
 > **Calendar and Contacts** moved to the mail connector — their screenshots
 > and seed data now live with lilmail, not here.
