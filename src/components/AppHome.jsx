@@ -15,7 +15,7 @@ import AccountShareModal from './AccountShareModal'
 import { importFromUrl, importFile, detectType } from '../lib/importFile'
 import { api } from '../lib/api'
 import { timeAgo, formatBytes } from '../lib/format'
-import { Button, IconButton, Input, Card, Tooltip, useToast, DocThumb, Skeleton, Avatar, hueFor } from './ui'
+import { Button, IconButton, Input, Card, Tooltip, useToast, DocThumb, Skeleton, Avatar, hueFor, ThemeSwitch } from './ui'
 
 // ─── Token-aligned config ─────────────────────────────────────────────────────
 const CONFIG = {
@@ -283,6 +283,7 @@ export default function AppHome({ type }) {
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
+          <ThemeSwitch collapsed />
           <div className="flex items-center gap-0.5 p-0.5 bg-bg-elev2 border border-line rounded-md mr-1">
             <Tooltip label="Grid view" side="bottom">
               <IconButton size="sm" active={viewMode === 'grid'} onClick={() => setViewMode('grid')}>

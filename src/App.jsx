@@ -48,7 +48,7 @@ export default function App() {
   useEffect(() => {
     // Register vulos-office:// protocol handler (web+ prefix required by browsers)
     try {
-      navigator.registerProtocolHandler('web+vulosoffice', window.location.origin + '/?goto=%s', 'Vulos Office')
+      navigator.registerProtocolHandler('web+vulosoffice', window.location.origin + '/?goto=%s', 'Ofisi')
     } catch { /* unsupported browser */ }
 
     // Handle incoming deep-link ?goto= param
@@ -76,7 +76,7 @@ export default function App() {
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-bg">
-        <LoadingState label="Loading Vulos Office…" />
+        <LoadingState label="Loading Ofisi…" />
       </div>
     )
   }

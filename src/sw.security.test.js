@@ -84,8 +84,8 @@ describe('office service worker — cache versioning', () => {
 describe('office web app manifest — installability basics', () => {
   test('has the fields required for an installable PWA', () => {
     expect(manifest.id).toBeTruthy()
-    expect(manifest.name).toBe('Vulos Office')
-    expect(manifest.short_name).toBe('Office')
+    expect(manifest.name).toBe('Ofisi')
+    expect(manifest.short_name).toBe('Ofisi')
     expect(manifest.start_url).toBe('/')
     expect(manifest.scope).toBe('/')
     expect(manifest.display).toBe('standalone')

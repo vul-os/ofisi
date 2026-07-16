@@ -1,22 +1,21 @@
 /**
- * Sidebar primitives — a vertical app rail with a near-black IDE aesthetic.
+ * Sidebar primitives — Ofisi's warm vertical app rail (sand chrome on ivory).
  *
  * Pieces:
  *   - <Sidebar>             root container; manages width (collapsed/expanded)
- *   - <Sidebar.Brand>       logo lockup + product name (fades wordmark collapsed)
+ *   - <Sidebar.Brand>       Ofisi mark + serif wordmark (fades collapsed)
  *   - <Sidebar.Section>     labelled group; mono uppercase label, hides collapsed
- *   - <Sidebar.Item>        nav row; accent left-rail + calm tint when active,
+ *   - <Sidebar.Item>        nav row; ember left-rail + calm tint when active,
  *                           optional per-app icon tint at rest
  *   - <Sidebar.Footer>      sticky bottom region (settings, collapse toggle…)
  *
- * Design DNA (vulos-cloud):
- *   - Surface sits one step above the canvas (#111 on #0c0c0c), hairline edge.
- *   - Active = a 2.5px accent left-rail + a calm accent-tint bg (no coloured
- *     border) + the icon brightening to accent. The rail marks, it doesn't box.
- *   - At rest, app icons carry one low-saturation tint each (iconAccent) so
- *     Docs/Sheets/Slides/PDF/Talk are findable at a glance.
- *   - Hover lifts to #1e1e1e. Mono uppercase section labels (the IDE trait).
- *   - Width transitions 200ms ease-out so collapsing feels considered.
+ * Design DNA:
+ *   - Surface is warm sand, one step off the ivory canvas, with a hairline edge.
+ *   - Active = a 2.5px ember left-rail + a calm accent-tint bg (no coloured
+ *     border) + the icon brightening to ember. The rail marks, it doesn't box.
+ *   - At rest, app icons carry one calm tint each (iconAccent) so
+ *     Docs/Sheets/Slides/Board/PDF are findable at a glance.
+ *   - Mono uppercase section labels; width transitions 200ms so it feels considered.
  */
 
 import { createContext, useContext } from 'react'
@@ -24,13 +23,41 @@ import { NavLink } from 'react-router-dom'
 
 const SidebarCtx = createContext({ collapsed: false })
 
+/**
+ * OfisiMark — the brand glyph: an ember rounded tile with an ivory "O" ring.
+ * Self-contained inline SVG (no asset request), so it's crisp at any size and
+ * inherits the warm palette. Reused by the rail brand + the mobile header.
+ */
+export function OfisiMark({ size = 32, className = '' }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <linearGradient id="ofisi-mark-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#E86A3E" />
+          <stop offset="1" stopColor="#CF4620" />
+        </linearGradient>
+      </defs>
+      <rect x="1" y="1" width="30" height="30" rx="8.5" fill="url(#ofisi-mark-grad)" />
+      <circle cx="16" cy="16" r="8.4" fill="none" stroke="#FBF3E9" strokeWidth="4.4" />
+      <circle cx="16" cy="16" r="2.2" fill="#FBF3E9" />
+    </svg>
+  )
+}
+
 function Sidebar({ collapsed, children, className = '' }) {
   return (
     <SidebarCtx.Provider value={{ collapsed }}>
       <aside
         className={[
           'relative flex flex-col flex-shrink-0',
-          'bg-bg-elev text-ink-muted border-r border-line',
+          'bg-bg-elev2 text-ink-muted border-r border-line',
           'transition-[width] duration-base ease-out',
           collapsed ? 'w-[60px]' : 'w-[244px]',
           className,
@@ -42,31 +69,21 @@ function Sidebar({ collapsed, children, className = '' }) {
   )
 }
 
-Sidebar.Brand = function SidebarBrand({ logoSrc, name = 'Vulos Office' }) {
+Sidebar.Brand = function SidebarBrand({ name = 'Ofisi' }) {
   const { collapsed } = useContext(SidebarCtx)
   return (
     <div className={[
-      'flex items-center gap-3 h-14 border-b border-line flex-shrink-0',
+      'flex items-center gap-2.5 h-14 border-b border-line flex-shrink-0',
       collapsed ? 'justify-center px-0' : 'px-4',
     ].join(' ')}>
-      {logoSrc ? (
-        <img
-          src={logoSrc}
-          alt=""
-          className="w-8 h-8 rounded-lg object-cover flex-shrink-0 ring-1 ring-line-strong shadow-e1"
-        />
-      ) : (
-        <div className="w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center text-sm font-semibold flex-shrink-0 shadow-e1">
-          V
-        </div>
-      )}
+      <OfisiMark size={30} className="flex-shrink-0 rounded-lg shadow-e1" />
       {!collapsed && (
         <div className="flex flex-col min-w-0">
-          <span className="text-sm font-semibold tracking-tight text-ink truncate leading-none">
-            Vulos
+          <span className="font-serif text-[19px] font-semibold tracking-tight text-ink truncate leading-none">
+            {name}
           </span>
-          <span className="font-mono text-[9.5px] font-medium uppercase tracking-[0.2em] text-ink-faint leading-none mt-[3px]">
-            Office
+          <span className="font-mono text-[8.5px] font-medium uppercase tracking-[0.22em] text-ink-faint leading-none mt-[4px]">
+            Office Suite
           </span>
         </div>
       )}

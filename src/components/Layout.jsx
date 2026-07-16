@@ -34,7 +34,7 @@ import { useFilesStore } from '../store/filesStore'
 import { useNotificationsStore } from '../store/notificationsStore'
 import NewFileModal from './NewFileModal'
 import NotificationsPanel from './NotificationsPanel'
-import { Sidebar, IconButton, Tooltip, ThemeSwitch } from './ui'
+import { Sidebar, IconButton, Tooltip, ThemeSwitch, OfisiMark } from './ui'
 
 // Each app icon carries one low-saturation tint at rest (so users find
 // Sheets/Slides/PDF at a glance); it brightens to accent only when its app is
@@ -82,7 +82,7 @@ function SidebarContent({ collapsed, onNavigate, onNewFile }) {
 
   return (
     <>
-      <Sidebar.Brand logoSrc="/vulos-office.png" name="Vulos Office" />
+      <Sidebar.Brand name="Ofisi" />
 
       <Sidebar.Section>
         {/* "New" is the only emphatic button in the rail — primary accent. */}
@@ -261,9 +261,8 @@ function Shell({ children }) {
           <IconButton size="md" onClick={() => setMobileOpen(true)} title="Open navigation">
             <Menu size={18} />
           </IconButton>
-          <img src="/vulos-office.png" alt="" className="w-7 h-7 rounded-lg object-cover ring-1 ring-line-strong shadow-e1" />
-          <span className="text-sm font-semibold tracking-tight text-ink leading-none">Vulos</span>
-          <span className="font-mono text-[9.5px] font-medium uppercase tracking-[0.2em] text-ink-faint leading-none">Office</span>
+          <OfisiMark size={26} className="rounded-lg shadow-e1" />
+          <span className="font-serif text-[17px] font-semibold tracking-tight text-ink leading-none">Ofisi</span>
         </header>
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">{children}</div>
       </main>

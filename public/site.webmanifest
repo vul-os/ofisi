@@ -1,11 +1,11 @@
 {
-  "name": "Vulos Office",
-  "short_name": "Vulos Office",
-  "description": "Vulos Office — documents, sheets, and slides in one place.",
+  "name": "Ofisi",
+  "short_name": "Ofisi",
+  "description": "Ofisi — a warm, real-time collaborative office suite: documents, spreadsheets, slides and whiteboards.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1e1e2e",
-  "theme_color": "#1e1e2e",
+  "background_color": "#FBF7F1",
+  "theme_color": "#D0471F",
   "icons": [
     {
       "src": "/favicon-16x16.png",

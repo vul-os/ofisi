@@ -30,11 +30,11 @@ describe('Vulos Office manifest.webmanifest', () => {
     const raw = readFileSync(manifestPath, 'utf-8')
     manifest = JSON.parse(raw)
 
-    expect(manifest.name).toBe('Vulos Office')
-    expect(manifest.short_name).toBe('Office')
+    expect(manifest.name).toBe('Ofisi')
+    expect(manifest.short_name).toBe('Ofisi')
     expect(manifest.start_url).toBe('/')
     expect(manifest.display).toBe('standalone')
-    expect(manifest.theme_color).toBe('#0f6a6c')
+    expect(manifest.theme_color).toBe('#D0471F')
   })
 
   it('has at least two icon entries with src, sizes, and type', () => {

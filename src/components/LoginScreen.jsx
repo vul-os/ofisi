@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { Lock, Eye, EyeOff, AlertCircle, Loader2 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
+import { OfisiMark } from './ui'
 
 /*
- * LoginScreen — first contact. Goes for warm, hand-set typography instead of
- * the previous "indigo grid" tech-startup look.  The serif title sets the
- * editorial tone immediately; one accent button completes the path.
+ * LoginScreen — first contact. Warm, hand-set typography: the Ofisi mark, a
+ * Fraunces serif title, and a single ember button complete the path.  Two soft
+ * off-canvas washes (ember + teal) give the page a centre of gravity without
+ * gradients or grids.
  */
 export default function LoginScreen() {
   const { login, error, remainingAttempts } = useAuthStore()
@@ -38,12 +40,13 @@ export default function LoginScreen() {
       <div className="relative w-full max-w-sm mx-4 animate-rise-in">
         <div className="bg-paper rounded-xl border border-line shadow-e3 p-8">
           <div className="flex flex-col items-start mb-7">
-            <span className="inline-flex items-center gap-2 mb-4">
-              <span className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center shadow-e1">
-                <span className="font-mono text-sm font-bold text-white leading-none">V</span>
-              </span>
-              <span className="text-2xs font-semibold text-ink-faint tracking-eyebrow uppercase">
-                Vulos Office
+            <span className="inline-flex items-center gap-2.5 mb-5">
+              <OfisiMark size={30} className="rounded-lg shadow-e1" />
+              <span className="flex flex-col leading-none">
+                <span className="font-serif text-lg font-semibold text-ink leading-none">Ofisi</span>
+                <span className="font-mono text-[8.5px] font-medium text-ink-faint tracking-eyebrow uppercase mt-1">
+                  Office Suite
+                </span>
               </span>
             </span>
             <h1 className="font-serif text-3xl text-ink leading-tight">

@@ -508,7 +508,7 @@ export default function Settings() {
         </Card>
 
         <p className="text-center text-2xs text-ink-faint tracking-eyebrow uppercase pb-4">
-          Vulos Office — open-source, self-hostable office suite
+          Ofisi — open-source, self-hostable office suite
           {' · '}
           <a
             href="/licenses.txt"
