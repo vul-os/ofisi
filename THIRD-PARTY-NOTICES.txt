@@ -1,5 +1,5 @@
 ==============================================================================
-THIRD-PARTY NOTICES -- Vulos Office (browser bundle)
+THIRD-PARTY NOTICES -- Ofisi (browser bundle)
 ==============================================================================
 
 This software's production dependency graph contains the third-party

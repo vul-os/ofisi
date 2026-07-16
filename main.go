@@ -512,7 +512,7 @@ func main() {
 		addr = ":8080"
 	}
 
-	log.Printf("Vulos Office running → http://localhost%s", addr)
+	log.Printf("Ofisi running → http://localhost%s", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatal(err)
 	}

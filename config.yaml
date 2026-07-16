@@ -1,4 +1,4 @@
-# Vulos Office Configuration
+# Ofisi Configuration
 
 server:
   addr: ":8080"
