@@ -10,6 +10,7 @@ Documents, spreadsheets, slides, and whiteboards — **CRDT-native** and
 **real-time**, shipped as a single binary, running on **your own storage**.
 No cloud account, no telemetry, no lock-in.
 
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-D0471F.svg)](LICENSE)
 [![Self-hostable](https://img.shields.io/badge/self--hostable-single%20binary-E07A5F)](SELFHOST.md)
 [![CRDT · real-time](https://img.shields.io/badge/CRDT-real--time%20P2P-14B8A6)](docs/COLLABORATION.md)

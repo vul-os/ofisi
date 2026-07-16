@@ -1,14 +1,17 @@
 # Ofisi — Roadmap
 
 Ofisi is the **documents** surface of the Vulos project — a self-hosted,
-open-source (MIT) suite for Documents, Sheets, Slides, and PDF/Signing that runs
-as a single Go binary with a React frontend. (Calendar and Contacts come through
-the mail connector — CalDAV/CardDAV via lilmail.) Today it is a fast, private,
-local-first editor. This roadmap charts its growth into a **networked** office:
-the same documents, edited together in real time by people on different Vulos
-instances, and PDFs signed with cryptographic audit trails — all riding the
-**Vulos peer fabric** that already connects and routes instances across the
-network, with relay/TURN fallback.
+open-source (MIT) suite for Documents, Sheets, Slides, Whiteboards, and
+PDF/Signing that runs as a single Go binary with a React frontend. (Calendar
+and Contacts come through the mail connector — CalDAV/CardDAV via lilmail.)
+Today it is a fast, private, local-first editor suite with **live
+peer-to-peer collaboration already running**: the same documents (and
+whiteboards) edited together in real time by people on different Vulos
+instances, end-to-end-encrypted with no central document server, and PDFs
+signed with cryptographic audit trails — all riding the **Vulos peer fabric**
+that already connects and routes instances across the network, with
+relay/TURN fallback. This roadmap charts what's next: deeper import/export
+fidelity and hardening the fabric further.
 
 > **Product scope.** Ofisi is documents-only. Chat and video are **third-party**
 > (Matrix/Element for chat; Element Call / Jitsi for video), not Vulos products;
@@ -35,9 +38,14 @@ A snapshot of where the product actually is. The vision pillars that follow
 ### Now — shipped and live
 
 - **Editors.** Documents (TipTap), Sheets (Fortune Sheet), Slides (the
-  from-scratch positioned-object canvas), and a PDF annotate-and-sign canvas —
-  all running from the single Go binary, installable as a PWA, no account
-  required in local mode.
+  from-scratch positioned-object canvas), **Whiteboards** (Excalidraw-based,
+  Yjs CRDT), and a PDF annotate-and-sign canvas — all running from the single
+  Go binary, installable as a PWA, no account required in local mode.
+- **Real-time collaboration.** Always peer-to-peer, no central document
+  server: Docs and Whiteboards sync as Yjs CRDT updates, Sheets/Slides over
+  LWW/tree CRDTs, inside an end-to-end-encrypted room. Peers connect directly
+  over WebRTC, with a content-blind relay circuit as hard-NAT fallback only;
+  presence and live cursors ride the same room.
 - **Import / export.** Microsoft (`.docx`/`.xlsx`/`.pptx`) and ODF
   (`.odt`/`.ods`/`.odp`) plus `.pdf`/`.csv`/Markdown, all passing through one
   hardened trust boundary (`lib/importBounds.js`: size + zip-bomb + zip-slip +
@@ -63,11 +71,6 @@ A snapshot of where the product actually is. The vision pillars that follow
 
 ### Next — actively planned
 
-- **Live P2P document collaboration** over the Vulos relay fabric
-  (`COLLAB-FABRIC-01`). The CRDT modules exist client-side, but the live doc-sync
-  channel is currently **dormant** — the live path today is REST + persistence,
-  and the Go CRDT engine was removed. Re-introducing WebRTC data channels with
-  relay/TURN fallback is the real § 2 of this roadmap.
 - **Import/export fidelity hardening** — nested tables, merged cells, embedded
   media, and slide transitions, driven by fixture-based round-trip checks.
 - **PDF depth** — true text extraction (beyond overlay annotations) and
@@ -93,7 +96,7 @@ A snapshot of where the product actually is. The vision pillars that follow
 
 ---
 
-## 1. Ofisi Core — Documents, Sheets, Slides, PDF
+## 1. Ofisi Core — Documents, Sheets, Slides, Whiteboards, PDF
 
 The foundation, and what ships today: a clean, single-binary suite that opens in
 the browser with no account required. Documents are edited with TipTap (rich
@@ -134,6 +137,10 @@ trustworthy.
   timer), and present-from-browser. The full-screen present overlay uses Reveal.js
   purely as a slide-to-slide **transition host** that renders our positioned
   objects — it is not the authoring model or the editor.
+- **Whiteboards (Excalidraw-based):** an infinite hand-drawn canvas built on
+  the MIT [Excalidraw](https://github.com/excalidraw/excalidraw) editor —
+  shapes, arrows, freehand, text, and images. The scene is a Yjs CRDT, riding
+  the **same** P2P collaboration engine as Docs (no separate collab stack).
 - **PDF:** render, page thumbnails, zoom; place text, freehand draw, and
   signature/initial annotations; page reorder/insert/delete/rotate; flatten and
   download via pdf-lib.
@@ -204,10 +211,11 @@ for the signaling and relay primitives this builds on.
 - **Activity & version history:** per-document change feed and named snapshots
   derived from the CRDT op log.
 
-> **Status.** The client-side CRDT modules, comments, suggestions, presence, and
-> version history are shipped. The **live P2P doc-sync channel is dormant**
-> (`COLLAB-FABRIC-01`) — reconnecting it over the relay fabric is the top
-> "Next" item above.
+> **Status.** Shipped: the client-side CRDT modules, comments, suggestions,
+> presence, version history, and the **live peer-to-peer doc-sync channel**
+> itself — collaboration is now always end-to-end-encrypted P2P (WebRTC
+> direct, content-blind relay circuit as hard-NAT fallback only), with no
+> server-mediated collaboration path left in the codebase.
 
 ### Explicit non-goals
 
