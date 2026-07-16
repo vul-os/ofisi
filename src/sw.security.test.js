@@ -72,7 +72,7 @@ describe('office service worker — sensitive + document routes are never cached
 describe('office service worker — cache versioning', () => {
   test('cache name is versioned so a stale shell is evicted on activate', () => {
     expect(swSource).toMatch(/const\s+CACHE_VERSION\s*=/)
-    expect(swSource).toMatch(/const\s+CACHE_NAME\s*=\s*`vulos-office-\$\{CACHE_VERSION\}`/)
+    expect(swSource).toMatch(/const\s+CACHE_NAME\s*=\s*`ofisi-\$\{CACHE_VERSION\}`/)
   })
 
   test('activate evicts every cache that is not the current version', () => {

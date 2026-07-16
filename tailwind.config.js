@@ -117,9 +117,10 @@ export default {
         'app-board-bg':  'var(--app-board-bg)',
       },
       fontFamily: {
-        sans:  ['var(--font-sans)'],
-        serif: ['var(--font-serif)'],
-        mono:  ['var(--font-mono)'],
+        sans:    ['var(--font-sans)'],
+        display: ['var(--font-display)'],
+        serif:   ['var(--font-serif)'],
+        mono:    ['var(--font-mono)'],
       },
       fontSize: {
         '2xs': ['var(--text-2xs)',  { lineHeight: 'var(--leading-snug)' }],
@@ -136,6 +137,7 @@ export default {
         tightish: 'var(--tracking-tight)',
         wideish:  'var(--tracking-wide)',
         eyebrow:  'var(--tracking-wider)',
+        display:  'var(--tracking-display)',
       },
       lineHeight: {
         doc: 'var(--leading-doc)',

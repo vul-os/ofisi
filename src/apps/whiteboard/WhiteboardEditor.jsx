@@ -30,7 +30,7 @@ import { ArrowLeft, Users, Eye, Share2, Presentation as BoardIcon, Info, WifiOff
 import { useFilesStore, getSaveState, onSaveStateChange } from '../../store/filesStore'
 import { api } from '../../lib/api'
 import { useAuthStore } from '../../store/authStore'
-import { useTheme } from '../../components/ui/useTheme'
+import { useResolvedTheme } from '../../components/ui/useTheme'
 import { Topbar, IconButton, Tooltip, SaveStatus, LoadingState, useToast } from '../../components/ui'
 import { docsCollabEnabled, DOCS_COLLAB_OFF_NOTICE } from '../../lib/flags.js'
 import { Y, SEED_ORIGIN } from '../../lib/crdt/ydoc.js'
@@ -50,7 +50,9 @@ export default function WhiteboardEditor() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { showToast } = useToast()
-  const { theme } = useTheme()
+  // Concrete 'light' | 'dark' (resolves 'system' + follows OS live) so the
+  // Excalidraw canvas flips in lock-step with the shared tokens.
+  const resolvedTheme = useResolvedTheme()
   // The SAME flag governs the whole P2P collab engine (Docs + whiteboards): when
   // off, no peering transport is opened and the UI says so plainly.
   const collabEnabled = useMemo(() => docsCollabEnabled(), [])
@@ -299,7 +301,7 @@ export default function WhiteboardEditor() {
           onChange={onChange}
           viewModeEnabled={p2p.readOnly}
           isCollaborating={Boolean(collabEnabled && p2p.active)}
-          theme={theme === 'dark' ? 'dark' : 'light'}
+          theme={resolvedTheme}
         />
       </div>
 

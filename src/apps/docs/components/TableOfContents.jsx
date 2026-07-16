@@ -38,8 +38,8 @@ export function buildTocHtml(headings) {
       </a>
     </p>`
   })
-  return `<div class="toc-block" style="border:1px solid var(--color-line,#e2e2e0);border-radius:6px;padding:12px 16px;margin:12px 0;background:var(--color-bg-elev2,#fafafa)">
-    <p style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-ink-faint,#888);margin-bottom:8px">Table of Contents</p>
+  return `<div class="toc-block" style="border:1px solid var(--line,#ece4d6);border-radius:6px;padding:12px 16px;margin:12px 0;background:var(--bg-elev-2,#f3ece0)">
+    <p style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-faint,#8b8378);margin-bottom:8px">Table of Contents</p>
     ${items.join('\n')}
   </div>`
 }

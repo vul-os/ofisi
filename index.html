@@ -43,9 +43,12 @@
     <script>
       (function () {
         try {
-          var t = localStorage.getItem('ofisi.theme') || localStorage.getItem('vulos.theme') || 'system';
-          if (t !== 'light' && t !== 'dark') {
+          // Ofisi defaults to LIGHT out of the box; System/Dark are opt-in.
+          var t = localStorage.getItem('ofisi.theme') || localStorage.getItem('vulos.theme') || 'light';
+          if (t === 'system') {
             t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          } else if (t !== 'dark') {
+            t = 'light';
           }
           document.documentElement.setAttribute('data-theme', t);
         } catch (e) {

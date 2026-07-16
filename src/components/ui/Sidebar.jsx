@@ -79,10 +79,10 @@ Sidebar.Brand = function SidebarBrand({ name = 'Ofisi' }) {
       <OfisiMark size={30} className="flex-shrink-0 rounded-lg shadow-e1" />
       {!collapsed && (
         <div className="flex flex-col min-w-0">
-          <span className="font-serif text-[19px] font-semibold tracking-tight text-ink truncate leading-none">
+          <span className="font-display text-[20px] font-bold tracking-display text-ink truncate leading-none">
             {name}
           </span>
-          <span className="font-mono text-[8.5px] font-medium uppercase tracking-[0.22em] text-ink-faint leading-none mt-[4px]">
+          <span className="font-mono text-[8.5px] font-medium uppercase tracking-[0.22em] text-ink-faint leading-none mt-[5px]">
             Office Suite
           </span>
         </div>

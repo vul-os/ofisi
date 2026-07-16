@@ -27,15 +27,17 @@ if (typeof document !== 'undefined') {
         display: inline-flex; align-items: center; gap: 2px;
         padding: 0 6px; margin: 0 1px; border-radius: 9999px;
         font-size: 0.92em; line-height: 1.5; white-space: nowrap;
-        background: var(--chip-bg, #eef2ff); color: var(--chip-fg, #3730a3);
-        border: 1px solid var(--chip-bd, #c7d2fe); cursor: default;
+        background: var(--chip-bg); color: var(--chip-fg);
+        border: 1px solid var(--chip-bd); cursor: default;
         user-select: none;
       }
-      .smart-chip-person { --chip-bg:#eef2ff; --chip-fg:#3730a3; --chip-bd:#c7d2fe; }
-      .smart-chip-date   { --chip-bg:#ecfdf5; --chip-fg:#065f46; --chip-bd:#a7f3d0; }
-      .smart-chip-file   { --chip-bg:#eff6ff; --chip-fg:#1e40af; --chip-bd:#bfdbfe; cursor:pointer; }
+      /* Category chips ride the design tokens (per-app tints + signals) via
+         color-mix, so they read correctly in BOTH light and dark themes. */
+      .smart-chip-person { --chip-bg: color-mix(in srgb, var(--app-board) 14%, transparent);  --chip-fg: var(--app-board);  --chip-bd: color-mix(in srgb, var(--app-board) 34%, transparent); }
+      .smart-chip-date   { --chip-bg: var(--signal-success-bg);                                 --chip-fg: var(--signal-success); --chip-bd: color-mix(in srgb, var(--signal-success) 34%, transparent); }
+      .smart-chip-file   { --chip-bg: color-mix(in srgb, var(--app-docs) 14%, transparent);    --chip-fg: var(--app-docs);   --chip-bd: color-mix(in srgb, var(--app-docs) 34%, transparent); cursor:pointer; }
       .smart-chip-file:hover { text-decoration: underline; }
-      .smart-chip-place  { --chip-bg:#fef3c7; --chip-fg:#92400e; --chip-bd:#fde68a; }
+      .smart-chip-place  { --chip-bg: var(--signal-warning-bg);                                 --chip-fg: var(--signal-warning); --chip-bd: color-mix(in srgb, var(--signal-warning) 34%, transparent); }
     `
     document.head.appendChild(s)
   }

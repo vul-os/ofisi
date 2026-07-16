@@ -38,8 +38,9 @@
 
 /* SOVEREIGNTY: fonts are vendored locally via @fontsource (self-hosted woff2),
  * NOT fetched from fonts.googleapis.com / fonts.gstatic.com at runtime. */
-@import '@fontsource-variable/hanken-grotesk/wght.css';
-@import '@fontsource-variable/hanken-grotesk/wght-italic.css';
+@import '@fontsource-variable/schibsted-grotesk/wght.css';
+@import '@fontsource-variable/schibsted-grotesk/wght-italic.css';
+@import '@fontsource-variable/bricolage-grotesque/opsz.css';
 @import '@fontsource-variable/fraunces/opsz.css';
 @import '@fontsource-variable/fraunces/opsz-italic.css';
 @import '@fontsource-variable/jetbrains-mono/wght.css';
@@ -155,32 +156,37 @@
   --selection-fg: #571E0D;
 
   /* ── Typography ──────────────────────────────────────────────────────────
-   * Hanken Grotesk for chrome; Fraunces for documents + editorial display;
-   * JetBrains Mono for micro-UI labels, kbd, code. */
-  --font-sans:  'Hanken Grotesk Variable', system-ui, -apple-system,
+   * The Ofisi voice — a warm editorial quartet, all self-hosted:
+   *   sans     Schibsted Grotesk — warm, humane UI/body workhorse
+   *   display  Bricolage Grotesque — characterful headings, hero, wordmark
+   *   serif    Fraunces (opsz) — the writing surface + editorial moments
+   *   mono     JetBrains Mono — micro-labels, kbd, code */
+  --font-sans:  'Schibsted Grotesk Variable', system-ui, -apple-system,
                 BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Bricolage Grotesque Variable', 'Schibsted Grotesk Variable',
+                system-ui, -apple-system, sans-serif;
   --font-serif: 'Fraunces Variable', 'Iowan Old Style', 'Charter',
                 'Source Serif Pro', Cambria, Georgia, serif;
   --font-mono:  'JetBrains Mono Variable', ui-monospace, 'SF Mono',
                 'Cascadia Code', 'Fira Code', Menlo, Consolas, monospace;
-  --font-display: var(--font-serif);
 
-  /* Type scale — minor-third (1.2) ratio, anchored 14px */
+  /* Type scale — anchored 14px; display sizes pushed for editorial presence. */
   --text-2xs: 0.6875rem; /* 11px — micro-labels, metadata */
   --text-xs:  0.75rem;   /* 12px — secondary chrome */
   --text-sm:  0.8125rem; /* 13px — buttons, default UI */
   --text-md:  0.875rem;  /* 14px — body chrome */
   --text-base:1rem;      /* 16px — document body */
-  --text-lg:  1.125rem;  /* 18px — section titles */
-  --text-xl:  1.375rem;  /* 22px — page titles */
-  --text-2xl: 1.75rem;   /* 28px — display */
-  --text-3xl: 2.25rem;   /* 36px — hero */
+  --text-lg:  1.1875rem; /* 19px — section titles */
+  --text-xl:  1.5rem;    /* 24px — page titles */
+  --text-2xl: 2rem;      /* 32px — display */
+  --text-3xl: 2.75rem;   /* 44px — hero */
 
   /* Tracking */
   --tracking-tight:   -0.011em;
   --tracking-normal:   0em;
   --tracking-wide:     0.04em;
   --tracking-wider:    0.14em;   /* uppercase mono eyebrows */
+  --tracking-display: -0.02em;   /* Bricolage headings at large sizes */
 
   /* Leading */
   --leading-tight: 1.2;
@@ -206,14 +212,16 @@
   --radius-xl: 20px;
   --radius-pill: 999px;
 
-  /* ── Elevation — warm, soft, no bloom (the paper rests, it doesn't float) ─*/
+  /* ── Elevation — warm, soft, no bloom (the paper rests, it doesn't float) ─
+   * Two stacked layers per step: a tight contact shadow + a soft warm ambient,
+   * so cards read tactile and printed rather than flatly bordered. */
   --elev-0: none;
-  --elev-1: 0 1px 2px rgba(74, 52, 30, 0.05),
-            0 1px 3px rgba(74, 52, 30, 0.06);
-  --elev-2: 0 4px 12px -2px rgba(74, 52, 30, 0.10),
-            0 2px 5px -2px rgba(74, 52, 30, 0.08);
-  --elev-3: 0 18px 40px -12px rgba(60, 40, 20, 0.22),
-            0 6px 16px -8px rgba(60, 40, 20, 0.12);
+  --elev-1: 0 1px 1px rgba(74, 52, 30, 0.05),
+            0 2px 4px -1px rgba(74, 52, 30, 0.07);
+  --elev-2: 0 1px 2px rgba(74, 52, 30, 0.06),
+            0 6px 16px -4px rgba(74, 52, 30, 0.12);
+  --elev-3: 0 2px 6px rgba(60, 40, 20, 0.08),
+            0 24px 48px -12px rgba(60, 40, 20, 0.26);
   --elev-focus: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
 
   /* ── Motion ─────────────────────────────────────────────────────────── */

@@ -262,7 +262,7 @@ function Shell({ children }) {
             <Menu size={18} />
           </IconButton>
           <OfisiMark size={26} className="rounded-lg shadow-e1" />
-          <span className="font-serif text-[17px] font-semibold tracking-tight text-ink leading-none">Ofisi</span>
+          <span className="font-display text-[18px] font-bold tracking-display text-ink leading-none">Ofisi</span>
         </header>
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">{children}</div>
       </main>

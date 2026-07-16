@@ -114,10 +114,10 @@ const ChartCard = memo(function ChartCard({
       aria-label={summary}
       onKeyDown={onKeyDown}
       onPointerDown={(e) => { e.stopPropagation(); onSelect(chart.id) }}
-      className="absolute rounded-lg overflow-hidden shadow-e2 bg-white"
+      className="absolute rounded-lg overflow-hidden shadow-e2 bg-paper"
       style={{
         left: geom.x, top: geom.y, width: geom.w, height: geom.h,
-        border: selected ? '2px solid var(--accent, #3b82f6)' : '1px solid #e2e8f0',
+        border: selected ? '2px solid var(--accent)' : '1px solid var(--line-strong)',
         zIndex: selected ? 30 : 20,
         pointerEvents: 'auto',
       }}
@@ -126,10 +126,10 @@ const ChartCard = memo(function ChartCard({
       {/* Drag header */}
       <div
         className="flex items-center justify-between px-1.5 select-none"
-        style={{ height: HEADER_H, background: '#f8fafc', borderBottom: '1px solid #e2e8f0', cursor: 'move' }}
+        style={{ height: HEADER_H, background: 'var(--bg-elev-2)', borderBottom: '1px solid var(--line)', cursor: 'move' }}
         onPointerDown={(e) => startDrag(e, 'move')}
       >
-        <span className="flex items-center gap-1 text-[10px] text-slate-500 truncate">
+        <span className="flex items-center gap-1 text-[10px] text-ink-faint truncate">
           <GripVertical size={11} aria-hidden />
           <span className="truncate max-w-[180px]">{chart.title || 'Chart'}</span>
         </span>
@@ -138,7 +138,7 @@ const ChartCard = memo(function ChartCard({
             type="button"
             title="Edit chart"
             aria-label="Edit chart"
-            className="p-1 rounded hover:bg-slate-200 text-slate-500"
+            className="p-1 rounded hover:bg-bg-hover text-ink-faint hover:text-ink"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); onEdit(chart.id) }}
           >
@@ -148,7 +148,7 @@ const ChartCard = memo(function ChartCard({
             type="button"
             title="Delete chart"
             aria-label="Delete chart"
-            className="p-1 rounded hover:bg-red-100 text-slate-500 hover:text-red-600"
+            className="p-1 rounded hover:bg-danger-bg text-ink-faint hover:text-danger"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); onDelete(chart.id) }}
           >
@@ -179,7 +179,7 @@ const ChartCard = memo(function ChartCard({
           className="absolute"
           style={{
             right: 0, bottom: 0, width: 14, height: 14, cursor: 'nwse-resize',
-            background: 'linear-gradient(135deg, transparent 50%, #94a3b8 50%)',
+            background: 'linear-gradient(135deg, transparent 50%, var(--line-emphasis) 50%)',
           }}
         />
       )}

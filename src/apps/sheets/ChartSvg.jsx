@@ -27,9 +27,11 @@ import {
 } from './charts.js'
 
 const PAD = { top: 34, right: 16, bottom: 40, left: 44 }
-const AXIS = '#94a3b8'
-const GRID = '#e2e8f0'
-const INK = '#334155'
+// Chart chrome (axes / gridlines / labels) rides the design tokens so charts
+// read correctly in light AND dark. Series colours stay data-driven (s.color).
+const AXIS = 'var(--ink-faint)'
+const GRID = 'var(--line-strong)'
+const INK = 'var(--ink-muted)'
 const SECONDARY_PAD = 42   // extra right padding when a secondary axis is drawn
 
 function niceMax(v) {
@@ -108,7 +110,7 @@ export function ChartSvg({ chart, sheet, width, height, extracted: extractedProp
       role="img"
       aria-labelledby={titleId ? `${titleId} ${descId}` : undefined}
       aria-label={titleId ? undefined : summary}
-      style={{ display: 'block', background: '#fff' }}
+      style={{ display: 'block', background: 'var(--bg-elev-1)' }}
     >
       {titleId && <title id={titleId}>{chart.title || `${kindLabel} chart`}</title>}
       {descId && <desc id={descId}>{summary}</desc>}

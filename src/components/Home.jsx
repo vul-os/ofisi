@@ -70,11 +70,11 @@ export default function Home() {
 
         {/* ── Hero ── */}
         <header>
-          <p className="mono-label mb-2.5">Workspace</p>
-          <h1 className="text-2xl font-semibold text-ink tracking-tight leading-tight">
+          <p className="mono-label mb-3">Workspace</p>
+          <h1 className="font-display text-3xl font-semibold text-ink tracking-display leading-[1.05]">
             Welcome back
           </h1>
-          <p className="text-sm text-ink-faint mt-1.5 leading-relaxed">
+          <p className="text-md text-ink-muted mt-3 leading-relaxed max-w-md">
             Create something new, or pick up where you left off.
           </p>
         </header>

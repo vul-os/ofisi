@@ -43,8 +43,8 @@ export default function LoginScreen() {
             <span className="inline-flex items-center gap-2.5 mb-5">
               <OfisiMark size={30} className="rounded-lg shadow-e1" />
               <span className="flex flex-col leading-none">
-                <span className="font-serif text-lg font-semibold text-ink leading-none">Ofisi</span>
-                <span className="font-mono text-[8.5px] font-medium text-ink-faint tracking-eyebrow uppercase mt-1">
+                <span className="font-display text-xl font-bold text-ink leading-none tracking-display">Ofisi</span>
+                <span className="font-mono text-[8.5px] font-medium text-ink-faint tracking-eyebrow uppercase mt-1.5">
                   Office Suite
                 </span>
               </span>

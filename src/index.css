@@ -19,8 +19,8 @@
   * { box-sizing: border-box; }
 
   html {
-    /* Hanken Grotesk — contextual alternates + kerning for a warm, even chrome */
-    font-feature-settings: "calt", "kern", "ss01";
+    /* Schibsted Grotesk — contextual alternates + kerning for warm, even chrome */
+    font-feature-settings: "calt", "kern";
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -99,10 +99,11 @@
   height: 0;
 }
 
-/* Headings — keep the sans grotesque (editorial chrome), let body breathe in serif */
+/* Headings — Bricolage display grotesque over the Fraunces serif body: a
+ * magazine-grade pairing (characterful headline + warm reading body). */
 .tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4 {
-  font-family: var(--font-sans);
-  letter-spacing: var(--tracking-tight);
+  font-family: var(--font-display);
+  letter-spacing: var(--tracking-display);
   color: var(--ink);
   font-weight: 600;
 }
@@ -707,11 +708,32 @@
 }
 .sheets-themed .fortune-context-menu-divider { background: var(--line) !important; }
 
-/* Frame the whole grid so the light canvas reads as a deliberate sheet of
- * paper resting on the dark desk: hairline edge + soft drop shadow. */
+/* Frame the whole grid so the canvas reads as a deliberate sheet of paper on
+ * the desk: hairline edge + soft drop shadow. */
 .sheets-themed .fortune-container {
   border: none !important;
   box-shadow: inset 0 0 0 1px var(--line-strong), var(--elev-2);
+}
+
+/* ── Sheets grid in DARK theme ───────────────────────────────────────────────
+ * Fortune Sheet paints the whole grid (cells, gridlines, row/column headers)
+ * onto <canvas> elements — CSS cannot recolour those pixels, so in dark mode
+ * the grid would stay a glaring white block on the espresso chrome. We flip it
+ * to dark with a scoped filter on ONLY the grid canvases: invert lightness +
+ * a 180° hue-rotate so white paper → near-espresso and black text → warm cream,
+ * while coloured series/marks keep (roughly) their hue. DOM overlays that live
+ * outside the canvas (selection box, remote cursors, the fill handle) are NOT
+ * inverted, so they keep their token-driven ember colours and read correctly.
+ * ------------------------------------------------------------------------- */
+:root[data-theme="dark"] .sheets-themed .fortune-sheet-container canvas,
+:root[data-theme="dark"] .sheets-themed canvas#luckysheetTableContent {
+  filter: invert(0.9) hue-rotate(180deg);
+}
+/* The scrollbars fortune-sheet draws are DOM, not canvas — keep them on-theme. */
+:root[data-theme="dark"] .sheets-themed .fortune-scrollbar-x,
+:root[data-theme="dark"] .sheets-themed .fortune-scrollbar-y {
+  filter: none;
+  background: var(--bg-elev-2) !important;
 }
 
 /* ===========================================================================

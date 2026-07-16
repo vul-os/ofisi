@@ -2,13 +2,13 @@
  * useTheme — tiny hook for explicit light/dark/system theme toggling.
  *
  * Storage:
- *   localStorage 'ofisi.theme' = 'light' | 'dark' | 'system' (default)
+ *   localStorage 'ofisi.theme' = 'light' | 'dark' | 'system'
+ *   DEFAULT is 'light' — Ofisi ships light out of the box (a workspace should
+ *   feel like daylight). System/Dark are opt-in via the selector.
  *
  * Side-effects:
  *   Always resolves to a concrete [data-theme="light"|"dark"] on <html> — in
  *   'system' mode it reads prefers-color-scheme and follows OS changes live.
- *   Ofisi is LIGHT by default (the token :root), so an absent attribute would
- *   read light; resolving explicitly keeps 'system' honest for OS-dark users.
  */
 
 import { useEffect, useState, useCallback } from 'react'
@@ -32,7 +32,7 @@ function applyTheme(theme) {
 
 export function useTheme() {
   const [theme, setTheme] = useState(() => {
-    try { return localStorage.getItem(STORE_KEY) || localStorage.getItem(LEGACY_KEY) || 'system' } catch { return 'system' }
+    try { return localStorage.getItem(STORE_KEY) || localStorage.getItem(LEGACY_KEY) || 'light' } catch { return 'light' }
   })
 
   useEffect(() => {
@@ -52,4 +52,28 @@ export function useTheme() {
   }, [])
 
   return { theme, setTheme, cycle }
+}
+
+/**
+ * useResolvedTheme — the concrete 'light' | 'dark' currently in effect, tracked
+ * live from the <html data-theme> attribute (which useTheme keeps authoritative,
+ * including 'system' → OS resolution). Sub-app canvases that own their own
+ * theming (Excalidraw, chart overlays, …) subscribe here so they flip in lock-
+ * step with the shared tokens instead of guessing from the raw preference.
+ */
+export function useResolvedTheme() {
+  const read = () =>
+    (typeof document !== 'undefined' &&
+      document.documentElement.getAttribute('data-theme')) === 'dark'
+      ? 'dark'
+      : 'light'
+  const [resolved, setResolved] = useState(read)
+  useEffect(() => {
+    const el = document.documentElement
+    const obs = new MutationObserver(() => setResolved(read()))
+    obs.observe(el, { attributes: true, attributeFilter: ['data-theme'] })
+    setResolved(read())
+    return () => obs.disconnect()
+  }, [])
+  return resolved
 }

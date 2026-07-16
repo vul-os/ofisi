@@ -270,7 +270,7 @@ export default function AppHome({ type }) {
         <div className={`w-7 h-7 rounded-md ${cfg.bgCn} flex items-center justify-center flex-shrink-0`}>
           <Icon size={15} className={cfg.iconCn} />
         </div>
-        <h1 className="text-sm font-semibold text-ink tracking-tightish">{cfg.label}</h1>
+        <h1 className="font-display text-lg font-semibold text-ink tracking-tight leading-none">{cfg.label}</h1>
 
         <div className="flex-1 max-w-xs mx-2">
           <Input

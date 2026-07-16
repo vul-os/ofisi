@@ -36,8 +36,11 @@
 //     origin. When Office is EMBEDDED as an iframe in the OS hub, the entry
 //     point does not register at all (see src/lib/pwa.js).
 
-const CACHE_VERSION = 'v1';
-const CACHE_NAME = `vulos-office-${CACHE_VERSION}`;
+// Bump on any shell/asset change so the activate step evicts stale caches and
+// clients pick up the new build (the 'ofisi-2' bump ships the Warm Workshop
+// redesign — the old 'vulos-office-v1' cache was serving pre-redesign assets).
+const CACHE_VERSION = 'ofisi-2';
+const CACHE_NAME = `ofisi-${CACHE_VERSION}`;
 
 // Derive the base from where THIS worker is served. Office is served at the
 // origin root in every deployment, so BASE is '/'; deriving it keeps the worker
