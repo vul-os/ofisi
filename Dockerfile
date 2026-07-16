@@ -3,25 +3,22 @@
 # Produces the image the README advertises as
 #   ghcr.io/vul-os/vulos-office:latest
 # a single static Go binary that EMBEDS the built SPA (//go:embed all:dist in
-# main.go), the marketing landing (//go:embed all:site), and serves everything
-# on :8080. Runs completely standalone — no config file, no cloud, no account.
+# main.go) and serves everything on :8080. Runs completely standalone — no
+# config file, no cloud, no account.
 #
 # ── BUILD CONTEXT (read before building) ──────────────────────────────────────
-# Vulos Office depends on SIBLING repos, both for Go and for the SPA:
-#   - Go : go.mod has `replace github.com/vul-os/vulos-apps => ../vulos-apps`
-#   - npm: package.json has `@vulos/apps-ui: file:../vulos-apps/ui` and
-#          `@vulos/relay-client: file:../vulos-relay/client`
-# Those `../` paths escape the repo, so the Docker build context MUST be the
-# PARENT directory that holds vulos-office/ alongside vulos-apps/ and
-# vulos-relay/. Build from the parent (the dir that checks out all repos — the
-# CI runner already has this layout, mirroring backend/cp/Dockerfile.cloudlet):
+# Vulos Office's SPA has one SIBLING npm package:
+#   - npm: package.json has `@vulos/relay-client: file:../vulos-relay/client`
+# That `../` path escapes the repo, so the Docker build context MUST be the
+# PARENT directory that holds vulos-office/ alongside vulos-relay/. Build from
+# the parent (the dir that checks out both repos — the CI runner already has
+# this layout):
 #
-#   # from the directory that CONTAINS vulos-office/ vulos-apps/ vulos-relay/
+#   # from the directory that CONTAINS vulos-office/ vulos-relay/
 #   docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/vulos-office:latest .
 #
 # A plain `docker build .` from inside vulos-office/ will FAIL — the sibling
-# repos are not reachable from that context. This is the same monorepo-context
-# constraint documented in vulos-cloud/backend/cp/Dockerfile.cloudlet.
+# repo is not reachable from that context.
 #
 # Run:
 #   docker run -d --name vulos-office -p 8080:8080 \
@@ -29,11 +26,10 @@
 #     ghcr.io/vul-os/vulos-office:latest
 #   # open http://localhost:8080
 
-# ── Stage 1: build the SPA (needs the sibling npm packages) ───────────────────
+# ── Stage 1: build the SPA (needs the sibling npm package) ────────────────────
 FROM node:20-bookworm AS web
 WORKDIR /build
-# Copy the sibling npm packages first so the file: deps resolve, then the app.
-COPY vulos-apps/ui        /build/vulos-apps/ui
+# Copy the sibling npm package first so the file: dep resolves, then the app.
 COPY vulos-relay/client   /build/vulos-relay/client
 COPY vulos-office         /build/vulos-office
 # Drop any node_modules dragged in from the host (the build context has no
@@ -41,14 +37,10 @@ COPY vulos-office         /build/vulos-office
 # native binaries (e.g. macOS rollup) that break under Linux — force clean
 # Linux installs everywhere.
 RUN rm -rf /build/vulos-office/node_modules \
-           /build/vulos-apps/ui/node_modules \
            /build/vulos-relay/client/node_modules
-# Pre-build the file: sibling packages FIRST. Each ships uncommitted build
-# outputs (@vulos/apps-ui exports dist-lib/, built by its `prepare` = vite build)
-# and its own devDeps (vite) — so it must be installed+built with its OWN toolchain
-# before the app can consume it. Doing it here also means the app install finds a
-# ready dist-lib and its prepare re-run has vite available in the sibling.
-RUN cd /build/vulos-apps/ui      && npm install --no-audit --no-fund && npm run build:lib
+# Pre-build the file: sibling package FIRST. It ships uncommitted build outputs
+# and its own devDeps (vite) — so it must be installed+built with its OWN
+# toolchain before the app can consume it.
 RUN cd /build/vulos-relay/client && npm install --no-audit --no-fund && npm run build
 WORKDIR /build/vulos-office
 # `npm ci` needs a lockfile in sync; the repo ships package-lock.json. Fall back
@@ -57,12 +49,10 @@ RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 # Produces dist/ (the embedded SPA). vite.config.js recreates dist/.gitkeep.
 RUN npm run build:frontend
 
-# ── Stage 2: build the static Go binary (needs the sibling Go module) ─────────
+# ── Stage 2: build the static Go binary ───────────────────────────────────────
 FROM golang:1.25-bookworm AS build
 ARG VERSION=docker
 WORKDIR /build
-# The `replace => ../vulos-apps` needs the sibling Go module in the same layout.
-COPY vulos-apps   /build/vulos-apps
 COPY vulos-office /build/vulos-office
 WORKDIR /build/vulos-office
 # Overlay the freshly-built SPA so //go:embed all:dist bakes in real assets
@@ -77,7 +67,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
 
 # ── Stage 3: minimal non-root runtime ─────────────────────────────────────────
 FROM alpine:3.20
-# ca-certificates for outbound TLS (cloud seam / OTLP); wget for the healthcheck.
+# ca-certificates for outbound TLS (optional identity/entitlements seam, OTLP);
+# wget for the healthcheck.
 RUN apk add --no-cache ca-certificates wget \
  && adduser -D -u 10001 vulos
 COPY --from=build /out/vulos-office /usr/local/bin/vulos-office

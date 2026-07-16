@@ -3,9 +3,6 @@ package handlers
 // file_authz_unit_test.go — WAVE32 coverage. Direct unit tests for the FileAuthz
 // predicates that the HTTP-level pentests don't reach:
 //
-//   - CanAccessAs / RecordOwnerAs — the NON-HTTP Apps & Bots adapter path
-//     (0% covered), where an installed app acts as its installing owner. A bug
-//     here would let one tenant's app read another tenant's document.
 //   - requireOwner / requireEditor role-denial branches (403 for viewer/
 //     commenter) and the GetRole storage-error branch (500, fail closed).
 //   - canAccessEnvelopeACL fallback to the envelope id.
@@ -49,64 +46,6 @@ var assertErr = &fakeErr{}
 type fakeErr struct{}
 
 func (*fakeErr) Error() string { return "boom" }
-
-// --- CanAccessAs / RecordOwnerAs (non-HTTP adapter path) -------------------
-
-func TestCanAccessAs_MultiTenant(t *testing.T) {
-	acl := fileacl.NewNullStore()
-	az := NewFileAuthzWithAuth(acl, true) // auth enabled → strict isolation
-
-	// Record owner via the non-HTTP path.
-	if err := az.RecordOwnerAs("doc", "alice"); err != nil {
-		t.Fatalf("RecordOwnerAs: %v", err)
-	}
-
-	if !az.CanAccessAs("doc", "alice") {
-		t.Error("owner should access own doc via CanAccessAs")
-	}
-	// Cross-tenant: another account must be denied on a recorded file.
-	if az.CanAccessAs("doc", "mallory") {
-		t.Error("non-owner must be denied via CanAccessAs in multi-tenant mode")
-	}
-	// Unowned/legacy file: in multi-tenant mode NOT globally readable (recorded=false).
-	if az.CanAccessAs("unowned-file", "anyone") {
-		t.Error("unowned file must NOT be readable by a non-owner under auth")
-	}
-}
-
-func TestCanAccessAs_SingleUserFailOpen(t *testing.T) {
-	// auth disabled → unowned file fails OPEN (single-user / OSS local mode).
-	az := NewFileAuthz(fileacl.NewNullStore()) // authEnabled=false
-	if !az.CanAccessAs("unowned", "self") {
-		t.Error("single-user mode: unowned file should be accessible")
-	}
-}
-
-func TestCanAccessAs_DegradedStore(t *testing.T) {
-	// Nil ACL store: multi-tenant denies, single-user allows.
-	degradedAuth := &FileAuthz{acl: nil, authEnabled: true}
-	if degradedAuth.CanAccessAs("f", "a") {
-		t.Error("degraded store under auth must fail closed")
-	}
-	degradedNoAuth := &FileAuthz{acl: nil, authEnabled: false}
-	if !degradedNoAuth.CanAccessAs("f", "a") {
-		t.Error("degraded store without auth should fail open (single-user)")
-	}
-}
-
-func TestCanAccessAs_StorageError(t *testing.T) {
-	az := NewFileAuthzWithAuth(errStore{}, true)
-	if az.CanAccessAs("f", "a") {
-		t.Error("CanAccessAs must fail closed on a storage error")
-	}
-}
-
-func TestRecordOwnerAs_NilStoreIsNoop(t *testing.T) {
-	az := &FileAuthz{acl: nil}
-	if err := az.RecordOwnerAs("f", "a"); err != nil {
-		t.Errorf("RecordOwnerAs on nil store should be a no-op, got %v", err)
-	}
-}
 
 // --- requireOwner / requireEditor role branches ---------------------------
 
@@ -265,10 +204,6 @@ func TestSSOOnly_UnrecordedDocDeniedToNonOwner(t *testing.T) {
 	}
 	if got := c.Writer.Status(); got != 404 {
 		t.Errorf("require() denial status = %d; want 404", got)
-	}
-	// Non-HTTP adapter path must agree.
-	if az.CanAccessAs("unowned-legacy", "mallory") {
-		t.Error("VULN: CanAccessAs must deny an unrecorded doc in SSO-only posture")
 	}
 }
 

@@ -26,7 +26,6 @@ Config error: ... — using defaults          ← config.yaml missing/unreadable
 [rate-limit] write/collab endpoints: token-bucket cap=30 rate=10/s per IP
 [v1] API-key introspection enabled | API-key path disabled
 [local-files] auth enabled (multi-tenant): local-files ... disabled
-[apps] MCP server mounted at /mcp
 Vulos Office running → http://localhost:8080
 ```
 
@@ -45,7 +44,7 @@ Vulos Office running → http://localhost:8080
 | Boot dies with `auth is enabled but no JWT signing secret is configured` | `auth.enabled: true` without a secret | `export VULOS_OFFICE_JWT_SECRET="$(openssl rand -hex 32)"` (or `VULOS_OFFICE_DEV=1` for local dev only) |
 | Boot dies with `Storage init failed` | Bad `DATABASE_URL` / unreachable Postgres / unwritable `data_dir` | Check the URL and DB reachability; ensure the process can create `./data` (in Docker the writable dirs are `/srv/data`, `/srv/uploads`) |
 | Starts but you expected your config | Log shows `Config error: … — using defaults` | The server reads `config.yaml` **from its working directory**. Run it from the directory that holds the file |
-| Docker build fails resolving `../vulos-apps` / `file:../vulos-relay/client` | Built from inside `vulos-office/` | Build from the **parent** directory: `docker build -f vulos-office/Dockerfile …` (see Dockerfile header) |
+| Docker build fails resolving `file:../vulos-relay/client` | Built from inside `vulos-office/` | Build from the **parent** directory: `docker build -f vulos-office/Dockerfile …` (see Dockerfile header) |
 | Container healthcheck failing | App not listening on 8080 or crash-looping | `docker logs`; confirm `server.addr` and the port mapping; hit `/healthz` from inside the container |
 
 ---

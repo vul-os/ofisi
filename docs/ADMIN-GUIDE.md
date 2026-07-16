@@ -46,7 +46,7 @@ Image facts (from the `Dockerfile`):
 - `EXPOSE 8080`; built-in `HEALTHCHECK` polls `GET /healthz`.
 - The binary is static (CGO off; Postgres via pure-Go pgx) on Alpine.
 
-**Building the image yourself** requires a *parent* build context: `go.mod` has `replace github.com/vul-os/vulos-apps => ../vulos-apps` and `package.json` has `file:` dependencies on `../vulos-apps/ui` and `../vulos-relay/client`. From the directory that contains all three repos:
+**Building the image yourself** requires a *parent* build context: `package.json` has a `file:` dependency on `../vulos-relay/client`. From the directory that contains both repos:
 
 ```bash
 docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/vulos-office:latest .
@@ -192,7 +192,6 @@ Related behavior to be aware of:
 - **Identity**: on a Vulos box or cloud cell, set `IDENTITY_URL` so Office introspects the shared `vc_session` cookie — Office deliberately holds no session-signing power in that mode.
 - **Peering fabric**: the OS/Relay host provides `/api/peering/stream` (WebSocket signaling) and `/api/peering/ice`; Office's collab code discovers them same-origin and lights up P2P collaboration + presence automatically. Without them it degrades gracefully.
 - **Control plane** (managed/multi-tenant): `VULOS_CP_BASE_URL` + `VULOS_CP_TOKEN` + `VULOS_ORG_ID` enable entitlements (`GET {CP}/api/entitlements`, fails open on transient CP outage), usage metering (fire-and-forget `POST {CP}/api/usage`), and `vk_` API-key introspection for `/v1` (fail-closed `503` if the CP is unreachable during key validation). See [SELFHOST.md](../SELFHOST.md) for the full seam contract.
-- **Apps & MCP**: Office mounts an apps/bots platform and an **MCP server at `/mcp`** (standalone, open-core): mint an app token and point an MCP agent at it; tool calls honor the same per-file ACL as the REST API. Startup logs `[apps] MCP server mounted at /mcp`.
 
 ---
 

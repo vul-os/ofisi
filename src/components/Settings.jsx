@@ -29,7 +29,6 @@ import { api } from '../lib/api'
 import { Button, IconButton, Input, Card, Tabs, Tooltip, useToast } from './ui'
 import { useTheme } from './ui/useTheme'
 import { InvitesPanel, AuditPanel } from '../apps/admin/AdminApp.jsx'
-import AppsAndBotsPanel from './AppsAndBotsPanel'
 
 // ─── Row ─────────────────────────────────────────────────────────────────────
 function Row({ label, hint, children, stacked }) {
@@ -229,7 +228,6 @@ export default function Settings() {
     { value: 'appearance', label: 'Appearance' },
     { value: 'security',   label: 'Security' },
     { value: 'storage',    label: 'Storage' },
-    { value: 'apps',       label: 'Apps & Bots' },
     ...(isAdmin ? [{ value: 'admin', label: 'Admin' }] : []),
   ]
 
@@ -485,13 +483,6 @@ export default function Settings() {
                   </div>
                 </>
               )}
-            </div>
-          )}
-
-          {/* ════ APPS & BOTS ════ */}
-          {tab === 'apps' && (
-            <div className="p-5">
-              <AppsAndBotsPanel />
             </div>
           )}
 

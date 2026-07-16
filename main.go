@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"vulos-office/backend/apikey"
-	"vulos-office/backend/apps"
 	"vulos-office/backend/billing"
 	"vulos-office/backend/config"
 	"vulos-office/backend/deploymode"
@@ -27,8 +26,6 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/vul-os/vulos-apps/appsplatform"
-	"github.com/vul-os/vulos-apps/mcp"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=vX.Y.Z".
@@ -277,7 +274,9 @@ func main() {
 	// would leave FileAuthz in a single-user fail-OPEN posture (unrecorded/legacy
 	// docs readable cross-tenant, viewer→editor/owner role checks skipped, and a
 	// degraded ACL store silently fail-open) — a cross-tenant isolation collapse.
-	fileAuthz := handlers.InitFileAuthz(store, cfg.Auth.Enabled || sessionIntrospector != nil)
+	// Initializes the process-wide per-file authorizer (defaultFileAuthz global
+	// used by the file handlers); the returned instance is not needed here.
+	handlers.InitFileAuthz(store, cfg.Auth.Enabled || sessionIntrospector != nil)
 
 	fileHandler := handlers.NewFileHandler(store)
 	protected.GET("/files", fileHandler.List)
@@ -497,23 +496,6 @@ func main() {
 	// standalone Vulos Talk product (vulos-talk). The /spaces/* and /meet/* APIs
 	// are served there; Office redirects those deep-links via seam-C.
 
-	// ── Apps & Bots place (shared @vulos/apps platform) ───────────────────────
-	// Office hosts an "apps & bots place" via the product-agnostic
-	// appsplatform handler set, with a small Office ProductAdapter (documents).
-	//
-	// Open-core seam: the registry defaults to the in-tree StandaloneRegistry
-	// (pure-Go SQLite). A Vulos Cloud control-plane registry implements the SAME
-	// appsplatform.Registry in backend/integration/cloud — a package the core
-	// never imports — and is wired ONLY when explicitly enabled via env
-	// (cloud.AppsRegistryEnabled). Removing the cloud package never breaks this
-	// build. Management routes reuse Office's OWN session auth via SessionIdentity;
-	// runtime routes authenticate with app tokens (handled inside the platform).
-	if h, err := mountAppsPlatform(cfg, r, store, fileAuthz); err != nil {
-		log.Printf("[apps] apps & bots platform disabled: %v", err)
-	} else {
-		log.Printf("[apps] apps & bots place mounted at %s (registry: %s)", h.BasePath, appsRegistryMode())
-	}
-
 	// Serve embedded frontend (SPA fallback to index.html)
 	staticFS, err := fs.Sub(distFS, "dist")
 	if err != nil {
@@ -599,106 +581,6 @@ func mountStatic(r *gin.Engine, staticFS fs.FS) {
 		}
 		serveSPA(c)
 	})
-}
-
-// appsDBPath resolves the SQLite DSN for the StandaloneRegistry from env,
-// defaulting to a durable file under the data dir.
-func appsDBPath() string {
-	if v := strings.TrimSpace(os.Getenv("VULOS_APPS_DB")); v != "" {
-		return v
-	}
-	return "./data/apps.db"
-}
-
-// appsRegistryMode reports which registry implementation the apps place uses,
-// for the boot log line. "cloud" only when explicitly env-enabled.
-func appsRegistryMode() string {
-	if cloud.AppsRegistryEnabled() {
-		return "cloud control plane"
-	}
-	return "standalone (sqlite)"
-}
-
-// newAppsRegistry selects the apps registry: the in-tree StandaloneRegistry by
-// default, or the cloud control-plane registry when explicitly enabled via env.
-// The core never imports the cloud adapter; only this composition root does.
-func newAppsRegistry() (appsplatform.Registry, error) {
-	if cloud.AppsRegistryEnabled() {
-		return cloud.NewAppsRegistry(cloud.FromEnv())
-	}
-	return appsplatform.NewStandaloneRegistry(appsDBPath())
-}
-
-// mountAppsPlatform wires the shared Apps & Bots platform handler set into the
-// Gin router under /api/apps. The management API reuses Office's session auth
-// (middleware.SessionIdentity); runtime + incoming-webhook routes are handled
-// by the platform (app-token auth / unauthenticated webhook id). It returns the
-// mounted handler (for the base-path log line) or an error.
-func mountAppsPlatform(cfg *config.Config, r *gin.Engine, store storage.Storage, authz *handlers.FileAuthz) (*appsplatform.Handler, error) {
-	reg, err := newAppsRegistry()
-	if err != nil {
-		return nil, err
-	}
-	adapter := apps.NewOfficeAdapter(store, authz)
-	disp := appsplatform.NewDispatcher(reg, appsplatform.ProductOffice)
-	h, err := appsplatform.NewHandler(appsplatform.MountConfig{
-		Adapter:    adapter,
-		Registry:   reg,
-		Dispatcher: disp,
-		Admin: func(req *http.Request) (string, bool, bool) {
-			return middleware.SessionIdentity(cfg, req)
-		},
-		BasePath: "/api/apps",
-	})
-	if err != nil {
-		return nil, err
-	}
-	// The platform handler set is a net/http ServeMux with ABSOLUTE patterns
-	// under the base path, so forward the whole /api/apps subtree to it. These
-	// routes intentionally bypass Gin's session middleware: the platform does its
-	// own auth (session for management, app token for runtime).
-	r.Any("/api/apps", gin.WrapH(h))
-	r.Any("/api/apps/*proxyPath", gin.WrapH(h))
-
-	// Mount the shared @vulos/apps MCP server over the SAME adapter, registry,
-	// and event emitter so any LLM/agent can operate Office over MCP. A failure
-	// here disables only MCP — the REST apps place stays up.
-	if err := mountMCP(r, adapter, reg, disp); err != nil {
-		log.Printf("[apps] MCP server disabled: %v", err)
-	}
-	return h, nil
-}
-
-// mountMCP wires the Vulos MCP server (github.com/vul-os/vulos-apps/mcp) into the
-// Gin router at /mcp. It is a different SHAPE over the EXACT seam the REST apps
-// platform already exposes: the SAME Office ProductAdapter (Act→tools,
-// Read→resources), the SAME app-token Registry (Bearer vat_, constant-time), and
-// the SAME dispatcher emitter (so MCP tool calls fan out like REST actions).
-//
-// Open-core: this ships in the OSS build and runs STANDALONE — self-host Office,
-// mint an app token, point an MCP agent at /mcp. The optional cloud aggregating
-// MCP gateway (mcp.MCPConfig.Gateway) is an env-gated seam the core never wires:
-// we leave it nil here, exactly as the apps registry leaves the cloud broker out
-// of the default build. The core never imports backend/integration/cloud for MCP.
-func mountMCP(r *gin.Engine, adapter appsplatform.ProductAdapter, reg appsplatform.Registry, disp *appsplatform.Dispatcher) error {
-	h, err := mcp.NewHandler(mcp.MCPConfig{
-		Adapter:  adapter,         // SAME ProductAdapter (per-file ACL honored in Act/Read)
-		Registry: reg,             // SAME vat_ token registry
-		Emit:     disp.EmitFunc(), // SAME event fan-out as REST actions
-		BasePath: "/mcp",
-		// Gateway: nil — standalone open-core; the cloud aggregation seam is not
-		// wired in the core build.
-	})
-	if err != nil {
-		return err
-	}
-	// Like the apps handler, this is a net/http ServeMux with absolute patterns
-	// under the base path; forward the whole /mcp subtree to it. It does its own
-	// app-token auth, so it intentionally bypasses Gin's session middleware.
-	r.Any("/mcp", gin.WrapH(h))
-	r.Any("/mcp/*proxyPath", gin.WrapH(h))
-	log.Printf("[apps] MCP server mounted at %s", h.BasePath)
-	return nil
 }
 
 // runMigrateCredential implements the `migrate-credential` subcommand.

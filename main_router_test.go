@@ -115,7 +115,7 @@ func TestSPAFallbackServesFrontend(t *testing.T) {
 
 func TestIsJSONAPIPath(t *testing.T) {
 	api := []string{"/api", "/api/", "/api/auth/me", "/v1", "/v1/documents/x/export"}
-	spa := []string{"/", "/docs", "/apiary", "/v10/things", "/assets/app.js", "/mcp", "/healthz"}
+	spa := []string{"/", "/docs", "/apiary", "/v10/things", "/assets/app.js", "/settings", "/healthz"}
 
 	for _, p := range api {
 		if !isJSONAPIPath(p) {

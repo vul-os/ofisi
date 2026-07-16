@@ -4,7 +4,7 @@
 
 # Vulos Office
 
-**A sovereign, self-hostable office suite — your documents, your server, your rules.**
+**A standalone, self-hostable, peer-to-peer collaborative office suite — your documents, your server, your rules.**
 
 Docs · Sheets · Slides · PDF Signing · Whiteboards
 
@@ -13,8 +13,6 @@ Docs · Sheets · Slides · PDF Signing · Whiteboards
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-
-<sub><img src="docs/assets/vulos-logo.png" height="14" alt="VulOS"> Part of <strong><a href="https://vulos.org">VulOS</a></strong> — the open, self-hostable web OS &amp; app suite. Runs standalone, or as an app hosted by the Vulos OS.</sub>
 
 </div>
 
@@ -26,40 +24,15 @@ Docs · Sheets · Slides · PDF Signing · Whiteboards
 
 ## What is this?
 
-Vulos Office is the **documents** product of VulOS, shipped as a **single Go binary** with the entire frontend embedded — no cloud account, no telemetry, no lock-in. It brings document editing, spreadsheets, presentations, whiteboards, and cryptographic document signing together in one clean, modern web interface. (Calendar and Contacts come through the **mail connector** — CalDAV/CardDAV via lilmail — see [Part of VulOS](#part-of-vulos).)
+Vulos Office is a **standalone, self-hostable office suite**, shipped as a **single Go binary** with the entire frontend embedded — no cloud account, no telemetry, no lock-in. It brings document editing, spreadsheets, presentations, whiteboards, and cryptographic document signing together in one clean, modern web interface.
 
-It is **independently self-hostable by default**: with zero configuration it runs as a single-user, local-storage app on your own machine. Everything that *could* tie it to an external service lives behind a small, clean **seam** — so you can run it fully standalone, or opt into the [vulos-cloud](#self-hosting) control plane for multi-tenant identity, entitlements, and usage. The core never imports cloud code; remove the adapter and the standalone build still compiles.
+It is **self-hostable by default**: with zero configuration it runs as a single-user, local-storage app on your own machine. Real-time co-editing is **peer-to-peer** — there is no central document server; peers sync directly over end-to-end-encrypted WebRTC (see [Real-time collaboration](#real-time-collaboration)). Everything that *could* tie it to an external service lives behind a small, clean **seam**, so multi-user identity and entitlements are optional and the standalone build never imports them.
 
 It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers who proved productivity software could be free, open, and community-driven — and carries that torch into the browser with a fast React frontend and a lightweight Go backend.
 
 > *"Vula" — open the door. Vulos Office is that door.*
 
----
-
-## Part of VulOS
-
-**VulOS** is an open, self-hostable sovereign web OS + app suite. The **Vulos OS** is the shell (launcher, windows, dock, assistant) that hosts the apps; each product is also independently self-hostable on its own:
-
-- **Vulos OS** — the web-native desktop shell that hosts the apps
-- **Vulos Office** — documents: docs, sheets, slides, PDF, **whiteboards** *(this repo)*. The Excalidraw-based collaborative whiteboard (formerly `@vulos/board-ui`) is now a first-class Office document type, riding Office's own distributed P2P collab engine.
-- **Vulos Files** — file storage + P2P sharing, built into the OS
-- **Vulos Relay** — sovereign connectivity / reachability fabric (`@vulos/relay-client`) — one of the two paid services
-- **llmux** — sovereign AI gateway
-
-**Vulos = free, open-source software + two paid services.** The OS, all its apps
-(this one included), and the app store are OSS and free — you self-host them on
-your own box; Vulos does not host or provision boxes. Vulos bills for only two
-things: **Vulos Relay** (reachability) and **backup storage** (buckets). There is
-no compute, mail, or app-store billing. Apps are listed on the main site
-(`vulos.org/products/…`) and their source lives on GitHub (`github.com/vul-os`).
-
-**Comms are third-party:** chat and video use established open protocols/apps (Matrix/Element for chat; Element Call / Jitsi for video), not products built by Vulos.
-
-**PIM is bring-your-own:** connect your own mailbox (Gmail / Microsoft 365 / IMAP) via **lilmail** (an independent connect-your-own-mailbox engine exposing `/v1`, incl. `/v1/calendar` + `/v1/contacts` over CalDAV/CardDAV); the OS adds standalone **Calendar** and **Contacts** widgets over it. There is no hosted Vulos mail.
-
-Products never import each other — they are linked/embedded across clean seams.
-
-**Vulos Office's role:** the documents surface — Docs, Sheets, Slides, Whiteboards, and PDF/Signing. It **runs standalone** as a single Go binary **and** as an app hosted by the Vulos OS. Calendar and Contacts are **not** part of Office; in the OS they come from the bring-your-own-mailbox PIM (lilmail `/v1/calendar` + `/v1/contacts`).
+Office is **documents-only**: Docs, Sheets, Slides, PDF/Signing, and Whiteboards. Communication (chat/video) and mail/calendar/contacts are **not** part of Office.
 
 ---
 
@@ -80,7 +53,7 @@ Products never import each other — they are linked/embedded across clean seams
 | **PWA-ready** | Installable as a desktop / mobile app via web manifest |
 | **Observability** | Prometheus metrics at `/metrics` and optional OpenTelemetry traces |
 
-Every surface is also published as an npm library (`@vulos/office-client`) so the Vulos OS — or your own app — can embed any editor as a native panel:
+Every surface is also published as an npm library (`@vulos/office-client`) so your own app can embed any editor as a native panel:
 
 ```js
 import { DocsApp }        from '@vulos/office-client/docs'
@@ -111,7 +84,7 @@ import { PDFApp }         from '@vulos/office-client/pdf'
 
 ## Quick start (standalone)
 
-Vulos Office runs **by itself** — no account, no cloud, no other Vulos product required.
+Vulos Office runs **by itself** — no account, no cloud, no external service required.
 
 ### Docker (one-liner)
 
@@ -126,8 +99,8 @@ docker run -d \
 Open <http://localhost:8080>.
 
 > Building the image yourself: the `Dockerfile` needs a **parent build context**
-> that also contains the sibling `vulos-apps/` and `vulos-relay/` repos (for the
-> Go `replace` and the SPA `file:` deps). From the directory that holds all three:
+> that also contains the sibling `vulos-relay/` repo (for the SPA `file:` dep).
+> From the directory that holds both:
 > `docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/vulos-office:latest .`
 > See the `Dockerfile` header and `fly.toml` for the full deploy flow.
 
@@ -177,13 +150,13 @@ flowchart TD
     FE["React + Vite + Tailwind frontend (JSX only)<br/>Docs · Sheets · Slides · PDF Signing · Whiteboards"]
     BE["Go backend (Gin)<br/>handlers · userauth · signing · storage · obs"]
     Seam["backend/seam — Identity · Entitlements · Usage<br/>standalone defaults (local, unlimited, no-op)"]
-    Cloud["backend/integration/cloud<br/>(vulos-cloud adapter, opt-in)"]
+    Adapter["backend/integration<br/>(optional identity/entitlements adapter, opt-in)"]
     FE -->|"embedded into the binary"| BE
     BE --> Seam
-    Seam -->|optional| Cloud
+    Seam -->|optional| Adapter
 ```
 
-The boundary between Office's core and any external control plane is a small set of Go interfaces in `backend/seam`. The composition root (`main.go`) wires the standalone defaults via `seam.NewStandaloneProvider(...)`:
+The boundary between Office's core and any external identity/entitlements service is a small set of Go interfaces in `backend/seam`. The composition root (`main.go`) wires the standalone defaults via `seam.NewStandaloneProvider(...)`:
 
 | Interface | Standalone default |
 |-----------|--------------------|
@@ -191,7 +164,7 @@ The boundary between Office's core and any external control plane is a small set
 | `seam.Entitlements` | `LocalEntitlements` — unlimited, `self-hosted` tier, all features |
 | `seam.Usage` | `NoopUsage` — discards metering (Prometheus still exported) |
 
-The cloud adapter lives in a **separate package** and is selected *only* when `VULOS_CP_BASE_URL` is set. With it unset (the default), none of it runs. See [SELFHOST.md](SELFHOST.md) for the full seam contract.
+The optional adapter lives in a **separate package** and is selected *only* when `VULOS_CP_BASE_URL` is set. With it unset (the default), none of it runs — Office is 100% standalone. See [SELFHOST.md](SELFHOST.md) for the full seam contract.
 
 ---
 
@@ -294,14 +267,14 @@ storage:
 | `VULOS_OFFICE_CORS_ORIGINS` | Comma-separated allowed CORS origins |
 | `VULOS_USERAUTH_DB` | Override the credential SQLite store path |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Enable OpenTelemetry trace export |
-| `VULOS_CP_BASE_URL` | **Opt-in** vulos-cloud control plane URL (enables the cloud seam) |
+| `VULOS_CP_BASE_URL` | **Opt-in** external control-plane URL (enables the optional identity/entitlements seam) |
 | `VULOS_CP_TOKEN` | Outbound service token for the control plane. Also the shared secret Office presents to the identity provider for SSO session introspection (== the provider's `CP_SHARED_SECRET`). **Not a signing key** — Office never signs sessions. |
-| `IDENTITY_URL` | **Opt-in** identity provider base URL for **SSO session introspection** (the sovereign box in self-host, the CP in cloud). When SET, Office validates the browser's `vc_session` cookie by calling `POST {IDENTITY_URL}/api/session/introspect` (fail-closed). When **UNSET** (self-host single-user appliance), the SSO path is disabled and the existing local single-identity behavior is unchanged. |
-| `VULOS_ORG_ID` | Tenant / org scoping (used by the cloud adapter and storage) |
+| `IDENTITY_URL` | **Opt-in** identity provider base URL for **SSO session introspection** (the sovereign box in self-host, or a central control plane in a managed deployment). When SET, Office validates the browser's `vc_session` cookie by calling `POST {IDENTITY_URL}/api/session/introspect` (fail-closed). When **UNSET** (self-host single-user appliance), the SSO path is disabled and the existing local single-identity behavior is unchanged. |
+| `VULOS_ORG_ID` | Tenant / org scoping (used by the optional integration adapter and storage) |
 
-#### Postgres shared-database setup (cloud / Neon)
+#### Postgres backend setup (Neon / shared database)
 
-Vulos Office uses the dedicated schema `office` inside the shared database, so it co-exists with other VulOS products (`mail`, `talk`, etc.) in a single Neon project without table-name collisions:
+Vulos Office uses the dedicated schema `office` inside the database, so it co-exists cleanly with anything else sharing the same Postgres project without table-name collisions:
 
 ```bash
 # Neon / shared Postgres (DATABASE_URL takes precedence over config.yaml)
@@ -326,15 +299,15 @@ Vulos Office is **built to be self-hosted by you**, not rented from anyone. The 
 - **Entitlements** are unlimited (`tier: self-hosted`) — no metering, no quotas, all features on.
 - **Storage** is local files + SQLite under `./data` and `./uploads`.
 
-Full standalone instructions, the seam contract, and the optional cloud integration are in **[SELFHOST.md](SELFHOST.md)**. Deployment notes (Docker, single-box co-location) live in [docs/DEPLOY.md](docs/DEPLOY.md) and [DEPLOY.md](DEPLOY.md).
+Full standalone instructions, the seam contract, and the optional multi-user integration are in **[SELFHOST.md](SELFHOST.md)**. Deployment notes (Docker, single-box co-location) live in [docs/DEPLOY.md](docs/DEPLOY.md) and [DEPLOY.md](DEPLOY.md).
 
-### Optional: the vulos-cloud seam
+### Optional: external identity & entitlements seam
 
-Setting `VULOS_CP_BASE_URL` selects the `backend/integration/cloud` adapter, which implements the same `seam` interfaces against the [vulos-cloud](https://vulos.org) control plane for multi-tenant identity, entitlements, and usage. Entitlement fetches **fail open** on a transient outage. Leave it unset and Office is 100% standalone.
+Setting `VULOS_CP_BASE_URL` selects the `backend/integration/cloud` adapter, which implements the same `seam` interfaces against an external control plane for multi-user identity, entitlements, and usage metering. Entitlement fetches **fail open** on a transient outage. Leave it unset and Office is 100% standalone.
 
 ### Optional: SSO session introspection (`IDENTITY_URL`)
 
-Office holds **no session-signing power**. In a multi-user deployment, a user's browser carries a `vc_session` cookie minted by a configurable **identity provider** — the sovereign box in self-host, or the vulos-cloud control plane in cloud. Office only ever **verifies** that session by introspecting it:
+Office holds **no session-signing power**. In a multi-user deployment, a user's browser carries a `vc_session` cookie minted by a configurable **identity provider** — the sovereign box in self-host, or a central control plane in a managed deployment. Office only ever **verifies** that session by introspecting it:
 
 ```
 POST {IDENTITY_URL}/api/session/introspect
@@ -344,7 +317,7 @@ POST {IDENTITY_URL}/api/session/introspect
 ```
 
 - **`IDENTITY_URL` UNSET** (self-host single-user / appliance): the SSO path is **disabled**; behavior is byte-for-byte the existing local single-identity mode. This is the correct posture for a sovereign single-user box.
-- **`IDENTITY_URL` SET** (cloud / multi-user): a request bearing `vc_session` (and not already authed by the product-JWT or `vk_` paths) is introspected. On `{valid:true}` the request is scoped to the resolved **user + tenant** (`tenantId` = the account id everything is keyed by); on `{valid:false}` or any transport error → **401, fail-closed**. Office never falls open to a shared identity when `IDENTITY_URL` is configured.
+- **`IDENTITY_URL` SET** (multi-user): a request bearing `vc_session` (and not already authed by the product-JWT or `vk_` paths) is introspected. On `{valid:true}` the request is scoped to the resolved **user + tenant** (`tenantId` = the account id everything is keyed by); on `{valid:false}` or any transport error → **401, fail-closed**. Office never falls open to a shared identity when `IDENTITY_URL` is configured.
 
 The shared secret is the **existing service-auth secret** (`VULOS_CP_TOKEN`, equal to the provider's `CP_SHARED_SECRET`) — **not a signing key**. Introspection results are cached in-process for a short TTL (~45s, further bounded by the session's own `expiresAt`) so this is not a round-trip per request. This SSO path is **additive**: the per-product JWT (`VULOS_OFFICE_JWT_SECRET`), the `vk_` API-key path, and the CP `X-Relay-Auth` introspection paths all still work.
 
@@ -354,7 +327,7 @@ The shared secret is the **existing service-auth secret** (`VULOS_CP_TOKEN`, equ
 
 | Document | Description |
 |----------|-------------|
-| [SELFHOST.md](SELFHOST.md) | Run fully standalone; the optional cloud seam |
+| [SELFHOST.md](SELFHOST.md) | Run fully standalone; the optional identity/entitlements seam |
 | [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | Full setup walkthrough |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component map and design decisions |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Env vars, `config.yaml`, OTEL / SMTP reference |
@@ -414,6 +387,6 @@ Pull requests are welcome — bug fixes, signing robustness, accessibility, test
 
 <div align="center">
 
-Made with care · Powered by open source · *Vula — open*
+<sub><img src="docs/assets/vulos-logo.png" height="16" alt="VulOS"> · <strong>Built with purpose. Open by design.</strong></sub>
 
 </div>
