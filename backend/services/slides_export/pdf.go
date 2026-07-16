@@ -25,17 +25,25 @@ import (
 	ximage "golang.org/x/image/font/gofont/goregular"
 )
 
-// Slide is the minimal representation of a slide needed for PDF rendering.
+// Slide is one slide of a deck.
 type Slide struct {
 	Title      string `json:"title"`
 	Content    string `json:"content"` // HTML; stripped to plain text for PDF
 	Notes      string `json:"notes"`
 	Background string `json:"background"` // CSS hex color, e.g. "#1a1a2e"
+
+	// Objects are the SOURCE OF TRUTH for the slide body (see objects.go and
+	// src/apps/slides/slideObjects.js). They were absent from this struct, which is
+	// exactly why the server's .pptx dropped every image, shape and text box.
+	// A nil Objects means a LEGACY slide, whose title/content are migrated by
+	// EnsureObjects — the same derivation the editor makes.
+	Objects []SlideObject `json:"objects"`
 }
 
 // Deck is the top-level structure sent in the export request.
 type Deck struct {
 	Title  string  `json:"title"`
+	Theme  string  `json:"theme"`
 	Slides []Slide `json:"slides"`
 }
 
@@ -159,7 +167,32 @@ func addFont(pdf *gopdf.GoPdf, family string) error {
 }
 
 // RenderPDF builds a PDF containing one page per slide and returns the bytes.
-func RenderPDF(deck Deck) ([]byte, error) {
+func RenderPDF(deck Deck) ([]byte, *Report, error) {
+	rep := &Report{}
+
+	// HONESTY. This renderer lays a slide out as a TEXT FLOW (title + body), not as
+	// a positioned canvas: it cannot place an image or a shape. The editor keeps
+	// `content` in sync with the slide's text objects, so the words survive — but a
+	// picture or a shape does not, and the caller must be told rather than handed a
+	// silently emptier deck. (The .pptx export carries all of them; see pptx.go.)
+	nImg, nShape := 0, 0
+	for _, s := range deck.Slides {
+		for _, o := range EnsureObjects(s) {
+			switch o.Type {
+			case "image":
+				nImg++
+			case "shape":
+				nShape++
+			}
+		}
+	}
+	if nImg > 0 {
+		rep.warn("%d image(s) are not drawn in the server PDF — export .pptx to keep them.", nImg)
+	}
+	if nShape > 0 {
+		rep.warn("%d shape(s) are not drawn in the server PDF — export .pptx to keep them.", nShape)
+	}
+
 	pdf := gopdf.GoPdf{}
 	pdf.Start(gopdf.Config{
 		PageSize: *gopdf.PageSizeA4Landscape,
@@ -171,7 +204,7 @@ func RenderPDF(deck Deck) ([]byte, error) {
 	// same font at a larger size for "titles" to simulate heading weight.
 	const fontFamily = "GoRegular"
 	if err := addFont(&pdf, fontFamily); err != nil {
-		return nil, fmt.Errorf("slide export: add font: %w", err)
+		return nil, rep, fmt.Errorf("slide export: add font: %w", err)
 	}
 
 	for i, slide := range deck.Slides {
@@ -193,7 +226,7 @@ func RenderPDF(deck Deck) ([]byte, error) {
 		// ── Title ────────────────────────────────────────────────────────────
 		if slide.Title != "" {
 			if err := pdf.SetFont(fontFamily, "", titleFontSize); err != nil {
-				return nil, fmt.Errorf("set title font: %w", err)
+				return nil, rep, fmt.Errorf("set title font: %w", err)
 			}
 			pdf.SetTextColor(textR, textG, textB)
 			pdf.SetX(marginL)
@@ -203,7 +236,7 @@ func RenderPDF(deck Deck) ([]byte, error) {
 				titleText = titleText[:77] + "..."
 			}
 			if err := pdf.Cell(nil, titleText); err != nil {
-				return nil, fmt.Errorf("title cell: %w", err)
+				return nil, rep, fmt.Errorf("title cell: %w", err)
 			}
 		}
 
@@ -211,7 +244,7 @@ func RenderPDF(deck Deck) ([]byte, error) {
 		bodyText := stripHTML(slide.Content)
 		if bodyText != "" {
 			if err := pdf.SetFont(fontFamily, "", bodyFontSize); err != nil {
-				return nil, fmt.Errorf("set body font: %w", err)
+				return nil, rep, fmt.Errorf("set body font: %w", err)
 			}
 			if isDark(bgR, bgG, bgB) {
 				pdf.SetTextColor(190, 190, 210)
@@ -234,7 +267,7 @@ func RenderPDF(deck Deck) ([]byte, error) {
 				pdf.SetY(bodyY)
 				if line != "" {
 					if err := pdf.Cell(nil, line); err != nil {
-						return nil, fmt.Errorf("body cell: %w", err)
+						return nil, rep, fmt.Errorf("body cell: %w", err)
 					}
 				}
 				bodyY += bodyLineH
@@ -243,7 +276,7 @@ func RenderPDF(deck Deck) ([]byte, error) {
 
 		// ── Page number ───────────────────────────────────────────────────────
 		if err := pdf.SetFont(fontFamily, "", pageNumFontSize); err != nil {
-			return nil, fmt.Errorf("set page num font: %w", err)
+			return nil, rep, fmt.Errorf("set page num font: %w", err)
 		}
 		if isDark(bgR, bgG, bgB) {
 			pdf.SetTextColor(100, 100, 120)
@@ -254,7 +287,7 @@ func RenderPDF(deck Deck) ([]byte, error) {
 		pdf.SetX(pageW - marginR - 60)
 		pdf.SetY(pageH - marginB - pageNumFontSize)
 		if err := pdf.Cell(nil, numStr); err != nil {
-			return nil, fmt.Errorf("page num cell: %w", err)
+			return nil, rep, fmt.Errorf("page num cell: %w", err)
 		}
 
 		// ── Thin border ───────────────────────────────────────────────────────
@@ -263,5 +296,5 @@ func RenderPDF(deck Deck) ([]byte, error) {
 		pdf.Rectangle(marginL/2, marginT/2, pageW-marginR/2, pageH-marginB/2, "D", 0, 0)
 	}
 
-	return pdf.GetBytesPdf(), nil
+	return pdf.GetBytesPdf(), rep, nil
 }

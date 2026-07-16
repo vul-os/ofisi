@@ -10,6 +10,16 @@ import (
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// paraBlocks wraps plain paragraphs as blocks (the writers take blocks now, so
+// that tables and images can no longer be flattened away — see blocks.go).
+func paraBlocks(ps ...Paragraph) []Block {
+	out := make([]Block, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, Block{Kind: BlockParagraph, Para: p})
+	}
+	return out
+}
+
 func sampleDocJSON() []byte {
 	doc := map[string]interface{}{
 		"type": "doc",
@@ -170,9 +180,9 @@ func TestExtractParagraphs_HeadingsAndParagraphs(t *testing.T) {
 func TestGeneratePDF_ReturnsBytesStartingWithPDFHeader(t *testing.T) {
 	raw := sampleDocJSON()
 	doc, _ := ParseDocJSON(raw)
-	paras := ExtractParagraphs(doc)
+	blocks, _ := ExtractBlocks(doc)
 
-	pdfBytes, err := GeneratePDF("Test Document", paras)
+	pdfBytes, err := GeneratePDF("Test Document", blocks)
 	if err != nil {
 		t.Fatalf("GeneratePDF returned error: %v", err)
 	}
@@ -186,11 +196,11 @@ func TestGeneratePDF_ReturnsBytesStartingWithPDFHeader(t *testing.T) {
 }
 
 func TestGeneratePDF_ContainsEOFMarker(t *testing.T) {
-	paras := []Paragraph{
-		{Text: "Simple document", HeadingLevel: 1},
-		{Text: "Body text here.", HeadingLevel: 0},
-	}
-	pdfBytes, err := GeneratePDF("Simple", paras)
+	blocks := paraBlocks(
+		Paragraph{Text: "Simple document", HeadingLevel: 1},
+		Paragraph{Text: "Body text here.", HeadingLevel: 0},
+	)
+	pdfBytes, err := GeneratePDF("Simple", blocks)
 	if err != nil {
 		t.Fatalf("GeneratePDF error: %v", err)
 	}
@@ -201,7 +211,7 @@ func TestGeneratePDF_ContainsEOFMarker(t *testing.T) {
 }
 
 func TestGeneratePDF_EmptyDocument(t *testing.T) {
-	pdfBytes, err := GeneratePDF("Empty", []Paragraph{})
+	pdfBytes, err := GeneratePDF("Empty", []Block{})
 	if err != nil {
 		t.Fatalf("GeneratePDF(empty) error: %v", err)
 	}
@@ -220,9 +230,9 @@ func isValidZip(data []byte) bool {
 func TestGenerateDOCX_ProducesValidZip(t *testing.T) {
 	raw := sampleDocJSON()
 	doc, _ := ParseDocJSON(raw)
-	paras := ExtractParagraphs(doc)
+	blocks, _ := ExtractBlocks(doc)
 
-	docxBytes, err := GenerateDOCX("Test Document", paras)
+	docxBytes, err := GenerateDOCX("Test Document", blocks)
 	if err != nil {
 		t.Fatalf("GenerateDOCX error: %v", err)
 	}
@@ -232,11 +242,11 @@ func TestGenerateDOCX_ProducesValidZip(t *testing.T) {
 }
 
 func TestGenerateDOCX_ContainsRequiredEntries(t *testing.T) {
-	paras := []Paragraph{
-		{Text: "Heading", HeadingLevel: 1},
-		{Text: "Body", HeadingLevel: 0},
-	}
-	docxBytes, err := GenerateDOCX("My Doc", paras)
+	blocks := paraBlocks(
+		Paragraph{Text: "Heading", HeadingLevel: 1},
+		Paragraph{Text: "Body", HeadingLevel: 0},
+	)
+	docxBytes, err := GenerateDOCX("My Doc", blocks)
 	if err != nil {
 		t.Fatalf("GenerateDOCX error: %v", err)
 	}
@@ -264,11 +274,11 @@ func TestGenerateDOCX_ContainsRequiredEntries(t *testing.T) {
 }
 
 func TestGenerateDOCX_DocumentXMLContainsText(t *testing.T) {
-	paras := []Paragraph{
-		{Text: "Hello Vulos", HeadingLevel: 1},
-		{Text: "World text", HeadingLevel: 0},
-	}
-	docxBytes, err := GenerateDOCX("Test", paras)
+	blocks := paraBlocks(
+		Paragraph{Text: "Hello Vulos", HeadingLevel: 1},
+		Paragraph{Text: "World text", HeadingLevel: 0},
+	)
+	docxBytes, err := GenerateDOCX("Test", blocks)
 	if err != nil {
 		t.Fatalf("GenerateDOCX error: %v", err)
 	}
