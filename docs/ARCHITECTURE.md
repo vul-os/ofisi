@@ -1,21 +1,21 @@
-# Vulos Office – Architecture
+# Ofisi – Architecture
 
 ## Overview
 
-Vulos Office is a collaborative document editing + e-signing service. It exposes:
+Ofisi is a collaborative document editing + e-signing service. It exposes:
 - File CRUD with version history
 - REST persistence plus real-time collaboration (comments, suggestions, live
   co-editing) over three complementary transports — see the note below
 - E-signing workflow (envelope → sign → sealed PDF)
 
-> **Scope:** Office is documents-only (Docs, Sheets, Slides, Whiteboards, PDF/Signing). Calendar
+> **Scope:** Ofisi is documents-only (Docs, Sheets, Slides, Whiteboards, PDF/Signing). Calendar
 > and Contacts come from the bring-your-own-mailbox PIM connector (lilmail
 > CalDAV/CardDAV + lilmail `/v1/calendar` + `/v1/contacts`), surfaced by the OS as
 > standalone widgets. Chat and video are third-party (Matrix/Element; Element Call /
 > Jitsi), not Vulos products. The Vulos OS is the shell that hosts the apps.
 
 > **Collaboration transport note:** Live co-editing is CRDT-based and runs
-> **entirely peer-to-peer — there is NO central document server.** The Office
+> **entirely peer-to-peer — there is NO central document server.** The Ofisi
 > binary hosts no op-relay, no doc-state hub, and no server-mediated collab
 > endpoint.
 > - **The document** rides an **end-to-end-encrypted room** as **Yjs** updates
@@ -70,19 +70,19 @@ flowchart TD
 - **Deploy modes** (`backend/deploymode/`, `DEPLOY_MODE`): exactly two — `standalone`
   (default; a fully sovereign self-host with no OS gateway in front — all features
   open, no billing/entitlement gating, blob I/O via the process-wide object client
-  or a silent no-op) and `os` (Office running as an app **behind a Vulos OS box
-  gateway**). Office is never multi-tenant cloud-hosted; the cloud runs Mail + Relay
+  or a silent no-op) and `os` (Ofisi running as an app **behind a Vulos OS box
+  gateway**). Ofisi is never multi-tenant cloud-hosted; the cloud runs Mail + Relay
   + the control plane only. In `os` mode the process **refuses to boot** without an
   authenticated posture (native auth or SSO introspection) so a hosted deployment can
   never silently collapse every caller onto one shared identity.
 - **Storage seam** (`backend/storage/seam_client.go`, `backend/handlers/bucket_store.go`):
   in `os` mode the gateway injects per-request `X-Vulos-Storage-*` headers describing a
-  short-lived, per-user S3 slice, so Office never holds full-bucket credentials. The
+  short-lived, per-user S3 slice, so Ofisi never holds full-bucket credentials. The
   headers are honoured **only** when the request also carries a valid
   `X-Vulos-Storage-Broker-Auth` matching `VULOS_STORAGE_BROKER_SECRET` (constant-time),
   and the injected endpoint is SSRF-checked (`ValidateSeamEndpoint`: https always,
   http only for loopback/private hosts). Otherwise the seam headers are ignored and
-  Office falls back to the standalone object client. In every mode blob keys are built
+  Ofisi falls back to the standalone object client. In every mode blob keys are built
   by `storage.OrgScopedKey(accountID, name)`, which scopes each object under its
   owning account and sanitises every segment so a caller-influenced id can never inject
   a path separator or `..` and escape into another account's namespace.

@@ -1,6 +1,6 @@
-# Vulos Office — Roadmap
+# Ofisi — Roadmap
 
-Vulos Office is the **documents** surface of the Vulos project — a self-hosted,
+Ofisi is the **documents** surface of the Vulos project — a self-hosted,
 open-source (MIT) suite for Documents, Sheets, Slides, and PDF/Signing that runs
 as a single Go binary with a React frontend. (Calendar and Contacts come through
 the mail connector — CalDAV/CardDAV via lilmail.) Today it is a
@@ -10,12 +10,12 @@ on different Vulos instances, and PDFs signed with cryptographic audit trails �
 all riding the **Vulos peer fabric** that already connects and routes instances
 across the network, with relay/TURN fallback.
 
-> **Product scope.** Vulos Office is documents-only. Chat and video are **third-party**
+> **Product scope.** Ofisi is documents-only. Chat and video are **third-party**
 > (Matrix/Element for chat; Element Call / Jitsi for video), not Vulos products; the
 > **Vulos OS** is the shell that hosts the apps. Any chat/calling roadmap items
 > previously tracked here are out of scope for this repo.
 
-The throughline: Vulos Office never invents its own network. Real-time document
+The throughline: Ofisi never invents its own network. Real-time document
 collaboration reuses the **same fabric the Vulos OS uses for device routing** —
 P2P first (cr-sqlite/CRDT sync to buckets), relay/TURN when direct connectivity
 fails. *Vulos — open.*
@@ -29,7 +29,7 @@ The sections below are **priority-ordered**.
 
 ---
 
-## 1. Office Core — Documents, Sheets, Slides, PDF
+## 1. Ofisi Core — Documents, Sheets, Slides, PDF
 
 The foundation, and what ships today: a clean, single-binary suite that opens in
 the browser with no account required. Documents are edited with TipTap (rich
@@ -48,7 +48,7 @@ trustworthy.
 ### Goals
 
 - Keep the local-first, single-binary experience excellent and dependency-light.
-- Make import/export round-trips lossless enough that Vulos Office is a credible
+- Make import/export round-trips lossless enough that Ofisi is a credible
   daily driver against LibreOffice and the incumbents.
 - Harden autosave and storage so no edit is ever silently lost.
 - Establish clean document models that the collaboration layer (Section 2) can
@@ -105,10 +105,10 @@ trustworthy.
 ## 2. Real-time Collaboration — Editing Over the Peer Fabric
 
 The first networked pillar: open the same Document, Sheet, or Slide deck on two
-Vulos instances and edit it together, live. Vulos Office does not stand up a
+Vulos instances and edit it together, live. Ofisi does not stand up a
 collaboration server. It rides the **Vulos peer fabric** — the OS already syncs
 state via **cr-sqlite/CRDT to buckets** and connects instances **P2P with
-relay/TURN fallback**. Office models its documents as CRDTs over that same
+relay/TURN fallback**. Ofisi models its documents as CRDTs over that same
 transport, so a doc converges across peers exactly the way the OS converges
 device state. See the [Vulos peering / RELAY layer](../vulos-cloud/roadmap/RELAY.md)
 for the signaling and relay primitives this builds on.
@@ -218,14 +218,14 @@ identity ties to the **Vulos account**.
 ## 4. Chat, Calling & Meetings — third-party (not built by Vulos)
 
 Team chat + Spaces and real-time voice/video calling + meetings were once planned
-as an Office pillar. Vulos no longer builds comms: chat and video are provided by
+as an Ofisi pillar. Vulos no longer builds comms: chat and video are provided by
 **established third-party open protocols/apps**:
 
 - **Chat** — Matrix / Element (the Slack equivalent).
 - **Video** — Element Call / Jitsi (the Google-Meet equivalent).
 
 The **Vulos OS** is the shell that hosts the apps; it can link out to whatever
-comms app the user runs, but Office never embeds chat or video, and neither is a
+comms app the user runs, but Ofisi never embeds chat or video, and neither is a
 first-party Vulos product.
 
 ---
@@ -234,7 +234,7 @@ first-party Vulos product.
 
 ### Storage-backend choice
 
-Vulos Office stores documents, sheets, and slides in the same S3-compatible
+Ofisi stores documents, sheets, and slides in the same S3-compatible
 object store as OS sync. The same two-backend choice applies:
 
 - **Tigris (default):** Per-org bucket prefix on Vulos Tigris; managed, durable, replicated.
@@ -247,14 +247,14 @@ configuration (consistent with the rest of the suite).
 
 ### Co-location on a single instance
 
-Vulos Office can run co-located with the OS on a single box, sharing one bucket
+Ofisi can run co-located with the OS on a single box, sharing one bucket
 and one CRDT/peering fabric. The BYO single-box story — "one box = your whole Vulos" — requires
 only one shared bucket endpoint. The meta-bundle installer (`BUNDLE-01`
 in `vulos`) wires this up; no vulos-office code changes are needed.
 
 ### Identity
 
-Vulos Office uses the same Vulos account identity as the OS. There is no separate Office
+Ofisi uses the same Vulos account identity as the OS. There is no separate Ofisi
 identity — the Vulos account (email + password / OAuth / passkey) is the single identity for
 all surfaces. Collaboration sessions are keyed by Vulos account; the cloud control plane routes
 presence and CRDT sync using the same identity service.
@@ -263,31 +263,31 @@ presence and CRDT sync using the same identity service.
 
 ## Bundling decision
 
-**Office ships with the suite; it is not a separately-priced tier.** There are no
+**Ofisi ships with the suite; it is not a separately-priced tier.** There are no
 per-active-user pricing tiers and no "mail tier" — mail is an experimental **connector**
 (bring your own Gmail/Outlook/IMAP), never a billed product. Billing is grounded in
-**compute + storage + relay** usage, not seats. Office installs by default alongside the
-other suite apps; self-hosting Office on your own box costs nothing.
+**compute + storage + relay** usage, not seats. Ofisi installs by default alongside the
+other suite apps; self-hosting Ofisi on your own box costs nothing.
 
 Cross-repo: see `vulos-cloud/ROADMAP.md` billing model section for the compute/storage/relay
 model.
 
 ---
 
-## Mail connector (Office is not involved)
+## Mail connector (Ofisi is not involved)
 
-Vulos Office is not involved in mail at all — PIM is a separate **bring-your-own-mailbox
+Ofisi is not involved in mail at all — PIM is a separate **bring-your-own-mailbox
 connector** (`lilmail`, exposing `/v1`) that logs into your existing IMAP/SMTP mailbox; the OS
-surfaces Calendar/Contacts widgets over it. There is no hosted Vulos mail. Office installs
+surfaces Calendar/Contacts widgets over it. There is no hosted Vulos mail. Ofisi installs
 alongside the rest of the suite regardless of whether the connector is configured. There
-is no "Mail tier" gating Office.
+is no "Mail tier" gating Ofisi.
 
 ---
 
 ## Future work
 
 ### Multi-target builds: web subdomain + OS-embed library for all apps
-Build each Office app surface (docs, sheets, slides, pdf) as two targets:
+Build each Ofisi app surface (docs, sheets, slides, pdf) as two targets:
 (1) a standalone web build served by **path** under the app hub (`app.vulos.org/office`), and
 (2) an embeddable library (`lib.jsx` export) consumed by the
 Vulos OS shell as a native app wrapper. Vite multi-entry config wires both outputs from the
@@ -317,7 +317,7 @@ navigated. Coordinate with the multi-target build work above for OS launcher int
     master slides, themes, presenter view. Reveal.js is used only for the
     full-screen *present* transition, not authoring.
 - **Calendar** and **Contacts** moved to the mail connector (CalDAV/CardDAV via
-  lilmail `/v1/calendar` + `/v1/contacts`); Office is documents-only.
+  lilmail `/v1/calendar` + `/v1/contacts`); Ofisi is documents-only.
 - **Org-bucket wiring** (`OfficeBackendConfig`) is fully wired (`FIX-OFFICE-STORE-WIRE-01`):
   file CRUD and sealed PDFs read/write to the S3-compatible bucket (Tigris or MinIO)
   when `VULOS_ORG_ID` is set; falls back to local storage otherwise.

@@ -1,11 +1,11 @@
-# Security Testing — Vulos Office
+# Security Testing — Ofisi
 
 This document describes the **pentest / adversarial test suite** for the
 `vulos-office` backend (Go) and the document/slide HTML render path (JSX/vitest).
 
-> Vulos Office is the documents-only product. Chat and video are third-party
+> Ofisi is the documents-only product. Chat and video are third-party
 > (Matrix/Element; Element Call / Jitsi), not Vulos products; this document covers
-> only Office's own attack surface.
+> only Ofisi's own attack surface.
 
 The suites are written attacker-first: every test **attempts a concrete attack
 and asserts it is blocked**. A green run means the corresponding defense holds.

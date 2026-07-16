@@ -1,4 +1,4 @@
-# Vulos Office – Service Level Objectives
+# Ofisi – Service Level Objectives
 
 | # | Surface | Target | Measurement | Error budget (99.9% / month) | Rollback trigger |
 |---|---------|--------|-------------|------------------------------|------------------|

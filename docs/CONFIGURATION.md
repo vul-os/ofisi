@@ -1,6 +1,6 @@
-# Vulos Office — Configuration Reference
+# Ofisi — Configuration Reference
 
-All runtime configuration for Vulos Office is driven by `config.yaml` and environment variables. Environment variables take precedence over the config file.
+All runtime configuration for Ofisi is driven by `config.yaml` and environment variables. Environment variables take precedence over the config file.
 
 By default the server looks for `config.yaml` in the process's current working directory. Override the path with `-config` (also accepted as `--config`; Go's flag parser treats both the same), e.g.:
 
@@ -8,7 +8,7 @@ By default the server looks for `config.yaml` in the process's current working d
 vulos-office -config /etc/vulos-office/config.yaml
 ```
 
-Office never refuses to start over a config problem — this is deliberate for a zero-config first run, but means a typo'd `-config` path fails silently:
+Ofisi never refuses to start over a config problem — this is deliberate for a zero-config first run, but means a typo'd `-config` path fails silently:
 
 - **Missing file** (wrong path, typo): silently falls back to built-in defaults — no error, no log line. If a setting doesn't seem to be taking effect, double-check the path first (e.g. `ls -la <path>`).
 - **File present but invalid YAML**: falls back to defaults AND logs `Config error: … — using defaults` on boot.
@@ -56,11 +56,11 @@ storage:
 
 ### SSO session introspection (multi-user)
 
-Office holds **no session-signing power**. When an identity provider is configured it validates the browser's `vc_session` cookie by introspection instead of verifying a signature Office minted.
+Ofisi holds **no session-signing power**. When an identity provider is configured it validates the browser's `vc_session` cookie by introspection instead of verifying a signature Ofisi minted.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `IDENTITY_URL` | Identity-provider base URL (sovereign box in self-host, CP in cloud). **SET** → Office introspects `vc_session` at `POST {IDENTITY_URL}/api/session/introspect` and fails **closed** (401) on invalid/expired/unreachable. **UNSET** → SSO disabled; existing local single-identity behavior unchanged. | — (unset) |
+| `IDENTITY_URL` | Identity-provider base URL (sovereign box in self-host, CP in cloud). **SET** → Ofisi introspects `vc_session` at `POST {IDENTITY_URL}/api/session/introspect` and fails **closed** (401) on invalid/expired/unreachable. **UNSET** → SSO disabled; existing local single-identity behavior unchanged. | — (unset) |
 | `VULOS_CP_TOKEN` | Shared service-auth secret presented as `X-Relay-Auth` on the introspection call (== the provider's `CP_SHARED_SECRET`). Reused from the existing API-key / entitlements path — **not a signing key**. | — |
 
 Precedence (first match wins): `vk_` API key → per-product session JWT → SSO `vc_session` introspection → 401. On a valid session the request is scoped to the resolved **user + tenant** (`tenantId` = account id); results are cached in-process for ~45s (bounded by the session's `expiresAt`) so it is not a round-trip per request.
@@ -106,7 +106,7 @@ Written by the OS storage-mode selector; consumed by all three bundle services:
 
 ### SMTP (optional)
 
-Office itself does not send mail. If you want outbound notifications, point Office at an external SMTP relay:
+Ofisi itself does not send mail. If you want outbound notifications, point Ofisi at an external SMTP relay:
 
 | Variable | Description |
 |----------|-------------|

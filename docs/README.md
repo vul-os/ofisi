@@ -1,4 +1,4 @@
-# Vulos Office — Documentation Index
+# Ofisi — Documentation Index
 
 | Document | Description |
 |----------|-------------|

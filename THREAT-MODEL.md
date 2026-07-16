@@ -1,8 +1,8 @@
-# Threat Model — Vulos Office
+# Threat Model — Ofisi
 
 STRIDE pass. Last updated: 2026-06-26.
 
-> **Scope:** Vulos Office is the **documents-only** product (Docs, Sheets, Slides,
+> **Scope:** Ofisi is the **documents-only** product (Docs, Sheets, Slides,
 > PDF/Signing). Calendar/Contacts come from the bring-your-own-mailbox PIM connector
 > (lilmail, CalDAV/CardDAV), and chat/video are third-party (Matrix/Element; Element
 > Call / Jitsi) — those surfaces are out of scope here.

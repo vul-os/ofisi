@@ -1,6 +1,6 @@
-# Self-hosting Vulos Office (standalone, no cloud)
+# Self-hosting Ofisi (standalone, no cloud)
 
-Vulos Office runs **completely standalone** as an open-source project with **no
+Ofisi runs **completely standalone** as an open-source project with **no
 dependency on vulos-cloud** (the "cp" control plane). The standalone path is the
 default and works with **zero cloud configuration**. Cloud integration is
 **optional** and lives entirely behind a clean seam.

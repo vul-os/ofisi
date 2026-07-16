@@ -1,4 +1,4 @@
-# Vulos Office – Deployment Guide
+# Ofisi – Deployment Guide
 
 ## Requirements
 
@@ -14,13 +14,13 @@ docker run -d \
   --name vulos-office \
   -p 8080:8080 \
   -v office-data:/data \
-  ghcr.io/vul-os/vulos-office:latest
+  ghcr.io/vul-os/ofisi:latest
 ```
 
 ## Building from Source
 
 ```sh
-git clone https://github.com/vul-os/vulos-office.git
+git clone https://github.com/vul-os/ofisi.git
 cd vulos-office
 
 # Build frontend

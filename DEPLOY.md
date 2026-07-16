@@ -1,11 +1,11 @@
-# Vulos Office — Static Deploy Guide
+# Ofisi — Static Deploy Guide
 
-Vulos Office ships the `office` SPA, built with Vite and uploaded to Tigris
+Ofisi ships the `office` SPA, built with Vite and uploaded to Tigris
 object storage for CDN delivery.
 
-> Vulos Office is the **documents-only** product (Docs, Sheets, Slides, PDF/Signing).
+> Ofisi is the **documents-only** product (Docs, Sheets, Slides, PDF/Signing).
 > Calendar and Contacts come from the bring-your-own-mailbox PIM connector
-> (**lilmail**), surfaced by the OS as standalone widgets — not from Office.
+> (**lilmail**), surfaced by the OS as standalone widgets — not from Ofisi.
 > Chat and video are third-party (Matrix/Element; Element Call / Jitsi), not
 > Vulos products. The **Vulos OS** is the shell that hosts the apps.
 

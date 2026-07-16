@@ -1,4 +1,4 @@
-# Security Policy — Vulos Office
+# Security Policy — Ofisi
 
 ## Scope
 
@@ -8,9 +8,9 @@
 - Backend API authentication and session handling
 - File upload / blob storage access controls
 
-> Vulos Office is documents-only. Chat and video are third-party (Matrix/Element;
+> Ofisi is documents-only. Chat and video are third-party (Matrix/Element;
 > Element Call / Jitsi), not Vulos products — report issues there. Calendar/Contacts
-> come from the bring-your-own-mailbox PIM connector (lilmail), not from Office.
+> come from the bring-your-own-mailbox PIM connector (lilmail), not from Ofisi.
 
 ### Out of scope
 - Third-party Go and npm dependencies — report to upstream maintainers

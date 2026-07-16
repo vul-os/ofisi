@@ -1,6 +1,6 @@
-# Vulos Office — Public `/v1` API
+# Ofisi — Public `/v1` API
 
-A clean, JSON-only REST API over the Vulos Office document engine (Docs, Sheets,
+A clean, JSON-only REST API over the Ofisi document engine (Docs, Sheets,
 Slides). It exposes the same document store, per-file access control, and export
 services the web app uses, behind a stable, versioned, developer-facing surface.
 
@@ -24,13 +24,13 @@ Base path: `/v1`. All examples assume a host of `http://localhost:8080` (the sta
 The `/v1` API accepts **either** of two credentials, both via the
 `Authorization` header:
 
-### 1. Session (the existing Office login)
+### 1. Session (the existing Ofisi login)
 
 `Authorization: Bearer <session-jwt>` **or** the HttpOnly `session` cookie
 (HS256, the same token the web app uses). This is the zero-config path for
 first-party / self-host use.
 
-When Office runs with `auth.enabled: false` (single-user self-host), no
+When Ofisi runs with `auth.enabled: false` (single-user self-host), no
 credential is required and requests act as the local `self` identity.
 
 ### 2. API key (`vk_…`)
@@ -62,7 +62,7 @@ scope.
 
 ## Key introspection seam (control-plane contract)
 
-This is the **shared** seam every Vulos product (Office, Mail, Talk, …) uses to
+This is the **shared** seam every Vulos product (Ofisi, Mail, Talk, …) uses to
 validate `vk_` keys. The control plane implements **one** endpoint; products
 call it identically.
 
@@ -98,7 +98,7 @@ For an unknown / revoked / expired key the CP still returns `200` with:
 | `valid`    | bool       | Whether the key is currently usable.                              |
 | `account`  | string     | The owning account id (becomes the request's verified identity).  |
 | `scopes`   | string[]   | Granular scopes the key carries (advisory; see below).            |
-| `products` | string[]   | Products the key may use. Office requires `"office"` to be present. |
+| `products` | string[]   | Products the key may use. Ofisi requires `"office"` to be present. |
 
 ### Caller behaviour (implemented by every product)
 
@@ -106,7 +106,7 @@ For an unknown / revoked / expired key the CP still returns `200` with:
   burst of API calls introspects a given key at most once per minute.
 - A non-`200` response or transport error is treated as **fail-closed**: the
   request is rejected `503` rather than granted.
-- Office requires `products` to include `office`. `scopes` are returned for
+- Ofisi requires `products` to include `office`. `scopes` are returned for
   forward use (per-endpoint scope enforcement); today any valid `office` key may
   use every `/v1` endpoint within its own ACL.
 

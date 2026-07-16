@@ -1,67 +1,75 @@
 <div align="center">
 
-<img src="public/vulos-office.png" alt="Vulos Office" width="120" />
+<img src="public/icons/icon-512.png" alt="Ofisi" width="128" />
 
-# Vulos Office
+# Ofisi
 
-**A standalone, self-hostable, peer-to-peer collaborative office suite — your documents, your server, your rules.**
+### A real, self-hostable collaborative office suite you own.
 
-Docs · Sheets · Slides · PDF Signing · Whiteboards
+Documents, spreadsheets, slides, and whiteboards — **CRDT-native** and
+**real-time**, shipped as a single binary, running on **your own storage**.
+No cloud account, no telemetry, no lock-in.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.1-informational)](CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-14B8A6.svg)](LICENSE)
+[![Self-hostable](https://img.shields.io/badge/self--hostable-single%20binary-2DD4BF)](SELFHOST.md)
+[![CRDT · real-time](https://img.shields.io/badge/CRDT-real--time%20P2P-0EA5E9)](docs/COLLABORATION.md)
+[![Tests](https://img.shields.io/badge/tests-passing-14B8A6)](docs/TESTING.md)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+[**Quickstart**](#quick-start) · [**Docs**](docs/) · [**Collaboration**](docs/COLLABORATION.md) · [**Architecture**](docs/ARCHITECTURE.md) · [**Self-hosting**](SELFHOST.md)
+
+<br/>
+
+<img src="docs/screenshots/hero.png" alt="Ofisi — documents, sheets, slides, and whiteboards in one self-hosted suite" width="900" />
 
 </div>
 
-<p align="center">
-  <img src="docs/screenshots/hero.png" alt="Vulos Office" width="900" />
-</p>
-
 ---
 
-## What is this?
+## What is Ofisi?
 
-Vulos Office is a **standalone, self-hostable office suite**, shipped as a **single Go binary** with the entire frontend embedded — no cloud account, no telemetry, no lock-in. It brings document editing, spreadsheets, presentations, whiteboards, and cryptographic document signing together in one clean, modern web interface.
+Ofisi is a **standalone, self-hostable office suite** — documents, spreadsheets,
+slides, and whiteboards in one clean, modern web app, shipped as a **single Go
+binary** with the entire frontend embedded. There is no cloud account to create,
+nothing phones home, and your files live in **your own storage**.
 
-It is **self-hostable by default**: with zero configuration it runs as a single-user, local-storage app on your own machine. Real-time co-editing is **peer-to-peer** — there is no central document server; peers sync directly over end-to-end-encrypted WebRTC (see [Real-time collaboration](#real-time-collaboration)). Everything that *could* tie it to an external service lives behind a small, clean **seam**, so multi-user identity and entitlements are optional and the standalone build never imports them.
+Real-time co-editing is **peer-to-peer and CRDT-native**: there is no central
+document server. Peers sync directly over an end-to-end-encrypted channel, and
+because edits are conflict-free (CRDTs), everyone converges with no authority in
+the middle. What you run is what you own.
 
-It stands as a tribute to **LibreOffice** and **OpenOffice** — the pioneers who proved productivity software could be free, open, and community-driven — and carries that torch into the browser with a fast React frontend and a lightweight Go backend.
+It carries the torch lit by **LibreOffice** and **OpenOffice** — the projects
+that proved productivity software can be free, open, and community-driven — into
+the browser, on a fast React frontend and a lightweight Go backend.
 
-> *"Vula" — open the door. Vulos Office is that door.*
+```mermaid
+flowchart LR
+    you["you (browser)"] -->|edits| ofisi["Ofisi<br/>single binary"]
+    peer["a collaborator"] -.->|"E2E-encrypted P2P (WebRTC)"| you
+    ofisi --> store["your storage<br/>files · SQLite · Postgres · S3"]
+    ofisi --> surfaces["Docs · Sheets · Slides<br/>Whiteboards · PDF signing"]
+```
 
-Office is **documents-only**: Docs, Sheets, Slides, PDF/Signing, and Whiteboards. Communication (chat/video) and mail/calendar/contacts are **not** part of Office.
+> *"Vula" — open the door. Ofisi is that door.*
 
 ---
 
 ## Features
 
-| Surface | Description |
-|---------|-------------|
-| **Docs** | Rich-text editing via TipTap — headings, tables, inline images (resize/align/alt), footnotes, task lists, links; anchored **comments**, **suggestions** (track-changes with accept/reject), **version history** with restore, find/replace, live document outline + word count |
-| **Sheets** | Full spreadsheet grid via Fortune Sheet — formulas, number formats, conditional formatting, **data validation**, **charts** (column/bar/line/area/pie), **filters**, **pivot tables**, **named ranges**, freeze panes |
-| **Slides** | Presentation editor on a **from-scratch positioned-object canvas** — free drag/resize/rotate of text, shapes, and images in normalized slide space, per-element **animations**, **themes**, editable **master slides**, per-slide **transitions**, **presenter view** (notes + timer in a second window), template gallery, `.pptx`/`.odp` import. The full-screen *present* overlay uses Reveal.js only as the slide-transition host for those positioned objects |
-| **Whiteboards** | Infinite-canvas whiteboard built on the MIT [Excalidraw](https://github.com/excalidraw/excalidraw) editor — shapes, arrows, freehand, text and images on a hand-drawn canvas. The scene is a **Yjs CRDT** (elements merge one-per-id), synced over the **exact same** end-to-end-encrypted peer-to-peer engine as Docs — **no central whiteboard/collab server**. New → Whiteboard from anywhere you make a doc |
-| **Signing** | View, **annotate** (text/draw/shapes), **fill interactive form fields** (AcroForm detection + one-click fill), and **sign** PDFs (draw/type/upload); multi-party signing envelopes (sequential or parallel) with a public signer page and a cryptographic audit trail; page reorder/rotate/insert/extract |
-| **Real-time collab** | **Always peer-to-peer — there is no central document server.** Docs **and whiteboards** sync as **Yjs CRDT** updates inside an **end-to-end-encrypted** room: peers connect **directly** over WebRTC (STUN-assisted), with a **content-blind relay** only as a hard-NAT fallback. You share collaboration via an **invite link** (`#vp2p=`); the key rides the URL fragment and never reaches any server. Sheets/Slides get live presence + cursors and CRDT content sync over the same peer fabric. Collaboration needs a host that provides content-blind peer **discovery** (`/api/peering/*`, a Vulos OS / Relay deployment); a bare standalone binary has none, so editing stays **local-only** and autosaves — no silent "fake Live". See [docs/COLLABORATION.md](docs/COLLABORATION.md) |
-| **Import / Export** | Docs `.docx` / Markdown / HTML / PDF · Sheets `.xlsx` / `.csv` · Slides `.pptx` / PDF · PDF signing; browse-and-import from the server's own `~/Documents`, `~/Downloads`, `~/Desktop` (single-user self-host only — disabled in multi-user mode, since it would expose the operator's local files to every account) |
-| **Storage** | Local files + SQLite by default; optional PostgreSQL (schema `office`) for multi-user; optional S3-compatible object store |
-| **Auth** | Optional password / JWT login — off by default for local use; per-file ACLs when multi-user |
-| **Single binary** | The Go server embeds the whole frontend — one file to deploy |
-| **PWA-ready** | Installable as a desktop / mobile app via web manifest |
-| **Observability** | Prometheus metrics at `/metrics` and optional OpenTelemetry traces |
+| | |
+|---|---|
+| 📝 **Documents** | Rich-text editing (TipTap) — headings, tables, inline images, footnotes, task lists, links; anchored **comments**, **suggestions** (track-changes with accept/reject), **version history** with restore, find/replace, live outline + word count. |
+| 📊 **Spreadsheets** | A full grid (Fortune Sheet) — formulas, number formats, conditional formatting, **data validation**, **charts**, **filters**, **pivot tables**, **named ranges**, freeze panes. |
+| 🖼️ **Slides** | A from-scratch positioned-object canvas — free drag/resize/rotate of text, shapes, and images; per-element **animations**, **themes**, editable **master slides**, per-slide **transitions**, and a **presenter view** (notes + timer). |
+| 🎨 **Whiteboards** | An infinite hand-drawn canvas built on the MIT [Excalidraw](https://github.com/excalidraw/excalidraw) editor — shapes, arrows, freehand, text, and images. The scene is a **Yjs CRDT** synced over the **same** E2E-encrypted P2P engine as Docs. |
+| ⚡ **Real-time co-editing** | **Always peer-to-peer, no central document server.** Edits sync as CRDT updates inside an **end-to-end-encrypted** room; peers connect directly over WebRTC with a **content-blind relay** only as a hard-NAT fallback. Share by invite link — the key rides the URL fragment and never reaches any server. |
+| 📄 **PDF import / export & signing** | Import and export `.docx` · `.xlsx` · `.csv` · `.pptx` · Markdown · HTML · **PDF**. View, annotate, fill AcroForm fields, and **sign** PDFs, including multi-party signing envelopes with a cryptographic audit trail. |
+| 💾 **Your own storage** | Local files + SQLite by default; optional **PostgreSQL** (schema `office`) for multi-user; optional **S3-compatible** object store. Nothing is hosted for you unless you choose it. |
+| 🔓 **No lock-in** | Open formats in and out, MIT-licensed, single self-contained binary. Every editor is also published as an npm library (`@vulos/office-client`) so you can embed any surface in your own app. |
 
-Every surface is also published as an npm library (`@vulos/office-client`) so your own app can embed any editor as a native panel:
-
-```js
-import { DocsApp }        from '@vulos/office-client/docs'
-import { SheetsApp }      from '@vulos/office-client/sheets'
-import { SlidesApp }      from '@vulos/office-client/slides'
-import { WhiteboardApp }  from '@vulos/office-client/whiteboard'
-import { PDFApp }         from '@vulos/office-client/pdf'
-```
+Ofisi is **documents-only** by design: Docs, Sheets, Slides, Whiteboards, and
+PDF signing. Chat, video, and mail are deliberately *not* part of it.
 
 ---
 
@@ -69,48 +77,41 @@ import { PDFApp }         from '@vulos/office-client/pdf'
 
 |  |  |
 | :---: | :---: |
-| **Docs** — rich text, tables, comments | **Sheets** — formulas, charts, pivots |
-| <img src="docs/screenshots/docs-editor.png" alt="Docs" /> | <img src="docs/screenshots/sheets-editor.png" alt="Sheets" /> |
+| **Documents** — rich text, tables, comments | **Spreadsheets** — formulas, charts, pivots |
+| <img src="docs/screenshots/docs-editor.png" alt="Documents" /> | <img src="docs/screenshots/sheets-editor.png" alt="Spreadsheets" /> |
 | **Slides** — themes, transitions, present | **Signing** — annotate & sign PDFs |
 | <img src="docs/screenshots/slides-editor.png" alt="Slides" /> | <img src="docs/screenshots/pdf-editor.png" alt="Signing" /> |
 | **Whiteboards** — Excalidraw canvas, P2P CRDT | **Home** — workspace & recent files |
 | <img src="docs/screenshots/whiteboard-editor.png" alt="Whiteboards" /> | <img src="docs/screenshots/home.png" alt="Home" /> |
-| **Settings** — account, storage & admin | |
-| <img src="docs/screenshots/settings.png" alt="Settings" /> | |
 
-> Regenerate anytime with `npm run screenshots` — it boots the app with seeded demo data (no real backend or credentials needed) and captures every screen. See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
+> Regenerate anytime with `npm run screenshots` — it boots the app with seeded
+> demo data (no real backend or credentials needed). See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 
 ---
 
-## Quick start (standalone)
+## Quick start
 
-Vulos Office runs **by itself** — no account, no cloud, no external service required.
+Ofisi runs **by itself** — no account, no cloud, no external service required.
 
 ### Docker (one-liner)
 
 ```bash
 docker run -d \
-  --name vulos-office \
+  --name ofisi \
   -p 8080:8080 \
-  -v office-data:/srv/data \
-  ghcr.io/vul-os/vulos-office:latest
+  -v ofisi-data:/srv/data \
+  ghcr.io/vul-os/ofisi:latest
 ```
 
 Open <http://localhost:8080>.
-
-> Building the image yourself: the `Dockerfile` needs a **parent build context**
-> that also contains the sibling `vulos-relay/` repo (for the SPA `file:` dep).
-> From the directory that holds both:
-> `docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/vulos-office:latest .`
-> See the `Dockerfile` header and `fly.toml` for the full deploy flow.
 
 ### From source (single binary)
 
 Prerequisites: [Go 1.25+](https://golang.org/dl/) and [Node.js 18+](https://nodejs.org/) with npm.
 
 ```bash
-git clone https://github.com/vul-os/vulos-office.git
-cd vulos-office
+git clone https://github.com/vul-os/ofisi.git
+cd ofisi
 
 # Install deps and build the frontend + single binary
 npm install
@@ -120,20 +121,8 @@ npm run build
 ./vulos-office
 ```
 
-Open <http://localhost:8080>. Data lives in `./data` and `./uploads`. That's the whole app, in one file.
-
-### Develop
-
-```bash
-# Vite dev server (:5173) + Go API (:8080), live reload
-npm run dev:web
-```
-
-Open <http://localhost:5173>.
-
-### Minimal config
-
-No configuration is required to run standalone. To require login (still fully standalone — no control plane):
+Open <http://localhost:8080>. Data lives in `./data` and `./uploads` — that's the
+whole app, in one file. To require login (still fully standalone):
 
 ```bash
 # config.yaml → auth.enabled: true
@@ -141,13 +130,28 @@ export VULOS_OFFICE_JWT_SECRET="$(openssl rand -hex 32)"
 ./vulos-office
 ```
 
+### Develop
+
+```bash
+npm run dev:web   # Vite dev server (:5173) + Go API (:8080), live reload
+```
+
+Open <http://localhost:5173>.
+
+### Install from the Vulos app store
+
+Ofisi also installs as a one-click app on a **Vulos OS** box (`DEPLOY_MODE=os`),
+where it runs behind the box gateway with scoped storage and single sign-on. It
+is the **same binary** — the app store just wires identity and storage for you.
+Self-hosting it yourself is always the default path, and never second-class.
+
 ---
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    FE["React + Vite + Tailwind frontend (JSX only)<br/>Docs · Sheets · Slides · PDF Signing · Whiteboards"]
+    FE["React + Vite + Tailwind frontend<br/>Docs · Sheets · Slides · Whiteboards · PDF signing"]
     BE["Go backend (Gin)<br/>handlers · userauth · signing · storage · obs"]
     Seam["backend/seam — Identity · Entitlements · Usage<br/>standalone defaults (local, unlimited, no-op)"]
     Adapter["backend/integration<br/>(optional identity/entitlements adapter, opt-in)"]
@@ -156,184 +160,37 @@ flowchart TD
     Seam -->|optional| Adapter
 ```
 
-The boundary between Office's core and any external identity/entitlements service is a small set of Go interfaces in `backend/seam`. The composition root (`main.go`) wires the standalone defaults via `seam.NewStandaloneProvider(...)`:
+Ofisi is a **single Go binary with the whole frontend embedded** — one file to
+deploy. With zero configuration it runs as a single-user, local-storage app on
+your own machine. Everything that *could* tie it to an external service lives
+behind a small set of Go interfaces in `backend/seam`; the standalone build
+wires local, unlimited, no-op defaults and never imports the optional adapter.
 
-| Interface | Standalone default |
-|-----------|--------------------|
-| `seam.Identity` | `LocalIdentity` — verifies Office's own HS256 session JWT |
-| `seam.Entitlements` | `LocalEntitlements` — unlimited, `self-hosted` tier, all features |
-| `seam.Usage` | `NoopUsage` — discards metering (Prometheus still exported) |
-
-The optional adapter lives in a **separate package** and is selected *only* when `VULOS_CP_BASE_URL` is set. With it unset (the default), none of it runs — Office is 100% standalone. See [SELFHOST.md](SELFHOST.md) for the full seam contract.
-
----
-
-## Real-time collaboration
-
-Co-editing is **CRDT-based and always peer-to-peer — there is no central
-document server.** Docs sync as **Yjs** updates (structure-aware: bold, headings,
-tables, images all propagate correctly); **whiteboards** sync as Yjs updates too
-(each Excalidraw element merges one-per-id) over the very same E2E-encrypted room
-and session — no separate whiteboard/collab server; Sheets and Slides use an LWW
-grid CRDT and a fractional-index tree CRDT. Because CRDT apply is idempotent + commutative,
-peers converge with no coordinating authority — which is exactly what lets the
-document ride an end-to-end-encrypted room where no server could rebase anything.
-
-**How edits travel (in order):**
-
-| Path | When | Notes |
-|------|------|-------|
-| **Direct WebRTC data channel** | The default — whenever two peers can connect | Edits flow **browser-to-browser**, end-to-end-encrypted (AES-256-GCM). NAT traversal via host-provided **STUN/TURN**. Nothing in the middle. |
-| **Content-blind relay circuit** | Fallback only, when a peer pair can't hole-punch (hard NAT) | The relay routes **ciphertext it cannot read** (per-session X25519 box). Still no plaintext, still no document server. |
-| **Local-only** | No peering host / offline | You keep editing; your work **autosaves** to your own storage and syncs to peers when they're reachable. The UI says "Offline" honestly — no fake "Live". |
-
-You enter collaboration by sharing an **invite link**. Sharing mints a random
-32-byte room key; it is HKDF-derived into a content key + an RW-authority MAC key
-+ a non-secret rendezvous id, and carried in the URL **fragment** (`#vp2p=…`),
-which **never reaches any server**. A read-write link and a read-only link are
-minted from the same key; ro peers hold the decryption key but not the RW MAC, so
-their writes are cryptographically refused.
-
-The only server role in collaboration is **content-blind peer discovery**
-(signaling + ICE at `/api/peering/*`, provided by a Vulos OS / Relay host) — it
-learns *that* some peers share a random room id, never any content.
-
-Live **presence** — avatar stack, roster, and **remote cursors/selections** —
-rides the **same E2E-encrypted room** as the document, so the host never learns
-who is in a room. Presence is ephemeral and never persisted. A read-only
-**viewer** legitimately shows a caret and appears in the roster, but a viewer's
-content writes are cryptographically refused.
-
----
-
-## Security model
-
-- **HTML sanitisation is centralised** in `src/lib/sanitize.js` — one audited
-  DOMPurify policy for every surface that renders user- or peer-supplied markup
-  (Docs import/export, Slides, search highlights). Scripts, `<iframe>`, `<object>`,
-  form controls, and all inline `on*` handlers are stripped.
-- **Inline `style` is allow-listed**, not blocklisted: only benign Docs
-  properties survive (colour, font, spacing, borders, table sizing). Positioning
-  overlays, `content:`, `behavior:`, and any fetch/exec function (`url()`,
-  `image()`, `expression()`, `@import`, …) are dropped fail-closed.
-- **Inline images are raster-only**: `<img src>` accepts http(s)/relative URLs or
-  base64 raster data: URIs; every non-raster data: URI (`data:image/svg+xml`,
-  `data:text/html`, …), `srcset`, and script-bearing MIME-lie is rejected. The
-  same `isSafeImageSrc` predicate also gates the **collab/JSON-reload ingress
-  path** so a hostile peer op can't smuggle an unsafe `src`.
-- **CRDT ingress is fail-closed**: remote text ops are validated (codepoint
-  bounds, no UTF-16 surrogates) before apply and dropped on failure — never
-  throw — so a malformed/oversized op can't crash or DoS the editor on bootstrap.
-- **Export is injection-safe**: Sheets/chart export neutralises spreadsheet
-  formula-injection (`=`/`+`/`-`/`@` cell prefixes) and escapes cell data before
-  it reaches SVG.
-- **Per-file ACLs** (`backend/fileacl/`) gate read/write/admin on the server
-  collab + persistence paths when multi-user auth is enabled.
-
-See [SECURITY.md](SECURITY.md), [THREAT-MODEL.md](THREAT-MODEL.md), and
-[SECURITY-TESTING.md](SECURITY-TESTING.md) for the full model.
-
----
-
-## Configuration
-
-Config is read from `config.yaml` (see the checked-in [`config.yaml`](config.yaml)) and selected environment variables. Sensible defaults mean **no configuration is required** to run standalone.
-
-### `config.yaml`
-
-```yaml
-server:
-  addr: ":8080"
-  data_dir: "./data"
-  uploads_dir: "./uploads"
-auth:
-  enabled: false          # set true to require login
-  password: "changeme"
-  session_hours: 24
-storage:
-  type: "local"           # "local" or "postgres"
-```
-
-### Environment variables
-
-| Variable | Purpose |
-|----------|---------|
-| `DEPLOY_MODE` | Typed deployment class: `standalone` (default when unset — fully sovereign self-host and the client-side demo/showcase) or `os` (Office behind a Vulos OS box gateway; storage via scoped `X-Vulos-Storage-*` headers). Read once at boot and validated for coherent config. Apps run on the user's OS box or standalone — never multi-tenant cloud-hosted. In `os` mode the process **refuses to start** unless an authenticated identity posture is configured (auth enabled or SSO introspection), closing the silent hosted fail-open. |
-| `VULOS_STORAGE_BROKER_SECRET` | Shared secret gating the OS-mode scoped-storage header seam (`DEPLOY_MODE=os`), so Office never holds full-bucket credentials. |
-| `DATABASE_URL` | **Postgres backend** — full `postgres://…` connection URL. When set, selects Postgres as the document storage backend (schema `office`) and overrides `config.yaml storage.type`. Alias: `VULOS_DATABASE_URL` (checked second). Unset = embedded JSON-file default. |
-| `VULOS_DATABASE_URL` | Alias for `DATABASE_URL` (checked if `DATABASE_URL` is unset). |
-| `VULOS_OFFICE_JWT_SECRET` | HS256 secret for session JWTs — **required when auth is enabled** |
-| `VULOS_OFFICE_DEV` | `1` uses a labelled insecure dev secret — local development only |
-| `VULOS_OFFICE_CORS_ORIGINS` | Comma-separated allowed CORS origins |
-| `VULOS_USERAUTH_DB` | Override the credential SQLite store path |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Enable OpenTelemetry trace export |
-| `VULOS_CP_BASE_URL` | **Opt-in** external control-plane URL (enables the optional identity/entitlements seam) |
-| `VULOS_CP_TOKEN` | Outbound service token for the control plane. Also the shared secret Office presents to the identity provider for SSO session introspection (== the provider's `CP_SHARED_SECRET`). **Not a signing key** — Office never signs sessions. |
-| `IDENTITY_URL` | **Opt-in** identity provider base URL for **SSO session introspection** (the sovereign box in self-host, or a central control plane in a managed deployment). When SET, Office validates the browser's `vc_session` cookie by calling `POST {IDENTITY_URL}/api/session/introspect` (fail-closed). When **UNSET** (self-host single-user appliance), the SSO path is disabled and the existing local single-identity behavior is unchanged. |
-| `VULOS_ORG_ID` | Tenant / org scoping (used by the optional integration adapter and storage) |
-
-#### Postgres backend setup (Neon / shared database)
-
-Vulos Office uses the dedicated schema `office` inside the database, so it co-exists cleanly with anything else sharing the same Postgres project without table-name collisions:
-
-```bash
-# Neon / shared Postgres (DATABASE_URL takes precedence over config.yaml)
-export DATABASE_URL="postgres://user:pass@ep-cool-term.us-east-2.aws.neon.tech/neondb?sslmode=require"
-./vulos-office
-
-# Run migrations first (idempotent, safe to re-run after upgrades)
-./vulos-office migrate up
-```
-
-The binary creates the `office` schema and all tables automatically on first boot. `migrate up` makes this explicit and can be run out-of-band before a rolling restart.
-
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete reference.
-
----
-
-## Self-hosting
-
-Vulos Office is **built to be self-hosted by you**, not rented from anyone. The standalone path is the default and requires no cloud, no account, and no external service:
-
-- **Identity** is local — every request is the `self` account in single-user mode; flip on multi-user auth with a JWT secret.
-- **Entitlements** are unlimited (`tier: self-hosted`) — no metering, no quotas, all features on.
-- **Storage** is local files + SQLite under `./data` and `./uploads`.
-
-Full standalone instructions, the seam contract, and the optional multi-user integration are in **[SELFHOST.md](SELFHOST.md)**. Deployment notes (Docker, single-box co-location) live in [docs/DEPLOY.md](docs/DEPLOY.md) and [DEPLOY.md](DEPLOY.md).
-
-### Optional: external identity & entitlements seam
-
-Setting `VULOS_CP_BASE_URL` selects the `backend/integration/cloud` adapter, which implements the same `seam` interfaces against an external control plane for multi-user identity, entitlements, and usage metering. Entitlement fetches **fail open** on a transient outage. Leave it unset and Office is 100% standalone.
-
-### Optional: SSO session introspection (`IDENTITY_URL`)
-
-Office holds **no session-signing power**. In a multi-user deployment, a user's browser carries a `vc_session` cookie minted by a configurable **identity provider** — the sovereign box in self-host, or a central control plane in a managed deployment. Office only ever **verifies** that session by introspecting it:
-
-```
-POST {IDENTITY_URL}/api/session/introspect
-  X-Relay-Auth: <shared service secret == VULOS_CP_TOKEN>
-  { "session": "<vc_session cookie value>" }
-  → { "valid": true, "userId": "...", "tenantId": "<account id>", "expiresAt": 1720000000 }
-```
-
-- **`IDENTITY_URL` UNSET** (self-host single-user / appliance): the SSO path is **disabled**; behavior is byte-for-byte the existing local single-identity mode. This is the correct posture for a sovereign single-user box.
-- **`IDENTITY_URL` SET** (multi-user): a request bearing `vc_session` (and not already authed by the product-JWT or `vk_` paths) is introspected. On `{valid:true}` the request is scoped to the resolved **user + tenant** (`tenantId` = the account id everything is keyed by); on `{valid:false}` or any transport error → **401, fail-closed**. Office never falls open to a shared identity when `IDENTITY_URL` is configured.
-
-The shared secret is the **existing service-auth secret** (`VULOS_CP_TOKEN`, equal to the provider's `CP_SHARED_SECRET`) — **not a signing key**. Introspection results are cached in-process for a short TTL (~45s, further bounded by the session's own `expiresAt`) so this is not a round-trip per request. This SSO path is **additive**: the per-product JWT (`VULOS_OFFICE_JWT_SECRET`), the `vk_` API-key path, and the CP `X-Relay-Auth` introspection paths all still work.
+Real-time collaboration is **CRDT-based and always peer-to-peer**: Docs and
+whiteboards sync as Yjs updates, Sheets and Slides use LWW/tree CRDTs, all inside
+an end-to-end-encrypted room whose key never reaches any server. The only server
+role is **content-blind peer discovery** — it learns *that* peers share a random
+room id, never any content. See [docs/COLLABORATION.md](docs/COLLABORATION.md)
+and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
 ## Documentation
 
+Full documentation lives in **[`docs/`](docs/)**.
+
 | Document | Description |
 |----------|-------------|
-| [SELFHOST.md](SELFHOST.md) | Run fully standalone; the optional identity/entitlements seam |
-| [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | Full setup walkthrough |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component map and design decisions |
-| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Env vars, `config.yaml`, OTEL / SMTP reference |
-| [docs/DEPLOY.md](docs/DEPLOY.md) | Self-hosting, Docker, single-box co-location |
-| [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) | Regenerating the screenshot gallery |
-| [ROADMAP.md](ROADMAP.md) · [CHANGELOG.md](CHANGELOG.md) | Plans and version history |
+| [Getting started](docs/GETTING-STARTED.md) | Run it locally, in Docker, or in production |
+| [Self-hosting](SELFHOST.md) | Run fully standalone; the optional identity/entitlements seam |
+| [Collaboration](docs/COLLABORATION.md) | How real-time P2P CRDT editing works, end to end |
+| [Architecture](docs/ARCHITECTURE.md) | Component map and design decisions |
+| [Configuration](docs/CONFIGURATION.md) | Env vars, `config.yaml`, storage, OTEL reference |
+| [API](docs/API.md) | REST API — files, versions, collab, signing |
+| [Admin guide](docs/ADMIN-GUIDE.md) | Deploy, back up, and operate the server |
+| [Deploy](docs/DEPLOY.md) | Docker, single-box co-location, static CDN |
+| [Testing](docs/TESTING.md) | Vitest unit + RTL/MSW integration, Playwright E2E |
+| [Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md) | Plans and version history |
 
 ---
 
@@ -341,52 +198,47 @@ The shared secret is the **existing service-auth secret** (`VULOS_CP_TOKEN`, equ
 
 ```bash
 npm run dev:web        # Vite (:5173) + Go API (:8080)
-npm test               # frontend unit + RTL/MSW integration tests (Vitest)
-npm run test:e2e       # browser E2E (Playwright, builds + serves vite preview)
+npm test               # unit + RTL/MSW integration tests (Vitest)
+npm run test:e2e       # browser E2E (Playwright)
 npm run build          # frontend dist/ + Go binary
-npm run build:all      # all sub-targets (office) + library
-npm run build:lib      # @vulos/office-client library only
-npm run screenshots    # regenerate the docs/screenshots gallery (seeded demo data)
+npm run screenshots    # regenerate the docs/screenshots gallery
 
-# Backend
-go build ./...
-go test ./...
-go vet ./...
+go build ./...  &&  go test ./...  &&  go vet ./...
 ```
 
-**Frontend test layers** (see [docs/TESTING.md](docs/TESTING.md)):
-
-- **Vitest** (`npm test`) — unit tests plus RTL + MSW *integration* tests that
-  mount real editor component trees (real TipTap, real panels, real API client)
-  against a mocked `/api`. Runs headless in jsdom; no browser needed.
-- **Playwright** (`npm run test:e2e`) — browser-level E2E against a production
-  `vite preview` build with the whole backend mocked in-browser via
-  `page.route`. First run: `npx playwright install --with-deps chromium`.
-
-> **Frozen invariants:** pure Go (no CGO), JSX only (never `.tsx`), no Google SSO, no Stripe. See [CONTRIBUTING.md](CONTRIBUTING.md).
+> **Frozen invariants:** pure Go (no CGO), JSX only (never `.tsx`), no third-party
+> SSO or payment lock-in in the standalone build. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
 ## Security
 
-Found a vulnerability? Please report it responsibly — see **[SECURITY.md](SECURITY.md)** for scope, the disclosure process, and our response SLA. Do not open public issues for security reports.
+Ofisi centralises HTML sanitisation in one audited DOMPurify policy, treats CRDT
+ingress as fail-closed, gates read-only collaborators cryptographically, and
+enforces per-file ACLs when multi-user auth is on. Found a vulnerability? Please
+report it **privately** — see [SECURITY.md](SECURITY.md), [THREAT-MODEL.md](THREAT-MODEL.md),
+and [SECURITY-TESTING.md](SECURITY-TESTING.md). Do not open public issues for
+security reports.
 
 ---
 
 ## Contributing
 
-Pull requests are welcome — bug fixes, signing robustness, accessibility, tests, and docs especially. For major changes, open an issue first. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup, code style, and the frozen invariants. No CLA required.
+Pull requests are welcome — bug fixes, signing robustness, accessibility, tests,
+and docs especially. For major changes, open an issue first. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, and the frozen
+invariants. No CLA required.
 
 ---
 
 ## License
 
-[MIT](LICENSE) — free to use, modify, and distribute.
+[MIT](LICENSE) — free to use, modify, and distribute. Ofisi is yours.
 
 ---
 
 <div align="center">
 
-<sub><img src="docs/assets/vulos-logo.png" height="16" alt="VulOS"> · <strong>Built with purpose. Open by design.</strong></sub>
+<sub><strong>Ofisi</strong> · A real, self-hostable collaborative office suite you own. · Open by design.</sub>
 
 </div>

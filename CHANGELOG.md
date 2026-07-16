@@ -1,20 +1,20 @@
 # Changelog
 
-All notable changes to Vulos Office are documented here.  
+All notable changes to Ofisi are documented here.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).  
-Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Ofisi uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
 ## [Unreleased]
 
-### Added — Whiteboards, a new Office document type (Board folded into Office)
+### Added — Whiteboards, a new Ofisi document type (Board folded into Ofisi)
 
-- **Vulos Board is now a first-class Office document type.** The Excalidraw-based
+- **Vulos Board is now a first-class Ofisi document type.** The Excalidraw-based
   collaborative whiteboard (formerly the separate `@vulos/board-ui` library) is
   brought in as a `whiteboard` file type alongside doc/sheet/slide/PDF —
   "**New → Whiteboard**" from the launcher, the app rail, and the file browser.
-- **It rides Office's OWN distributed peer-to-peer collab engine** — the exact
+- **It rides Ofisi's OWN distributed peer-to-peer collab engine** — the exact
   same `YP2PCollabSession` + `FabricClient` transport, E2E-encrypted room,
   content-blind signalling (`/api/peering/*`) and TURN-only-on-hard-NAT fallback
   that Docs uses. There is **no** central whiteboard/collab server and **no**
@@ -33,7 +33,7 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed — Collaboration is now ALWAYS peer-to-peer (no central document server)
 
-- **Removed the server-mediated collaboration path entirely.** Office's
+- **Removed the server-mediated collaboration path entirely.** Ofisi's
   differentiator is that co-editing is genuinely distributed peer-to-peer —
   unlike Collabora/OnlyOffice, which route every edit through a central document
   server. The codebase had grown a parallel **server-mediated** collab path (an
@@ -83,7 +83,7 @@ Vulos Office uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   annotate → export pipeline. The risky geometry (PDF↔screen coordinate mapping,
   Y-flip, scale) lives in a pure, unit-tested `formFields.js` module.
 
-### Added — Office interop (import + export fidelity)
+### Added — Ofisi interop (import + export fidelity)
 
 - **Unified Open flow**: drag-and-drop + file-picker on every app home detects the
   format (.docx/.xlsx/.pptx/.odt/.ods/.odp/.md/.txt/.html/.csv/.pdf) and routes to
@@ -244,7 +244,7 @@ sanitiser ingress paths.
 
 ### Added — Standalone, server-honest Settings + admin surface
 
-A self-hoster running Vulos Office standalone now gets a Settings surface that
+A self-hoster running Ofisi standalone now gets a Settings surface that
 reports what the instance is **actually** doing, instead of hardcoded placeholders.
 
 - **New endpoint** `GET /api/system/info` — honest runtime facts: build version,
@@ -270,7 +270,7 @@ reports what the instance is **actually** doing, instead of hardcoded placeholde
 
 ### Changed — Calendar + Contacts moved to the mail connector
 
-Vulos Office is now **documents-only** (Docs, Sheets, Slides, PDF/Signing). Calendar
+Ofisi is now **documents-only** (Docs, Sheets, Slides, PDF/Signing). Calendar
 and Contacts were redundant with the canonical PIM surfaces now served by the **mail
 connector** (lilmail CalDAV/CardDAV + `/v1/calendar` + `/v1/contacts` +
 `@vulos/mail-ui`), so they have been removed from this repo. This
@@ -295,13 +295,13 @@ mirrors the earlier Meet/Talk extractions.
 > `vulos-calendar` / `vulos-contacts` tiles and the Workspace registry to the Mail
 > product's Calendar/Contacts surfaces.
 
-### Changed — Office is now documents-only
+### Changed — Ofisi is now documents-only
 
-Vulos Office is now scoped to **documents only** (Docs, Sheets, Slides, PDF/Signing).
+Ofisi is now scoped to **documents only** (Docs, Sheets, Slides, PDF/Signing).
 Real-time chat + Spaces and video calling/meetings have been
-split into their own products, combined with Office by the **Vulos Workspace** shell:
+split into their own products, combined with Ofisi by the **Vulos Workspace** shell:
 
-- **Vulos Meet → `vulos-meet`**: the standalone video product. Office's meeting/lobby/
+- **Vulos Meet → `vulos-meet`**: the standalone video product. Ofisi's meeting/lobby/
   TURN/recording surface and the `/meet/*` routes were removed from this repo.
 - **Vulos Talk → `vulos-talk`**: team chat + Spaces (channels, DMs, threads, reactions,
   pins, presence). The `/spaces/*` routes, message CRDT store, and chat UI were removed.
@@ -320,7 +320,7 @@ split into their own products, combined with Office by the **Vulos Workspace** s
   THREAT-MODEL, the design system, and the deploy/seed/screenshot scripts; deleted the
   Meet recording design note and the Spaces/Meetings demo seeding + screenshots.
 
-Office's sidebar keeps an **external** launcher link to Talk (`talk.vulos.org`) — a
+Ofisi's sidebar keeps an **external** launcher link to Talk (`talk.vulos.org`) — a
 cross-product link, not an in-process surface.
 
 ### Added (Google-parity Wave H — Sheets/Slides/Docs polish)
@@ -559,5 +559,5 @@ cross-product link, not an in-process surface.
 
 ---
 
-[Unreleased]: https://github.com/vul-os/vulos-office/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/vul-os/vulos-office/releases/tag/v0.1.0
+[Unreleased]: https://github.com/vul-os/ofisi/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/vul-os/ofisi/releases/tag/v0.1.0

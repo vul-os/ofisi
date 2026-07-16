@@ -1,6 +1,6 @@
-# Vulos Office — Getting Started
+# Ofisi — Getting Started
 
-This guide walks you through running Vulos Office for the first time, whether you want a quick local development environment or a production deployment.
+This guide walks you through running Ofisi for the first time, whether you want a quick local development environment or a production deployment.
 
 ---
 
@@ -20,7 +20,7 @@ This guide walks you through running Vulos Office for the first time, whether yo
 The dev server runs Vite (frontend, hot-reload) and the Go API side by side:
 
 ```bash
-git clone https://github.com/vul-os/vulos-office.git
+git clone https://github.com/vul-os/ofisi.git
 cd vulos-office
 
 npm install
@@ -61,7 +61,7 @@ docker run -d \
   -p 8080:8080 \
   -v office-data:/srv/data \
   -v office-uploads:/srv/uploads \
-  ghcr.io/vul-os/vulos-office:latest
+  ghcr.io/vul-os/ofisi:latest
 ```
 
 The image runs the server from `/srv` (see the Dockerfile), so mount `/srv/data` (SQLite stores + the JSON file/document store) and `/srv/uploads` (uploaded file staging) for persistence — both are declared `VOLUME`s in the image. Pass `-e VULOS_OFFICE_JWT_SECRET=<secret>` when enabling auth.
@@ -124,8 +124,8 @@ For the full environment variable and observability reference see [CONFIGURATION
 2. Click **New** to create a document, sheet, or presentation.
 3. Open a PDF to view, annotate, or set up signing.
 
-> Calendar and Contacts are no longer part of Office — they come through the mail
-> connector (CalDAV/CardDAV via lilmail). The Office sidebar deep-links to that surface.
+> Calendar and Contacts are no longer part of Ofisi — they come through the mail
+> connector (CalDAV/CardDAV via lilmail). The Ofisi sidebar deep-links to that surface.
 
 ---
 

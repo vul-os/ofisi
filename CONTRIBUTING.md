@@ -1,4 +1,4 @@
-# Contributing to Vulos Office
+# Contributing to Ofisi
 
 ## Code of Conduct
 
@@ -75,4 +75,4 @@ Look for `good first issue` or `help wanted` labels. UI polish, accessibility, a
 
 ## Licensing
 
-Vulos Office is MIT-licensed. Contributions inherit MIT. No CLA required.
+Ofisi is MIT-licensed. Contributions inherit MIT. No CLA required.

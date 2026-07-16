@@ -1,6 +1,6 @@
-# Vulos Office — Admin Guide
+# Ofisi — Admin Guide
 
-This chapter is for the person who runs Vulos Office: deploying it (bare binary, Docker, Fly.io, or as part of a Vulos OS bundle), configuring it (`config.yaml` + environment variables), understanding where documents actually live on disk, enabling multi-user auth, integrating with the Vulos OS, and backing it all up. Vulos Office is a **single Go binary with the entire web app embedded** — the default deployment is one process, one port (`:8080`), one data directory, no external dependencies. Every endpoint and variable named here exists in the code of this repository.
+This chapter is for the person who runs Ofisi: deploying it (bare binary, Docker, Fly.io, or as part of a Vulos OS bundle), configuring it (`config.yaml` + environment variables), understanding where documents actually live on disk, enabling multi-user auth, integrating with the Vulos OS, and backing it all up. Ofisi is a **single Go binary with the entire web app embedded** — the default deployment is one process, one port (`:8080`), one data directory, no external dependencies. Every endpoint and variable named here exists in the code of this repository.
 
 ---
 
@@ -37,7 +37,7 @@ docker run -d \
   --name vulos-office \
   -p 8080:8080 \
   -v office-data:/srv/data \
-  ghcr.io/vul-os/vulos-office:latest
+  ghcr.io/vul-os/ofisi:latest
 ```
 
 Image facts (from the `Dockerfile`):
@@ -49,7 +49,7 @@ Image facts (from the `Dockerfile`):
 **Building the image yourself** requires a *parent* build context: `package.json` has a `file:` dependency on `../vulos-relay/client`. From the directory that contains both repos:
 
 ```bash
-docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/vulos-office:latest .
+docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/ofisi:latest .
 ```
 
 A plain `docker build .` from inside `vulos-office/` will fail — the sibling repos aren't reachable.
@@ -59,16 +59,16 @@ A plain `docker build .` from inside `vulos-office/` will fail — the sibling r
 `fly.toml` is checked in. Because Fly's build context is the config file's directory (which breaks the sibling-repo requirement), build and push the image out-of-band, then deploy by image reference:
 
 ```bash
-docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/vulos-office:latest .
-docker push ghcr.io/vul-os/vulos-office:latest
-fly deploy -c vulos-office/fly.toml --image ghcr.io/vul-os/vulos-office:latest
+docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/ofisi:latest .
+docker push ghcr.io/vul-os/ofisi:latest
+fly deploy -c vulos-office/fly.toml --image ghcr.io/vul-os/ofisi:latest
 ```
 
 The config mounts a volume `office_data` at `/srv/data`, checks `/healthz`, forces HTTPS, and documents setting `DATABASE_URL` / `IDENTITY_URL` / `VULOS_CP_TOKEN` as Fly secrets.
 
 ### 1.4 Vulos OS bundle
 
-For a full sovereign box (OS + Mail + Office sharing one identity and storage fabric), use the bundle installer described in [INSTALL.md](INSTALL.md) / [GETTING-STARTED.md](GETTING-STARTED.md). The bundle also provides the `/api/peering/*` fabric endpoints that light up low-latency P2P collaboration and cross-app presence — a standalone Office binary does not serve those itself (see [COLLABORATION.md](COLLABORATION.md) §4).
+For a full sovereign box (OS + Mail + Ofisi sharing one identity and storage fabric), use the bundle installer described in [INSTALL.md](INSTALL.md) / [GETTING-STARTED.md](GETTING-STARTED.md). The bundle also provides the `/api/peering/*` fabric endpoints that light up low-latency P2P collaboration and cross-app presence — a standalone Ofisi binary does not serve those itself (see [COLLABORATION.md](COLLABORATION.md) §4).
 
 ---
 
@@ -126,7 +126,7 @@ SSO / cloud seams (all optional; unset = fully standalone):
 
 | Variable | Purpose |
 |----------|---------|
-| `IDENTITY_URL` | Identity provider base URL. When set, Office validates the browser's `vc_session` cookie via `POST {IDENTITY_URL}/api/session/introspect`, **fail-closed** (401 on invalid/unreachable). Unset ⇒ SSO path disabled. |
+| `IDENTITY_URL` | Identity provider base URL. When set, Ofisi validates the browser's `vc_session` cookie via `POST {IDENTITY_URL}/api/session/introspect`, **fail-closed** (401 on invalid/unreachable). Unset ⇒ SSO path disabled. |
 | `VULOS_CP_BASE_URL` | vulos-cloud control-plane URL. Enables the cloud entitlements/usage adapter and the `vk_` API-key introspection path for `/v1`. Unset ⇒ none of that code runs. |
 | `VULOS_CP_TOKEN` | Service token presented as `X-Relay-Auth` to the CP / identity provider. Not a signing key. |
 | `VULOS_ORG_ID` | Tenant/org scoping used by the cloud adapter and storage. |
@@ -137,7 +137,7 @@ Observability: `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` (default `vulo
 
 SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`) — only relevant for outbound notification mail in standalone setups.
 
-Auth precedence per request: `vk_` API key → Office session JWT → SSO `vc_session` introspection → 401. Introspection results are cached in-process ~45 s.
+Auth precedence per request: `vk_` API key → Ofisi session JWT → SSO `vc_session` introspection → 401. Introspection results are cached in-process ~45 s.
 
 ---
 
@@ -162,7 +162,7 @@ Every id used to build a path is validated against a strict pattern (letters/dig
 
 ### 3.2 Postgres (multi-user / cloud)
 
-Set `DATABASE_URL` (or `storage.type: postgres`). Office uses the dedicated schema **`office`** inside the database, so it co-exists with other Vulos products in one shared Postgres/Neon project. Tables are created automatically on first boot; `./vulos-office migrate up` applies the same migrations explicitly (idempotent — run it before a rolling restart after upgrades), and `migrate status` lists present tables. File ACLs move into Postgres too (`backend/storage/fileacl_postgres.go`).
+Set `DATABASE_URL` (or `storage.type: postgres`). Ofisi uses the dedicated schema **`office`** inside the database, so it co-exists with other Vulos products in one shared Postgres/Neon project. Tables are created automatically on first boot; `./vulos-office migrate up` applies the same migrations explicitly (idempotent — run it before a rolling restart after upgrades), and `migrate status` lists present tables. File ACLs move into Postgres too (`backend/storage/fileacl_postgres.go`).
 
 ### 3.3 Object storage (optional)
 
@@ -189,15 +189,15 @@ Related behavior to be aware of:
 ## 5. Integration into the Vulos OS
 
 - **Embedding**: every editor surface ships as the npm library `@vulos/office-client` with entries `…/docs`, `…/sheets`, `…/slides`, `…/pdf` — the Vulos OS (or your own app) mounts them as native panels. Built by `vite.config.lib.js` into `dist-lib/`.
-- **Identity**: on a Vulos box or cloud cell, set `IDENTITY_URL` so Office introspects the shared `vc_session` cookie — Office deliberately holds no session-signing power in that mode.
-- **Peering fabric**: the OS/Relay host provides `/api/peering/stream` (WebSocket signaling) and `/api/peering/ice`; Office's collab code discovers them same-origin and lights up P2P collaboration + presence automatically. Without them it degrades gracefully.
+- **Identity**: on a Vulos box or cloud cell, set `IDENTITY_URL` so Ofisi introspects the shared `vc_session` cookie — Ofisi deliberately holds no session-signing power in that mode.
+- **Peering fabric**: the OS/Relay host provides `/api/peering/stream` (WebSocket signaling) and `/api/peering/ice`; Ofisi's collab code discovers them same-origin and lights up P2P collaboration + presence automatically. Without them it degrades gracefully.
 - **Control plane** (managed/multi-tenant): `VULOS_CP_BASE_URL` + `VULOS_CP_TOKEN` + `VULOS_ORG_ID` enable entitlements (`GET {CP}/api/entitlements`, fails open on transient CP outage), usage metering (fire-and-forget `POST {CP}/api/usage`), and `vk_` API-key introspection for `/v1` (fail-closed `503` if the CP is unreachable during key validation). See [SELFHOST.md](../SELFHOST.md) for the full seam contract.
 
 ---
 
 ## 6. Running behind a reverse proxy
 
-Office serves the app + API on one port, so proxying is one location block. Note: Office itself hosts **no** long-lived collaboration stream — collaboration is peer-to-peer with no central document server (see [COLLABORATION.md](COLLABORATION.md)). One path needs care, and only on a Vulos OS/Relay host:
+Ofisi serves the app + API on one port, so proxying is one location block. Note: Ofisi itself hosts **no** long-lived collaboration stream — collaboration is peer-to-peer with no central document server (see [COLLABORATION.md](COLLABORATION.md)). One path needs care, and only on a Vulos OS/Relay host:
 
 - **WebSocket** (`/api/peering/stream`): the content-blind peer-discovery signaling channel. It only exists when a Vulos OS/Relay host provides the peering fabric; if you proxy such a deployment, `Upgrade`/`Connection` headers must be forwarded and read timeouts kept long, or peers fail to discover each other (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) §3).
 
@@ -223,7 +223,7 @@ Also remember the per-IP write rate limit (burst 30, refill 10/s): if the proxy 
 
 - [ ] `auth.enabled: true` + strong `VULOS_OFFICE_JWT_SECRET` (32+ random bytes); never `VULOS_OFFICE_DEV=1` in production.
 - [ ] TLS in front (reverse proxy or Fly `force_https`); session cookies are HttpOnly, but the transport is on you.
-- [ ] `VULOS_OFFICE_CORS_ORIGINS` set to your exact origins if anything embeds Office or calls it cross-origin.
+- [ ] `VULOS_OFFICE_CORS_ORIGINS` set to your exact origins if anything embeds Ofisi or calls it cross-origin.
 - [ ] First admin bootstrapped, then registration only via **invites** (avoid leaving a static `VULOS_OFFICE_REGISTRATION_TOKEN` around).
 - [ ] Keep the write rate-limit on (don't ship `--no-rate-limit-writes` to the internet).
 - [ ] Volumes for `data/` *and* `uploads/`; backups tested (see §9).

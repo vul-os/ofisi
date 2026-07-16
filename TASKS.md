@@ -1,6 +1,6 @@
-# Vulos Office — Task Backlog
+# Ofisi — Task Backlog
 
-> **Historical record.** Vulos Office is now the **documents-only** product. The
+> **Historical record.** Ofisi is now the **documents-only** product. The
 > Vulos Spaces (chat) and meetings/calling work described below is retained for
 > history only — Vulos no longer builds comms (chat/video are third-party:
 > Matrix/Element, Element Call / Jitsi). Likewise, entries below that reference the
@@ -9,7 +9,7 @@
 > mailbox connector (`lilmail`) surfaced by the OS. See ROADMAP.md and CHANGELOG.md
 > for the current scope.
 
-**Status: 39 / 40 tasks done (98%).** Office Core, Real-time Collaboration (CRDT +
+**Status: 39 / 40 tasks done (98%).** Ofisi Core, Real-time Collaboration (CRDT +
 fabric), PDF Auto-Sign, and Vulos Spaces (channels, calls, screen-share, meetings) are
 all shipped. Wave C (2026-05-24) adds the shared `@vulos/relay-client` migration
 (RELAY-CLIENT-02) and the Spaces UI ship-ready polish — captions panel, recording
@@ -37,7 +37,7 @@ links to /verify; api.js adds sealedPDFUrl / verifyEnvelope / signingPublicKey.
 **Remaining open:** Multi-target subdomain + OS-embed lib build (P2 · L — owned by subdomain agent).
 
 Actionable work for autonomous coding agents, grouped by area and
-**priority-ordered**. Vulos Office is the productivity surface of the Vulos
+**priority-ordered**. Ofisi is the productivity surface of the Vulos
 project: Documents / Sheets / Slides / PDF today, growing into a networked office
 (real-time collaboration, e-signature, and a chat+meetings pillar) that rides the
 **Vulos peer fabric** — the same CRDT-bucket + WebRTC + relay/TURN transport the
@@ -69,7 +69,7 @@ AC: [ ] verifiable outcome [ ] … [ ] go build ./... && npm run build (or the s
 
 ---
 
-## Area: Office Core
+## Area: Ofisi Core
 
 _Roadmap: [`ROADMAP.md` § 1](ROADMAP.md)_ · _Prefix: `OFFICE-`_
 
@@ -264,7 +264,7 @@ AC: [ ] create/join channel, post + thread-reply [ ] DMs + group DMs work [ ] un
 
 ### [OFFICE-62] Presence + status for Vulos Spaces
 `done` · P2 · S · dep: OFFICE-61, OFFICE-24 · parallel: yes — src/lib/presence.js, src/apps/spaces/ChannelView.jsx
-Scope: Extend the presence primitive with custom status (online/away/in-a-call + free-text), shown next to members in Vulos Spaces and reused by Office editors. In-a-call state is set by the calling layer (OFFICE-63). JSX only.
+Scope: Extend the presence primitive with custom status (online/away/in-a-call + free-text), shown next to members in Vulos Spaces and reused by Ofisi editors. In-a-call state is set by the calling layer (OFFICE-63). JSX only.
 AC: [ ] status changes propagate live to other peers [ ] in-a-call status reflects active calls [ ] presence reused in editors + spaces [ ] npm run build
 Note (2026-06-15): Fabric-null stub replaced with working REST/poll presence. Backend:
 POST /api/spaces/presence/heartbeat + GET /api/spaces/presence/roster (35s TTL, 15s poll interval).
@@ -318,7 +318,7 @@ _Spec: [`ROADMAP.md §Storage backend & co-location`](ROADMAP.md)_  ·  _Prefix:
 _Cross-repo: [`vulos`](https://github.com/vul-os/vulos) (BUNDLE-01) · [`vulos-cloud`](https://github.com/vul-os/vulos-cloud) (CP-STORE-01)_
 
 > Implementation tasks for storage-backend config injection and co-location documentation.
-> Office bundled Starter+ is an existing decision (see §Bundling decision in ROADMAP.md).
+> Ofisi bundled Starter+ is an existing decision (see §Bundling decision in ROADMAP.md).
 
 ### [OFFICE-STORE-01] Storage-backend config injection: accept Tigris or MinIO endpoint
 `done` · P1 · S · dep: OFFICE-06 · parallel: yes — backend/storage/backendconfig.go (OfficeBackendConfig + NewOfficeS3Client; pure-Go SigV4; tigris|minio, env-fill for Tigris, explicit for MinIO)
@@ -344,8 +344,8 @@ AC: [x] `docs/INSTALL.md` covers co-location with OS + mail [x] shared storage c
 _Spec: [`ROADMAP.md §Bundling decision`](ROADMAP.md)_  ·  _Prefix: `OFFICE-BYO-*`_
 _Cross-repo: [`vulos-cloud`](https://github.com/vul-os/vulos-cloud) · [`vulos-mail`](https://github.com/vul-os/vulos-mail)_
 
-> Office is bundled from Starter and up. These tasks ensure the bundling is surfaced correctly in
-> the product and that BYO Mail customers at Starter+ tier get Office access without extra steps.
+> Ofisi is bundled from Starter and up. These tasks ensure the bundling is surfaced correctly in
+> the product and that BYO Mail customers at Starter+ tier get Ofisi access without extra steps.
 
 ### [OFFICE-BYO-01] OS installer hook: install vulos-office alongside vulos-mail for Starter+
 `in-progress` · P2 · M · dep: none · parallel: yes — docs/INSTALL.md (new or update)
@@ -355,24 +355,24 @@ service alongside vulos-mail. No code change to vulos-office itself — this is 
 script integration task. Coordinate with the vulos-mail MAIL-BYO-04 bash installer.
 AC: [ ] INSTALL.md documents vulos-office install alongside vulos-mail for Starter+ [ ] install hook point documented for OS wizard team [ ] no .go or .jsx changes [ ] npm run build passes unmodified
 
-### [OFFICE-BYO-02] Pricing copy verification: Office bundled from Starter
+### [OFFICE-BYO-02] Pricing copy verification: Ofisi bundled from Starter
 `in-progress` · P3 · S · dep: none · parallel: yes — (doc only)
 Scope: Verify that all user-facing copy in vulos-office README.md, ROADMAP.md, and any marketing
-copy in `docs/` correctly reflects that Office is bundled from Starter and up — no standalone
-Office tier exists. Fix any copy that implies a standalone Office tier.
-AC: [ ] README.md mentions bundling from Starter [ ] ROADMAP.md §Bundling decision present [ ] no copy implies standalone Office tier [ ] npm run build passes unmodified
+copy in `docs/` correctly reflects that Ofisi is bundled from Starter and up — no standalone
+Ofisi tier exists. Fix any copy that implies a standalone Ofisi tier.
+AC: [ ] README.md mentions bundling from Starter [ ] ROADMAP.md §Bundling decision present [ ] no copy implies standalone Ofisi tier [ ] npm run build passes unmodified
 
 ---
 
 ## Area: Offline-first + local-first sync (v6 — 2026-05-24)
 
-### [OFFICE-OFFLINE-01] Office offline-first PWA hardening + LAN-endpoint failover
+### [OFFICE-OFFLINE-01] Ofisi offline-first PWA hardening + LAN-endpoint failover
 `done` · P2 · M · dep: none · parallel: yes — src/lib/, src/sw.js (new)
-Scope: Office is already local-first CRDT; add service-worker app-shell caching + LAN-endpoint failover
+Scope: Ofisi is already local-first CRDT; add service-worker app-shell caching + LAN-endpoint failover
 (consistent with the OS OFFLINE-02 contract in `vulos`) so the suite loads + edits offline on the box's LAN.
 AC: [x] app shell loads offline [x] CRDT edits work offline + sync on reconnect [x] LAN-endpoint failover [x] npm run build
 
-### [OFFICE-SYNC-01] Office CRDT sync via rendezvous + fabric-P2P (local-MinIO mode)
+### [OFFICE-SYNC-01] Ofisi CRDT sync via rendezvous + fabric-P2P (local-MinIO mode)
 `done` · P2 · M · dep: OFFICE-STORE-01 · parallel: yes — backend/storage/, backend/crdt/
 Scope: In `local-minio-sync` mode, office syncs its CRDT docs + blobs via the central Tigris rendezvous
 (SYNC-RENDEZVOUS-01 in vulos-cloud) and fast-follow fabric-P2P (SYNC-P2P-01 in vulos-relay), converging

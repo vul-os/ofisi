@@ -1,4 +1,4 @@
-# Frontend testing — Vulos Office
+# Frontend testing — Ofisi
 
 Two complementary layers cover the React app. Both are hermetic (no Go backend,
 no relay): the API surface is mocked.

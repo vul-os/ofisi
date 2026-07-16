@@ -1,4 +1,4 @@
-# Vulos Office — Screenshots
+# Ofisi — Screenshots
 
 This document describes the screenshot gallery, how screenshots are captured, and the seed data used to produce populated views.
 
@@ -48,8 +48,8 @@ Demo data is committed in `scripts/seed-demo.mjs` and never touches `./data` —
 |---------|-------------|
 | **Docs** | "Q2 2026 Product Update" — headings, prose, bullet lists, table; "ADR-014: Sync Layer" — decision record |
 | **Sheets** | "Revenue Tracker H1 2026" — 6 months × 5 columns, SUM + margin formulas, 2 sheets |
-| **Slides** | "Vulos Office Product Overview" — 5 slides, Reveal.js obsidian theme |
-| **Whiteboards** | "Vulos Office — Architecture Sketch" — Excalidraw scene: labelled boxes + E2E/relay arrows |
+| **Slides** | "Ofisi Product Overview" — 5 slides, Reveal.js obsidian theme |
+| **Whiteboards** | "Ofisi — Architecture Sketch" — Excalidraw scene: labelled boxes + E2E/relay arrows |
 
 ---
 
@@ -73,7 +73,7 @@ Demo data is committed in `scripts/seed-demo.mjs` and never touches `./data` —
 
 ![Home](screenshots/home.png)
 
-The Vulos Office home screen showing the seeded file list (doc, sheet, slides), recent files, and navigation sidebar.
+The Ofisi home screen showing the seeded file list (doc, sheet, slides), recent files, and navigation sidebar.
 
 ### Docs Editor
 
@@ -91,13 +91,13 @@ The Spreadsheets editor (Fortune Sheet) with the "Revenue Tracker H1 2026" — 6
 
 ![Slides Editor](screenshots/slides-editor.png)
 
-The Presentations editor (Reveal.js) open on the 5-slide "Vulos Office Product Overview" deck with the obsidian dark theme.
+The Presentations editor (Reveal.js) open on the 5-slide "Ofisi Product Overview" deck with the obsidian dark theme.
 
 ### Whiteboard Editor
 
 ![Whiteboard Editor](screenshots/whiteboard-editor.png)
 
-The Whiteboard editor — the MIT [Excalidraw](https://github.com/excalidraw/excalidraw) canvas mounted on Office's own distributed peer-to-peer collab engine (the same Yjs/E2E-encrypted room Docs uses, no central whiteboard server). Shown open on the seeded "Architecture Sketch". Note the "Excalidraw · MIT" attribution in the top bar.
+The Whiteboard editor — the MIT [Excalidraw](https://github.com/excalidraw/excalidraw) canvas mounted on Ofisi's own distributed peer-to-peer collab engine (the same Yjs/E2E-encrypted room Docs uses, no central whiteboard server). Shown open on the seeded "Architecture Sketch". Note the "Excalidraw · MIT" attribution in the top bar.
 
 ### PDF Editor
 

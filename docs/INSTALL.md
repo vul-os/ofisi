@@ -1,4 +1,4 @@
-# Vulos Office — Install Guide
+# Ofisi — Install Guide
 
 This document covers how to install and run `vulos-office` either co-located
 with the Vulos OS (the recommended single-box deployment) or as a
@@ -44,7 +44,7 @@ See https://github.com/vul-os/vulos/blob/dev/docs/SELF-HOST-BUNDLE.md for the fu
 The OS-side storage-mode selector (`STORE-LOCAL-01`,
 `vulos/backend/internal/storagemode/`) writes a single shared env file
 (consumed by `vulos.service` and `vulos-office.service`)
-with the following variables. Office reads these at startup and passes them
+with the following variables. Ofisi reads these at startup and passes them
 into [`OfficeBackendConfig`](../backend/storage/backendconfig.go):
 
 | Variable                | Purpose                                                                 |
@@ -72,13 +72,13 @@ flowchart TD
     MinIO["[vulos-minio.service]<br/>(optional — local-MinIO mode only)"]
     Fabric["vulos-fabric.service<br/>(shared fabric identity init — oneshot)"]
     OS["vulos.service (OS backend, :8443)"]
-    Office["vulos-office.service (office backend, :8445)"]
+    Ofisi["vulos-office.service (office backend, :8445)"]
     Bundle["vulos-bundle.target"]
     Net --> MinIO
     MinIO --> Fabric
     Fabric --> OS
-    Fabric --> Office
-    Office --> Bundle
+    Fabric --> Ofisi
+    Ofisi --> Bundle
 ```
 
 The relevant ordering for office (from
@@ -94,7 +94,7 @@ Requires=vulos-fabric.service
 WantedBy=multi-user.target vulos-bundle.target
 ```
 
-Office is intentionally ordered **after** `vulos.service` and the fabric
+Ofisi is intentionally ordered **after** `vulos.service` and the fabric
 oneshot so the shared bucket creds + fabric identity are already in place
 before office tries to open the storage backend. The bundle target
 ([`scripts/vulos-bundle.target`](https://github.com/vul-os/vulos/blob/main/scripts/vulos-bundle.target))
@@ -142,7 +142,7 @@ client, err := storage.NewOfficeS3Client(cfg)
 ```
 
 Both backends use the same S3-compatible interface (pure-Go SigV4, no CGO).
-Office logs the resolved endpoint at startup.
+Ofisi logs the resolved endpoint at startup.
 
 For the runtime config file and Docker quick-start, see
 [`DEPLOY.md`](DEPLOY.md).

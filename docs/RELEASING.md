@@ -1,4 +1,4 @@
-# Vulos Office – Versioning & Release Policy
+# Ofisi – Versioning & Release Policy
 
 ## Versioning
 

@@ -1,6 +1,6 @@
-# Vulos Office — User Guide
+# Ofisi — User Guide
 
-Vulos Office is the documents product of VulOS: word-processor documents (**Docs**), spreadsheets (**Sheets**), presentations (**Slides**), infinite-canvas **Whiteboards** (built on Excalidraw), and PDF viewing/annotation/**Signing**, all served from a single self-hosted Go binary with the web app built in. This guide covers everyday use — creating and opening files, editing in each surface, collaborating live with other people, working offline, importing and exporting files, and keyboard shortcuts. If you run the server yourself, see the [Admin Guide](ADMIN-GUIDE.md); for how collaboration works under the hood, see [Collaboration](COLLABORATION.md).
+Ofisi is the documents product of VulOS: word-processor documents (**Docs**), spreadsheets (**Sheets**), presentations (**Slides**), infinite-canvas **Whiteboards** (built on Excalidraw), and PDF viewing/annotation/**Signing**, all served from a single self-hosted Go binary with the web app built in. This guide covers everyday use — creating and opening files, editing in each surface, collaborating live with other people, working offline, importing and exporting files, and keyboard shortcuts. If you run the server yourself, see the [Admin Guide](ADMIN-GUIDE.md); for how collaboration works under the hood, see [Collaboration](COLLABORATION.md).
 
 ---
 
@@ -11,7 +11,7 @@ Open the app in your browser (by default `http://localhost:8080`, or wherever yo
 - **Single-user mode** (the default): no login is required — you *are* the account. Everything below just works.
 - **Multi-user mode** (when the admin has enabled auth): you log in with your account and password, or via your Vulos single sign-on session if the instance is attached to one. New accounts are created with an **invite token** minted by an admin.
 
-Vulos Office is a **PWA** — your browser can install it as a desktop or mobile app (look for "Install app" in the browser menu). The app shell keeps loading even when the network is down (see [Offline behavior](#7-offline-behavior)).
+Ofisi is a **PWA** — your browser can install it as a desktop or mobile app (look for "Install app" in the browser menu). The app shell keeps loading even when the network is down (see [Offline behavior](#7-offline-behavior)).
 
 ---
 
@@ -34,7 +34,7 @@ New files are **private to you** by default — the creator is the owner.
 ### Opening existing files
 
 - Click any file on Home or a surface home page.
-- **Open** a file from your computer (file picker or drag-and-drop). Office detects the format by extension and routes it to the right editor — see [Import](#8-import--export) for the supported list.
+- **Open** a file from your computer (file picker or drag-and-drop). Ofisi detects the format by extension and routes it to the right editor — see [Import](#8-import--export) for the supported list.
 - **Shared with me** lists documents other accounts on the instance have shared with you.
 
 ### Folders, moving, and deleting
@@ -177,13 +177,13 @@ For Docs, **Collaborate via link** starts an end-to-end encrypted peer session:
 - Read-only peers see live edits but cannot make authoritative changes.
 - A tampered or malformed invite link simply fails to join — the editor stays in normal local mode.
 
-> Note: the peer-to-peer channel needs the Vulos peering fabric to be reachable (provided when Office runs inside a Vulos OS / Relay deployment). On a bare standalone server there is no peer rendezvous endpoint, so invite-link collaboration cannot connect peers — account-based live collaboration (6.1) is the path that always works.
+> Note: the peer-to-peer channel needs the Vulos peering fabric to be reachable (provided when Ofisi runs inside a Vulos OS / Relay deployment). On a bare standalone server there is no peer rendezvous endpoint, so invite-link collaboration cannot connect peers — account-based live collaboration (6.1) is the path that always works.
 
 ---
 
 ## 7. Offline behavior
 
-Office is deliberately resilient to bad networks:
+Ofisi is deliberately resilient to bad networks:
 
 - **App shell offline**: the service worker caches the application itself, so the app opens even with no network. API data is never cached — you see the app, and your locally cached work, not stale server state.
 - **Crash-safe drafts**: before every save to the server, the document is written to a local IndexedDB draft. If the browser crashes or you go offline mid-edit, the editor offers to **restore the pending draft** on reload. Drafts are cleared after a successful save.

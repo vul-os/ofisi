@@ -1,12 +1,12 @@
-# Vulos Office — How Collaboration Works
+# Ofisi — How Collaboration Works
 
-This chapter explains real-time collaboration in Vulos Office end to end: how documents merge concurrent edits (CRDTs), how edits travel **peer-to-peer** with no central document server, what is and is not encrypted, how rooms are gated, and what happens on conflicts. It is written for users who want to understand what they're trusting, and for admins who need to know what their server can and cannot see. Everything here describes the actual implementation in this repository.
+This chapter explains real-time collaboration in Ofisi end to end: how documents merge concurrent edits (CRDTs), how edits travel **peer-to-peer** with no central document server, what is and is not encrypted, how rooms are gated, and what happens on conflicts. It is written for users who want to understand what they're trusting, and for admins who need to know what their server can and cannot see. Everything here describes the actual implementation in this repository.
 
 ---
 
 ## 1. The one-minute model
 
-- Collaboration in Office is **always peer-to-peer**. There is **no central document server** — no server ever stores, relays, or reads your document's collaborative edits. This is the defining difference from server-mediated office suites (Collabora, OnlyOffice), where every keystroke passes through a document server.
+- Collaboration in Ofisi is **always peer-to-peer**. There is **no central document server** — no server ever stores, relays, or reads your document's collaborative edits. This is the defining difference from server-mediated office suites (Collabora, OnlyOffice), where every keystroke passes through a document server.
 - Every edit becomes a small **CRDT update**. CRDT updates are commutative and idempotent: peers can receive them in any order, more than once, over more than one channel, and still converge to the same document.
 - The document you see is always your **local** copy, hydrated from your own saved content. Collaboration never blocks typing: if no peer is reachable, you keep editing locally and your changes autosave to your own storage.
 - When you collaborate, edits ride an **end-to-end-encrypted peer-to-peer room**. Peers connect **directly** to each other over WebRTC; a relay is used only as a last-resort fallback for hard NATs, and even then it is **content-blind** (it moves ciphertext it cannot read).
@@ -36,7 +36,7 @@ All CRDT code lives in `src/lib/crdt/` (frontend).
 
 ## 3. The transport — direct peer-to-peer first, content-blind relay only as fallback
 
-Office uses a `FabricClient` from `@vulos/relay-client` to move CRDT updates between peers. Its connection strategy, in order:
+Ofisi uses a `FabricClient` from `@vulos/relay-client` to move CRDT updates between peers. Its connection strategy, in order:
 
 1. **Direct WebRTC data channel (the default).** For each peer, the client negotiates an `RTCPeerConnection` and opens a data channel. Once connected (`connectionState === 'connected'`), edits flow **directly browser-to-browser** — nothing in the middle. NAT traversal uses **ICE/STUN** servers the host provides.
 2. **Content-blind relay circuit (fallback only).** If the direct connection *fails* (symmetric NAT, restrictive firewall — the ~10–20 % of pairs that can't hole-punch), the client falls back to a relay circuit. Payloads on this path are sealed with a per-session X25519 box, so the relay **routes ciphertext it cannot read**. This fallback is the *only* time a relay is involved, and it still never sees plaintext.
@@ -46,7 +46,7 @@ The only always-needed server pieces are **lightweight, content-blind peer disco
 - Signaling (rendezvous): `wss://<host>/api/peering/stream` — exchanges WebRTC offer/answer/ICE candidates so two peers can find each other. It carries no document content.
 - ICE config: `GET /api/peering/ice` — returns the STUN/TURN servers to use for NAT traversal.
 
-**Important:** the standalone Office binary does **not** serve `/api/peering/*`. Those endpoints are provided by the **host** — a Vulos OS / Vulos Relay deployment. On a bare standalone server with no host fabric, peers cannot discover each other, so collaboration stays **local-only** (you keep editing; your work autosaves) and the UI says so honestly rather than showing a false "Live". Self-hosting the discovery + a STUN/TURN server (e.g. coturn) is enough to get direct P2P working for your own users; it stores nothing and reads nothing.
+**Important:** the standalone Ofisi binary does **not** serve `/api/peering/*`. Those endpoints are provided by the **host** — a Vulos OS / Vulos Relay deployment. On a bare standalone server with no host fabric, peers cannot discover each other, so collaboration stays **local-only** (you keep editing; your work autosaves) and the UI says so honestly rather than showing a false "Live". Self-hosting the discovery + a STUN/TURN server (e.g. coturn) is enough to get direct P2P working for your own users; it stores nothing and reads nothing.
 
 ---
 
@@ -123,7 +123,7 @@ Alice (rw) shares a `#vp2p=` link with Bob (rw); Carol opens the ro link.
 ## 7. Access control — admin summary
 
 - **Account sharing (the ACL)** — `backend/fileacl/`: roles `viewer` < `commenter` < `editor`, plus `owner`. Grants are owner-gated server-side, land in the append-only **audit log**, and no-access responses are `404` to avoid existence leaks. Read-only **share links** (256-bit token, optional bcrypt-hashed password, expiry capped at one year) reach *only* the anonymous read path. This governs who may open the document from **your storage** — it does **not** put a server in the live-collaboration path.
-- **Live collaboration** — possession of the invite fragment. The host cannot enumerate, join, or read rooms; it also cannot audit their content. If your compliance posture requires all collaboration to be server-auditable, note that Office's collaboration is deliberately end-to-end and peer-to-peer — auditing happens at the account-save and version-history layer, not in the wire.
+- **Live collaboration** — possession of the invite fragment. The host cannot enumerate, join, or read rooms; it also cannot audit their content. If your compliance posture requires all collaboration to be server-auditable, note that Ofisi's collaboration is deliberately end-to-end and peer-to-peer — auditing happens at the account-save and version-history layer, not in the wire.
 - **Peer discovery** is available only where a host provides the peering fabric (Vulos OS / Relay). No fabric ⇒ no live P2P, automatically — the editor stays local-only.
 
 ---
@@ -145,7 +145,7 @@ You can confirm the serverless property from the outside:
 curl -i "https://office.example.org/v1/documents/<id>/collab/stream"   # expect 404
 curl -i "https://office.example.org/v1/documents/<id>/collab/ops"      # expect 404
 
-# 2. Is the peering fabric present? (host-provided, not the Office binary)
+# 2. Is the peering fabric present? (host-provided, not the Ofisi binary)
 curl -i "https://office.example.org/api/peering/ice"   # 404 ⇒ standalone, no P2P discovery
 ```
 
@@ -165,7 +165,7 @@ In the browser, DevTools → Network shows the truth: opening a `#vp2p=` link op
 
 **Is there a maximum number of collaborators?** No explicit cap in the collab code; the practical bound is WebRTC mesh fan-out (each peer connects to the others) and your discovery/relay capacity.
 
-**Does collaboration work across two different Office servers?** Yes, as long as the peers can reach the same peering fabric — collaboration is between *browsers*, not servers. The document does not live on either server for the purpose of the live session.
+**Does collaboration work across two different Ofisi servers?** Yes, as long as the peers can reach the same peering fabric — collaboration is between *browsers*, not servers. The document does not live on either server for the purpose of the live session.
 
 **What happens with no network at all?** You keep editing; the CRDT applies locally and an IndexedDB draft protects your work. It syncs to peers when you reconnect, and autosaves to your storage.
 
