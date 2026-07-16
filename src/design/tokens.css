@@ -1,136 +1,169 @@
 /* ============================================================================
- * Vulos Office — Design Tokens
+ * Ofisi — Design Tokens
  * ----------------------------------------------------------------------------
  * Single source of truth for colour, type, space, radii, motion, elevation.
  * Tailwind reads these via tailwind.config.js theme.extend so utilities like
- * `bg-paper`, `text-ink`, `border-line`, `bg-accent` resolve through here.
+ * `bg-paper`, `text-ink`, `border-line`, `bg-accent`, `font-serif`, … resolve
+ * through here.  Never hard-code a hex / px / shadow in component code — add or
+ * extend a token instead.
  *
- * Aesthetic direction (aligned with vulos-cloud's landing):
- *   - Near-black, restrained, IDE / terminal aesthetic. No rainbow, no glow.
- *   - One deliberate accent: deep teal (#0f6a6c) — active nav, focus, primary.
- *   - Vulos purple (#C96AFF) as an occasional brand accent only.
- *   - Inter for body / headings; mono face for section labels, kbd, micro-UI.
- *   - Hairline 1px borders, 10px base radius, calm 150ms ease motion.
+ * ── Ofisi identity — "Warm Workshop" ───────────────────────────────────────
+ * Ofisi is a warm, human, delightful collaborative office suite.  It has its
+ * OWN identity, deliberately distinct from the near-black IDE look of sibling
+ * products: a bright, editorial, paper-warm surface with a confident signature
+ * accent.  Light is the DEFAULT (a workspace should feel like daylight); a warm
+ * dark theme is a first-class opt-in.
  *
- * Dark is the DEFAULT (the IDE baseline). A light theme is available via the
- * app toggle (`[data-theme="light"]`) for users who want it, but the canvas
- * ships near-black like vulos-cloud.
+ *   PALETTE
+ *     - Signature accent : EMBER — a warm terracotta-coral (#D0471F).  Creative,
+ *       friendly, energetic.  Used for the one "yes" action, focus, links,
+ *       active state.  Exactly one UI accent.
+ *     - Secondary        : TEAL (#0E8B86) — coral's complement.  An occasional
+ *       brand mark + the neutral "info" signal.  Never a second control accent.
+ *     - Neutrals         : warm ivory canvas, crisp white paper, sand chrome,
+ *       warm-charcoal ink.  No cold greys anywhere.
+ *     - Per-app tints    : one calm hue each (Docs blue, Sheets green, Slides
+ *       gold, PDF rose, Board violet) so the suite is findable at a glance.
+ *
+ *   TYPE — a warm, characterful trio (all self-hosted via @fontsource, never
+ *   fetched from Google at runtime, so a self-host install leaks no IP and
+ *   stays air-gappable):
+ *     - Chrome / UI  : Hanken Grotesk — a friendly humanist grotesque.
+ *     - Document /    : Fraunces (opsz) — a soft editorial serif with real
+ *       display        warmth; carries doc bodies AND display moments.
+ *     - Micro-UI      : JetBrains Mono — crisp mono for eyebrows, kbd, labels.
+ *
+ *   GEOMETRY — soft, generous radii (10px base) + warm, low, no-bloom shadows.
  * ========================================================================= */
 
-/* SOVEREIGNTY: Inter is vendored locally via @fontsource (self-hosted woff2),
- * NOT fetched from Google Fonts at runtime. A self-host product must never leak
- * the user's IP to fonts.googleapis.com / fonts.gstatic.com, and must stay
- * air-gappable. The variable `opsz` axis mirrors the previous
- * `Inter:ital,opsz,wght@…14..32…` request exactly. system-ui fallback preserved
- * in --font-sans below. */
-@import '@fontsource-variable/inter/opsz.css';
-@import '@fontsource-variable/inter/opsz-italic.css';
+/* SOVEREIGNTY: fonts are vendored locally via @fontsource (self-hosted woff2),
+ * NOT fetched from fonts.googleapis.com / fonts.gstatic.com at runtime. */
+@import '@fontsource-variable/hanken-grotesk/wght.css';
+@import '@fontsource-variable/hanken-grotesk/wght-italic.css';
+@import '@fontsource-variable/fraunces/opsz.css';
+@import '@fontsource-variable/fraunces/opsz-italic.css';
+@import '@fontsource-variable/jetbrains-mono/wght.css';
 
 :root {
-  /* ── Near-black neutral ramp (oat-* names kept for back-compat) ──────────
-   * Re-pointed from the old warm "oat" scale to vulos-cloud's near-black ramp.
-   * Index direction preserved: 50 = lightest text, 900 = deepest surface, so
-   * existing `oat-200` (dividers) / `oat-700` (muted text) refs stay sensible. */
-  --oat-50:  #e5e5e5;   /* primary text (was warmest bg) */
-  --oat-100: #cccccc;   /* secondary text */
-  --oat-200: #1a1a1a;   /* hairline dividers / default border */
-  --oat-300: #222222;   /* stronger borders */
-  --oat-400: #666666;   /* muted icons, placeholders */
-  --oat-500: #888888;   /* secondary / faint text */
-  --oat-600: #999999;   /* tertiary text */
-  --oat-700: #cccccc;   /* primary-muted text */
-  --oat-800: #1a1a1a;   /* elevated surface */
-  --oat-900: #e5e5e5;   /* ink — primary text on dark */
+  /* ── Ember ramp — the signature accent (warm terracotta-coral) ───────────
+   * Legacy scale names (`--teal-*`, kept so any old alias resolves) now hold
+   * the EMBER values.  50 = lightest tint surface, 900 = deepest. */
+  --ember-50:  #FDF1EB;
+  --ember-100: #FBE0D4;
+  --ember-200: #F6C4AC;
+  --ember-300: #F09E7B;
+  --ember-400: #EB784F;
+  --ember-500: #E15A31;
+  --ember-600: #D0471F;   /* primary accent — buttons, focus, links */
+  --ember-700: #AE3917;
+  --ember-800: #8A2D12;
+  --ember-900: #571E0D;
 
-  /* ── Near-black surfaces (cloud verbatim) ─────────────────────────────── */
-  --bg-base:            #0c0c0c;
-  --bg-surface:         #111111;
-  --bg-elevated:        #1a1a1a;
-  --bg-hover:           #1e1e1e;
-  --bg-selected:        #0e1f1f;
-  --bg-selected-border: #143030;
+  /* Back-compat aliases: `teal-*` / `brand-*` tailwind scales point here. */
+  --teal-50:  var(--ember-50);
+  --teal-100: var(--ember-100);
+  --teal-200: var(--ember-200);
+  --teal-300: var(--ember-300);
+  --teal-400: var(--ember-400);
+  --teal-500: var(--ember-500);
+  --teal-600: var(--ember-600);
+  --teal-700: var(--ember-700);
+  --teal-800: var(--ember-800);
+  --teal-900: var(--ember-900);
 
-  --paper:   #111111;   /* primary panel surface */
-  --paper-2: #0c0c0c;   /* base canvas */
-  --paper-3: #1a1a1a;   /* elevated */
-  --clay:    #1a1a1a;   /* warmer panel alias */
+  /* ── Warm neutral ramp (oat-* names kept for back-compat) ────────────────
+   * Monotonic light→dark: 50 = lightest surface, 900 = deepest ink. */
+  --oat-50:  #FDFBF7;
+  --oat-100: #F6F0E6;
+  --oat-200: #ECE4D6;   /* hairline dividers / default border */
+  --oat-300: #DFD6C6;   /* stronger borders */
+  --oat-400: #BBB2A6;   /* muted icons, placeholders */
+  --oat-500: #8B8378;   /* secondary / faint text */
+  --oat-600: #6B655C;   /* tertiary text */
+  --oat-700: #4A453E;   /* primary-muted text */
+  --oat-800: #35312B;   /* near-ink */
+  --oat-900: #2A2723;   /* ink — primary text on light */
 
-  /* ── Accent: deep teal — committed (office + cloud aligned) ────────────── */
-  --teal-50:  #0e1f1f;   /* darkest tint surface */
-  --teal-100: #143030;   /* selected border */
-  --teal-200: #1e8d7a;
-  --teal-300: #2dd4bf;   /* legible teal on dark surfaces */
-  --teal-400: #14807f;
-  --teal-500: #117375;
-  --teal-600: #0f6a6c;   /* primary accent — buttons, focus, links */
-  --teal-700: color-mix(in srgb, #0f6a6c 85%, white 15%);
-  --teal-800: #0c585b;
-  --teal-900: #08393b;
+  /* ── Surfaces (light — the default) ──────────────────────────────────────
+   * Warm ivory canvas, crisp white paper that pops, sand chrome. */
+  --bg-base:            #FBF7F1;   /* ivory canvas */
+  --bg-surface:         #FFFFFF;   /* paper — cards, topbar, rail */
+  --bg-elevated:        #F3ECE0;   /* sand — chips, wells, table headers */
+  --bg-hover:           #EFE7D9;   /* hover well */
+  --bg-selected:        #FBE9DF;   /* ember-tinted selection */
+  --bg-selected-border: #F5D2BE;
 
-  /* ── Brand: Vulos purple — occasional accent only ─────────────────────── */
-  --brand:        #C96AFF;
-  --brand-hover:  color-mix(in srgb, #C96AFF 80%, black);
-  --brand-subtle: color-mix(in srgb, #C96AFF 12%, transparent);
+  --paper:   #FFFFFF;
+  --paper-2: #FBF7F1;
+  --paper-3: #F3ECE0;
+  --clay:    #F3ECE0;
 
-  /* ── Signal colours (cloud semantic set) ──────────────────────────────── */
-  --signal-warning:    #f59e0b;
-  --signal-warning-bg: color-mix(in srgb, #f59e0b 14%, transparent);
-  --signal-error:      #f43f5e;
-  --signal-error-bg:   color-mix(in srgb, #f43f5e 14%, transparent);
-  --signal-success:    #2dd4bf;
-  --signal-success-bg: color-mix(in srgb, #2dd4bf 12%, transparent);
-  --signal-info:       #C96AFF;
-  --signal-info-bg:    color-mix(in srgb, #C96AFF 12%, transparent);
+  /* ── Secondary accent: TEAL — coral's complement, occasional brand mark ── */
+  --brand:        #0E8B86;
+  --brand-hover:  #0B726E;
+  --brand-subtle: color-mix(in srgb, #0E8B86 14%, transparent);
 
-  /* ── Per-app icon tints — one low-saturation hue per app so Docs / Sheets /
-   *    Slides / PDF / Talk are findable at a glance. These colour the ICON
-   *    STROKE only in the rail (never a row background); the `-bg` chip is for
-   *    the Home cards so the sidebar ↔ content language agrees. Tuned for the
-   *    near-black rail (#1a1a1a) — legible, calm, no glow. */
-  --app-docs:      #6f9fd8;                                  /* soft blue   */
-  --app-docs-bg:   color-mix(in srgb, #6f9fd8 13%, transparent);
-  --app-sheets:    #5cc08a;                                  /* soft green  */
-  --app-sheets-bg: color-mix(in srgb, #5cc08a 13%, transparent);
-  --app-slides:    #e2a93f;                                  /* warm amber  */
-  --app-slides-bg: color-mix(in srgb, #e2a93f 13%, transparent);
-  --app-pdf:       #e0726a;                                  /* soft red    */
-  --app-pdf-bg:    color-mix(in srgb, #e0726a 13%, transparent);
-  --app-board:     #a487d8;                                  /* soft violet */
-  --app-board-bg:  color-mix(in srgb, #a487d8 13%, transparent);
+  /* ── Signal colours ──────────────────────────────────────────────────────
+   * Tuned to sit legibly on warm light surfaces (and re-tuned for dark below). */
+  --signal-warning:    #C77E12;
+  --signal-warning-bg: color-mix(in srgb, #C77E12 14%, transparent);
+  --signal-error:      #D63B3B;
+  --signal-error-bg:   color-mix(in srgb, #D63B3B 12%, transparent);
+  --signal-success:    #1E9E57;
+  --signal-success-bg: color-mix(in srgb, #1E9E57 13%, transparent);
+  --signal-info:       #0E8B86;
+  --signal-info-bg:    color-mix(in srgb, #0E8B86 12%, transparent);
 
-  /* ── Semantic aliases (DEFAULT = near-black dark) ─────────────────────── */
-  --bg:        var(--bg-base);        /* #0c0c0c */
-  --bg-elev-1: var(--bg-surface);     /* #111111 — panels, cards */
-  --bg-elev-2: var(--bg-elevated);    /* #1a1a1a — rails, headers */
-  --bg-sunk:   #090909;               /* deepest sunk */
+  /* ── Per-app icon tints — one calm hue per app so Docs / Sheets / Slides /
+   *    PDF / Board are findable at a glance.  These colour the ICON STROKE in
+   *    the rail (never a row background); the `-bg` chip tints the Home cards. */
+  --app-docs:      #3B6FD6;                                  /* blue   */
+  --app-docs-bg:   color-mix(in srgb, #3B6FD6 12%, transparent);
+  --app-sheets:    #1E9E57;                                  /* green  */
+  --app-sheets-bg: color-mix(in srgb, #1E9E57 12%, transparent);
+  --app-slides:    #D69314;                                  /* gold   */
+  --app-slides-bg: color-mix(in srgb, #D69314 14%, transparent);
+  --app-pdf:       #D6455C;                                  /* rose   */
+  --app-pdf-bg:    color-mix(in srgb, #D6455C 12%, transparent);
+  --app-board:     #7B5BD1;                                  /* violet */
+  --app-board-bg:  color-mix(in srgb, #7B5BD1 13%, transparent);
 
-  --ink:        #e5e5e5;
-  --ink-muted:  #cccccc;
-  --ink-faint:  #888888;
-  --ink-ghost:  #666666;
-  --ink-on-accent: #061514;           /* legible on bright teal CTA */
+  /* ── Semantic aliases (DEFAULT = warm light) ─────────────────────────────*/
+  --bg:        var(--bg-base);        /* #FBF7F1 */
+  --bg-elev-1: var(--bg-surface);     /* #FFFFFF — panels, cards, topbar */
+  --bg-elev-2: var(--bg-elevated);    /* #F3ECE0 — sand chrome, wells */
+  --bg-sunk:   #EDE6D9;               /* deepest sunk */
 
-  --line:        #1a1a1a;
-  --line-strong: #222222;
-  --line-emphasis: #333333;
+  --ink:        #2A2723;
+  --ink-muted:  #6B655C;
+  --ink-faint:  #8B8378;
+  --ink-ghost:  #BBB2A6;
+  --ink-on-accent: #FFFFFF;           /* legible on the ember CTA */
 
-  --accent:        var(--teal-600);   /* #0f6a6c */
-  --accent-hover:  var(--teal-700);
-  --accent-press:  var(--teal-300);   /* bright teal for active text/icons */
-  --accent-tint:   #0e1f1f;           /* selected tint */
-  --accent-tint-2: #143030;           /* selected border / stronger tint */
-  --accent-on-ink: var(--teal-300);
+  --line:        #ECE4D6;
+  --line-strong: #DFD6C6;
+  --line-emphasis: #CDC2AF;
 
-  --selection-bg: color-mix(in srgb, #0f6a6c 32%, transparent);
-  --selection-fg: #e5e5e5;
+  --accent:        var(--ember-600);  /* #D0471F */
+  --accent-hover:  var(--ember-700);
+  --accent-press:  var(--ember-700);  /* active text/icon on light */
+  --accent-tint:   #FBEADF;           /* selected / hover tint */
+  --accent-tint-2: #F7D8C6;           /* selected border / stronger tint */
+  --accent-on-ink: var(--ember-600);
+
+  --selection-bg: color-mix(in srgb, #D0471F 22%, transparent);
+  --selection-fg: #571E0D;
 
   /* ── Typography ──────────────────────────────────────────────────────────
-   * Inter for chrome + headings; mono for documents, labels, kbd, code. */
-  --font-sans:  'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-serif: ui-serif, 'Iowan Old Style', 'Charter', 'Source Serif Pro',
-                Cambria, 'Hoefler Text', Georgia, serif;
-  --font-mono:  ui-monospace, 'SF Mono', 'Cascadia Code', 'Fira Code',
-                'JetBrains Mono', Menlo, Consolas, monospace;
+   * Hanken Grotesk for chrome; Fraunces for documents + editorial display;
+   * JetBrains Mono for micro-UI labels, kbd, code. */
+  --font-sans:  'Hanken Grotesk Variable', system-ui, -apple-system,
+                BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-serif: 'Fraunces Variable', 'Iowan Old Style', 'Charter',
+                'Source Serif Pro', Cambria, Georgia, serif;
+  --font-mono:  'JetBrains Mono Variable', ui-monospace, 'SF Mono',
+                'Cascadia Code', 'Fira Code', Menlo, Consolas, monospace;
+  --font-display: var(--font-serif);
 
   /* Type scale — minor-third (1.2) ratio, anchored 14px */
   --text-2xs: 0.6875rem; /* 11px — micro-labels, metadata */
@@ -144,16 +177,16 @@
   --text-3xl: 2.25rem;   /* 36px — hero */
 
   /* Tracking */
-  --tracking-tight:   -0.014em;
+  --tracking-tight:   -0.011em;
   --tracking-normal:   0em;
   --tracking-wide:     0.04em;
-  --tracking-wider:    0.12em;   /* uppercase mono eyebrows — wider for IDE feel */
+  --tracking-wider:    0.14em;   /* uppercase mono eyebrows */
 
   /* Leading */
   --leading-tight: 1.2;
   --leading-snug:  1.35;
   --leading-body:  1.55;
-  --leading-doc:   1.7;
+  --leading-doc:   1.72;
 
   /* ── Spacing (4px base) ─────────────────────────────────────────────── */
   --space-1:  0.25rem;
@@ -165,23 +198,23 @@
   --space-7:  3rem;
   --space-8:  4rem;
 
-  /* ── Radii — restrained, cloud geometry (10px base) ──────────────────── */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 16px;
+  /* ── Radii — soft + friendly (10px base) ─────────────────────────────── */
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
   --radius-pill: 999px;
 
-  /* ── Elevation — deep, no bloom (cloud shadows, scaled for app chrome) ── */
+  /* ── Elevation — warm, soft, no bloom (the paper rests, it doesn't float) ─*/
   --elev-0: none;
-  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.40),
-            0 1px 3px rgba(0, 0, 0, 0.30);
-  --elev-2: 0 2px 8px rgba(0, 0, 0, 0.50),
-            0 1px 3px rgba(0, 0, 0, 0.35);
-  --elev-3: 0 8px 32px rgba(0, 0, 0, 0.60),
-            0 2px 8px rgba(0, 0, 0, 0.35);
-  --elev-focus: 0 0 0 3px color-mix(in srgb, var(--accent) 50%, transparent);
+  --elev-1: 0 1px 2px rgba(74, 52, 30, 0.05),
+            0 1px 3px rgba(74, 52, 30, 0.06);
+  --elev-2: 0 4px 12px -2px rgba(74, 52, 30, 0.10),
+            0 2px 5px -2px rgba(74, 52, 30, 0.08);
+  --elev-3: 0 18px 40px -12px rgba(60, 40, 20, 0.22),
+            0 6px 16px -8px rgba(60, 40, 20, 0.12);
+  --elev-focus: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
 
   /* ── Motion ─────────────────────────────────────────────────────────── */
   --ease-out:   cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -191,96 +224,103 @@
   --duration-base: 200ms;
   --duration-slow: 320ms;
 
-  color-scheme: dark;
-}
-
-/* ────────────────────────────────────────────────────────────────────────
- * Light theme — opt-in via the app toggle (`[data-theme="light"]`).
- * Mirrors cloud's light mode: clean white/grey, same teal accent.
- * ────────────────────────────────────────────────────────────────────── */
-:root[data-theme="light"] {
-  /* ── Light neutral ramp — monotonic light→dark (50 = lightest surface,
-   *    900 = deepest ink). Mirrors cloud's light mode; replaces the old
-   *    inverted/garbage ramp that caused dark patches on light. ───────────── */
-  --oat-50:  #fbfbfa;   /* lightest surface */
-  --oat-100: #f4f4f3;   /* subtle surface */
-  --oat-200: #eaeaea;   /* hairline dividers / default border */
-  --oat-300: #dcdcdc;   /* stronger borders */
-  --oat-400: #b8b8b8;   /* muted icons, placeholders */
-  --oat-500: #8a8a8a;   /* secondary / faint text */
-  --oat-600: #6b6b6b;   /* tertiary text */
-  --oat-700: #4a4a4a;   /* primary-muted text */
-  --oat-800: #2c2c2c;   /* near-ink */
-  --oat-900: #1a1a1a;   /* ink — primary text on light */
-
-  --bg-base:            #ffffff;
-  --bg-surface:         #f7f7f7;
-  --bg-elevated:        #eeeeee;
-  --bg-hover:           #e4e4e4;
-  --bg-selected:        #d4ecec;
-  --bg-selected-border: #9dcece;
-
-  --paper:   #ffffff;
-  --paper-2: #f7f7f7;
-  --paper-3: #eeeeee;
-  --clay:    #eeeeee;
-
-  --bg:        #ffffff;
-  --bg-elev-1: #ffffff;
-  --bg-elev-2: #f7f7f7;
-  --bg-sunk:   #eeeeee;
-
-  --ink:        #1a1a1a;
-  --ink-muted:  #444444;
-  --ink-faint:  #777777;
-  --ink-ghost:  #999999;
-  --ink-on-accent: #ffffff;
-
-  --line:        #e8e8e8;
-  --line-strong: #dcdcdc;
-  --line-emphasis: #cccccc;
-
-  --accent:        #0f6a6c;
-  --accent-hover:  #0c585b;
-  --accent-press:  #0a4548;
-  --accent-tint:   #e6f2f1;
-  --accent-tint-2: #d4ecec;
-  --accent-on-ink: #0f6a6c;
-
-  --selection-bg: color-mix(in srgb, #0f6a6c 22%, transparent);
-  --selection-fg: #08393b;
-
-  --signal-success-bg: color-mix(in srgb, #0f6a6c 10%, transparent);
-  --signal-warning-bg: color-mix(in srgb, #f59e0b 12%, transparent);
-  --signal-error-bg:   color-mix(in srgb, #f43f5e 10%, transparent);
-  --signal-info-bg:    color-mix(in srgb, #C96AFF 10%, transparent);
-
-  /* Per-app tints — darkened for AA contrast on light surfaces (white / #f7f7f7). */
-  --app-docs:      #2f6cba;
-  --app-docs-bg:   color-mix(in srgb, #2f6cba 10%, transparent);
-  --app-sheets:    #1f8a55;
-  --app-sheets-bg: color-mix(in srgb, #1f8a55 10%, transparent);
-  --app-slides:    #a9760f;
-  --app-slides-bg: color-mix(in srgb, #a9760f 12%, transparent);
-  --app-pdf:       #bf443c;
-  --app-pdf-bg:    color-mix(in srgb, #bf443c 10%, transparent);
-  --app-board:     #8360c8;
-  --app-board-bg:  color-mix(in srgb, #8360c8 12%, transparent);
-
-  --elev-1: 0 1px 2px rgba(20, 20, 20, 0.06),
-            0 1px 3px rgba(20, 20, 20, 0.05);
-  --elev-2: 0 2px 8px rgba(20, 20, 20, 0.08),
-            0 1px 3px rgba(20, 20, 20, 0.06);
-  --elev-3: 0 12px 28px -8px rgba(20, 20, 20, 0.16),
-            0 4px 12px -4px rgba(20, 20, 20, 0.10);
-  --elev-focus: 0 0 0 3px color-mix(in srgb, #0f6a6c 35%, transparent);
-
   color-scheme: light;
 }
 
-/* Explicit dark toggle — identical to the :root default. Kept so the app's
- * theme cycler ('light' | 'dark' | 'system') has a concrete dark target. */
+/* Explicit light toggle — identical to the :root default. Kept so the app's
+ * theme cycler ('light' | 'dark' | 'system') has a concrete light target. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Dark theme — a first-class WARM dark (espresso, not slate/black), opt-in via
+ * the app toggle (`[data-theme="dark"]`).  Same ember accent; active text/icons
+ * brighten so they stay legible on the warm-dark canvas.
+ * ────────────────────────────────────────────────────────────────────── */
 :root[data-theme="dark"] {
+  /* Neutral ramp inverts: 50 = lightest text, 900 = deepest surface. */
+  --oat-50:  #F1EBE0;
+  --oat-100: #D9D1C4;
+  --oat-200: #2E2820;   /* hairline dividers / default border */
+  --oat-300: #3A332A;   /* stronger borders */
+  --oat-400: #8E8677;
+  --oat-500: #A79E8E;
+  --oat-600: #C3BAAC;
+  --oat-700: #D9D1C4;
+  --oat-800: #201C16;
+  --oat-900: #F1EBE0;
+
+  --bg-base:            #17130E;   /* warm espresso canvas */
+  --bg-surface:         #201B15;   /* paper — cards, topbar, rail */
+  --bg-elevated:        #2A241C;   /* sand-dark chrome */
+  --bg-hover:           #322B22;
+  --bg-selected:        #2F1D12;
+  --bg-selected-border: #4A2C1A;
+
+  --paper:   #201B15;
+  --paper-2: #17130E;
+  --paper-3: #2A241C;
+  --clay:    #2A241C;
+
+  --bg:        #17130E;
+  --bg-elev-1: #201B15;
+  --bg-elev-2: #2A241C;
+  --bg-sunk:   #120F0A;
+
+  --ink:        #F1EBE0;
+  --ink-muted:  #C3BAAC;
+  --ink-faint:  #8E8677;
+  --ink-ghost:  #6A6358;
+  --ink-on-accent: #FFFFFF;
+
+  --line:        #2E2820;
+  --line-strong: #3A332A;
+  --line-emphasis: #4A4236;
+
+  --accent:        var(--ember-600);  /* #D0471F — white text stays legible */
+  --accent-hover:  var(--ember-500);
+  --accent-press:  #FF8759;           /* bright ember for active text/icons */
+  --accent-tint:   #2E1C12;
+  --accent-tint-2: #3E2417;
+  --accent-on-ink: #FF8759;
+
+  --brand:        #2CB5AE;
+  --brand-hover:  #46C7C0;
+  --brand-subtle: color-mix(in srgb, #2CB5AE 15%, transparent);
+
+  --selection-bg: color-mix(in srgb, #FF8759 30%, transparent);
+  --selection-fg: #F1EBE0;
+
+  --signal-warning:    #E9A93C;
+  --signal-warning-bg: color-mix(in srgb, #E9A93C 15%, transparent);
+  --signal-error:      #F26B6B;
+  --signal-error-bg:   color-mix(in srgb, #F26B6B 15%, transparent);
+  --signal-success:    #3FC77E;
+  --signal-success-bg: color-mix(in srgb, #3FC77E 14%, transparent);
+  --signal-info:       #2CB5AE;
+  --signal-info-bg:    color-mix(in srgb, #2CB5AE 14%, transparent);
+
+  /* Per-app tints — brightened for legibility on the warm-dark chrome. */
+  --app-docs:      #6F9FE6;
+  --app-docs-bg:   color-mix(in srgb, #6F9FE6 15%, transparent);
+  --app-sheets:    #4FC486;
+  --app-sheets-bg: color-mix(in srgb, #4FC486 15%, transparent);
+  --app-slides:    #E9B84A;
+  --app-slides-bg: color-mix(in srgb, #E9B84A 15%, transparent);
+  --app-pdf:       #EC7183;
+  --app-pdf-bg:    color-mix(in srgb, #EC7183 15%, transparent);
+  --app-board:     #A487E0;
+  --app-board-bg:  color-mix(in srgb, #A487E0 16%, transparent);
+
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.40),
+            0 1px 3px rgba(0, 0, 0, 0.30);
+  --elev-2: 0 4px 14px -2px rgba(0, 0, 0, 0.55),
+            0 2px 5px -2px rgba(0, 0, 0, 0.40);
+  --elev-3: 0 20px 44px -12px rgba(0, 0, 0, 0.70),
+            0 6px 16px -8px rgba(0, 0, 0, 0.45);
+  --elev-focus: 0 0 0 3px color-mix(in srgb, var(--accent-press) 40%, transparent);
+
   color-scheme: dark;
 }
 

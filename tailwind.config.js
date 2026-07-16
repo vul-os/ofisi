@@ -1,9 +1,10 @@
 /** @type {import('tailwindcss').Config} */
 // -----------------------------------------------------------------------------
-// Tailwind reads from src/design/tokens.css via CSS variables — the source of
-// truth is the tokens file, not this config.  We expose token-backed utilities
-// (`bg-paper`, `text-ink`, `border-line`, `bg-accent`, `font-serif`, …) and a
-// few signal classes so app code never reaches for raw hex.
+// Ofisi — Tailwind reads from src/design/tokens.css via CSS variables; the
+// source of truth is the tokens file, not this config.  We expose token-backed
+// utilities (`bg-paper`, `text-ink`, `border-line`, `bg-accent`, `font-serif`,
+// `bg-ember-600`, …) and a few signal classes so app code never reaches for raw
+// hex.  The signature accent is EMBER (warm coral); light is the default theme.
 //
 // `darkMode: ['class', '[data-theme="dark"]']` lets us flip dark on a parent
 // element (e.g. the SignView's paper-look pages stay light even when the rest
@@ -18,7 +19,21 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Brand kept as an alias for any legacy refs; new code uses `accent`.
+        // Ofisi signature accent scale. `--ember-*` is the source of truth;
+        // `teal-*` / `brand-*` are back-compat aliases that resolve to it.
+        ember: {
+          50:  'var(--ember-50)',
+          100: 'var(--ember-100)',
+          200: 'var(--ember-200)',
+          300: 'var(--ember-300)',
+          400: 'var(--ember-400)',
+          500: 'var(--ember-500)',
+          600: 'var(--ember-600)',
+          700: 'var(--ember-700)',
+          800: 'var(--ember-800)',
+          900: 'var(--ember-900)',
+        },
+        // Legacy alias for any older refs; new code uses `accent` / `ember`.
         brand: {
           50:  'var(--teal-50)',
           100: 'var(--teal-100)',
@@ -69,10 +84,13 @@ export default {
         line:       'var(--line)',
         'line-strong': 'var(--line-strong)',
         'line-emphasis': 'var(--line-emphasis)',
-        // Vulos purple brand — occasional accent only.
+        // Secondary brand mark (teal, ember's complement) — occasional only.
         'brand-purple':       'var(--brand)',
         'brand-purple-hover': 'var(--brand-hover)',
         'brand-purple-subtle':'var(--brand-subtle)',
+        'brand-teal':         'var(--brand)',
+        'brand-teal-hover':   'var(--brand-hover)',
+        'brand-teal-subtle':  'var(--brand-subtle)',
         accent:        'var(--accent)',
         'accent-hover':'var(--accent-hover)',
         'accent-press':'var(--accent-press)',

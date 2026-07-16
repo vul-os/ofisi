@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
     <!-- Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
@@ -14,31 +15,44 @@
 
     <!-- PWA / Android -->
     <link rel="manifest" href="/manifest.webmanifest" />
-    <!-- theme-color tracks the paper background (light) and ink (dark) so
-         the mobile chrome doesn't fight the warm-neutral palette. -->
-    <meta name="theme-color" content="#fbf9f5" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#131110" media="(prefers-color-scheme: dark)" />
+    <!-- theme-color tracks the warm ivory canvas (light) and warm espresso
+         (dark) so the mobile chrome agrees with Ofisi's warm palette. -->
+    <meta name="theme-color" content="#FBF7F1" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#17130E" media="(prefers-color-scheme: dark)" />
 
     <!-- Primary Meta -->
-    <title>Vulos Office</title>
-    <meta name="application-name" content="Vulos Office" />
-    <meta name="description" content="Vulos Office — documents, sheets, and slides in one place." />
+    <title>Ofisi</title>
+    <meta name="application-name" content="Ofisi" />
+    <meta name="description" content="Ofisi — a warm, real-time collaborative office suite: documents, spreadsheets, slides and whiteboards." />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Vulos Office" />
-    <meta property="og:description" content="Vulos Office — documents, sheets, and slides in one place." />
+    <meta property="og:title" content="Ofisi" />
+    <meta property="og:description" content="Ofisi — a warm, real-time collaborative office suite: documents, spreadsheets, slides and whiteboards." />
     <meta property="og:image" content="/android-chrome-512x512.png" />
 
     <!--
-      Fonts: we use the OS's grotesque + serif via the ui-sans-serif /
-      ui-serif font keywords (configured in src/design/tokens.css).
-      This gives a distinctive, characterful look without shipping a webfont
-      and avoids the Inter sameness of generic React apps.
-
-      Optional upgrade: self-host "Inter Display" + "Source Serif Pro" if a
-      brand wants stricter consistency across OSes. See src/design/DESIGN.md.
+      Fonts: Ofisi's chrome/document/mono trio (Hanken Grotesk · Fraunces ·
+      JetBrains Mono) is self-hosted via @fontsource and imported at the top of
+      src/design/tokens.css — never fetched from Google at runtime, so a
+      self-host install leaks no IP and stays air-gappable. See src/design/DESIGN.md.
     -->
+
+    <!-- Early theme boot — resolve the persisted theme (or OS preference) before
+         first paint so there is no light↔dark flash. Mirrors useTheme.js. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('ofisi.theme') || localStorage.getItem('vulos.theme') || 'system';
+          if (t !== 'light' && t !== 'dark') {
+            t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
