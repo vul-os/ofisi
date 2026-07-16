@@ -191,7 +191,7 @@ Related behavior to be aware of:
 - **Embedding**: every editor surface ships as the npm library `@vulos/office-client` with entries `…/docs`, `…/sheets`, `…/slides`, `…/pdf` — the Vulos OS (or your own app) mounts them as native panels. Built by `vite.config.lib.js` into `dist-lib/`.
 - **Identity**: on a Vulos box or cloud cell, set `IDENTITY_URL` so Ofisi introspects the shared `vc_session` cookie — Ofisi deliberately holds no session-signing power in that mode.
 - **Peering fabric**: the OS/Relay host provides `/api/peering/stream` (WebSocket signaling) and `/api/peering/ice`; Ofisi's collab code discovers them same-origin and lights up P2P collaboration + presence automatically. Without them it degrades gracefully.
-- **Control plane** (managed/multi-tenant): `VULOS_CP_BASE_URL` + `VULOS_CP_TOKEN` + `VULOS_ORG_ID` enable entitlements (`GET {CP}/api/entitlements`, fails open on transient CP outage), usage metering (fire-and-forget `POST {CP}/api/usage`), and `vk_` API-key introspection for `/v1` (fail-closed `503` if the CP is unreachable during key validation). See [SELFHOST.md](../SELFHOST.md) for the full seam contract.
+- **Control plane** (managed/multi-tenant): `VULOS_CP_BASE_URL` + `VULOS_CP_TOKEN` + `VULOS_ORG_ID` enable entitlements (`GET {CP}/api/entitlements`, fails open on transient CP outage), usage metering (fire-and-forget `POST {CP}/api/usage`), and `vk_` API-key introspection for `/v1` (fail-closed `503` if the CP is unreachable during key validation). See [SELFHOST.md](SELFHOST.md) for the full seam contract.
 
 ---
 
@@ -231,7 +231,7 @@ Also remember the per-IP write rate limit (burst 30, refill 10/s): if the proxy 
 - [ ] If cloud seams are unused, leave `VULOS_CP_BASE_URL`, `IDENTITY_URL` unset — the adapter code then never runs.
 - [ ] Communicate the E2E "Collaborate via link" posture to your users: those sessions are content-blind to your server and not centrally auditable ([COLLABORATION.md](COLLABORATION.md) §5).
 
-The repo also ships [SECURITY.md](../SECURITY.md), [THREAT-MODEL.md](../THREAT-MODEL.md), and [SECURITY-TESTING.md](../SECURITY-TESTING.md) with the full model and its regression tests.
+The repo also ships [SECURITY.md](../SECURITY.md), [THREAT-MODEL.md](THREAT-MODEL.md), and [SECURITY-TESTING.md](SECURITY-TESTING.md) with the full model and its regression tests.
 
 ---
 

@@ -3,17 +3,17 @@
 Ofisi is the **documents** surface of the Vulos project — a self-hosted,
 open-source (MIT) suite for Documents, Sheets, Slides, and PDF/Signing that runs
 as a single Go binary with a React frontend. (Calendar and Contacts come through
-the mail connector — CalDAV/CardDAV via lilmail.) Today it is a
-fast, private, local-first editor. This roadmap charts its growth into a
-**networked** office: the same documents, edited together in real time by people
-on different Vulos instances, and PDFs signed with cryptographic audit trails —
-all riding the **Vulos peer fabric** that already connects and routes instances
-across the network, with relay/TURN fallback.
+the mail connector — CalDAV/CardDAV via lilmail.) Today it is a fast, private,
+local-first editor. This roadmap charts its growth into a **networked** office:
+the same documents, edited together in real time by people on different Vulos
+instances, and PDFs signed with cryptographic audit trails — all riding the
+**Vulos peer fabric** that already connects and routes instances across the
+network, with relay/TURN fallback.
 
 > **Product scope.** Ofisi is documents-only. Chat and video are **third-party**
-> (Matrix/Element for chat; Element Call / Jitsi for video), not Vulos products; the
-> **Vulos OS** is the shell that hosts the apps. Any chat/calling roadmap items
-> previously tracked here are out of scope for this repo.
+> (Matrix/Element for chat; Element Call / Jitsi for video), not Vulos products;
+> the **Vulos OS** is the shell that hosts the apps. Any chat/calling items
+> previously tracked here are out of scope for this repo (see § 4).
 
 The throughline: Ofisi never invents its own network. Real-time document
 collaboration reuses the **same fabric the Vulos OS uses for device routing** —
@@ -25,7 +25,71 @@ fails. *Vulos — open.*
 > fabric (CRDT + relay), not a bespoke server. No telemetry, no required cloud
 > account for the local single-binary mode.
 
-The sections below are **priority-ordered**.
+---
+
+## Status — Now / Next / Later
+
+A snapshot of where the product actually is. The vision pillars that follow
+(§ 1–4) give the full picture; this is the honest state of play.
+
+### Now — shipped and live
+
+- **Editors.** Documents (TipTap), Sheets (Fortune Sheet), Slides (the
+  from-scratch positioned-object canvas), and a PDF annotate-and-sign canvas —
+  all running from the single Go binary, installable as a PWA, no account
+  required in local mode.
+- **Import / export.** Microsoft (`.docx`/`.xlsx`/`.pptx`) and ODF
+  (`.odt`/`.ods`/`.odp`) plus `.pdf`/`.csv`/Markdown, all passing through one
+  hardened trust boundary (`lib/importBounds.js`: size + zip-bomb + zip-slip +
+  XXE caps, then a per-app sanitiser). Slide decks import as positioned objects.
+- **Collaboration affordances.** Anchored, threaded, resolvable **comments**;
+  **suggestion (track-changes)** mode (Postgres-backed); local **version
+  history + snapshots** and restore.
+- **Storage.** Local JSON/SQLite by default; org-bucket write-through to the
+  S3-compatible store (Tigris or MinIO) when `VULOS_ORG_ID` is set, falling back
+  gracefully when no credentials are present.
+- **PDF Auto-Sign.** Full pipeline: field placement, per-signer scoped/expiring
+  signing links, multi-signer orchestration (sequential/parallel), an **Ed25519
+  cryptographic token per signature**, a **hash-chained append-only audit
+  trail**, a completion certificate + sealed PDF, and a verification tool with a
+  public pubkey endpoint.
+- **Security.** Per-file ACLs enforced by every file-scoped handler; an
+  adversarial pentest suite that stays green (see
+  [`docs/SECURITY-TESTING.md`](docs/SECURITY-TESTING.md) and
+  [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md)).
+- **Offline / routing.** Offline-first PWA (service-worker app shell + LAN
+  failover); client-side CRDT modules; per-document deep links and the
+  `web+vulosoffice://` protocol handler.
+
+### Next — actively planned
+
+- **Live P2P document collaboration** over the Vulos relay fabric
+  (`COLLAB-FABRIC-01`). The CRDT modules exist client-side, but the live doc-sync
+  channel is currently **dormant** — the live path today is REST + persistence,
+  and the Go CRDT engine was removed. Re-introducing WebRTC data channels with
+  relay/TURN fallback is the real § 2 of this roadmap.
+- **Import/export fidelity hardening** — nested tables, merged cells, embedded
+  media, and slide transitions, driven by fixture-based round-trip checks.
+- **PDF depth** — true text extraction (beyond overlay annotations) and
+  form-field detection.
+
+### Later — on the horizon
+
+- **Multi-target builds** — build each app surface as both a standalone web
+  bundle (served by path under `app.vulos.org`) and an embeddable `lib.jsx`
+  export consumed by the Vulos OS shell, from one source tree via Vite
+  multi-entry. **Owned by the subdomain/app-shell agent** while active —
+  `vite.config.*`, `package.json`, and `src/apps/*/lib.jsx` are off-limits to
+  other work in parallel.
+- **Advanced signing** — qualified/eIDAS-QES or HSM-backed signatures remain an
+  explicit **non-goal for v1**; the product ships strong tamper-evidence and
+  audit trails, not government-grade qualified signatures.
+
+> **Historical.** A Vulos Spaces surface (channels, DMs, threads, WebRTC
+> voice/video, screen-share, scheduled meeting rooms) was built in an earlier
+> wave. Vulos no longer builds comms — chat and video are third-party
+> (Matrix/Element; Element Call / Jitsi). That code is retained for history only
+> and is out of scope for this repo (§ 4).
 
 ---
 
@@ -51,7 +115,7 @@ trustworthy.
 - Make import/export round-trips lossless enough that Ofisi is a credible
   daily driver against LibreOffice and the incumbents.
 - Harden autosave and storage so no edit is ever silently lost.
-- Establish clean document models that the collaboration layer (Section 2) can
+- Establish clean document models that the collaboration layer (§ 2) can
   wrap in CRDTs without a rewrite.
 
 ### Concrete features
@@ -71,7 +135,8 @@ trustworthy.
   purely as a slide-to-slide **transition host** that renders our positioned
   objects — it is not the authoring model or the editor.
 - **PDF:** render, page thumbnails, zoom; place text, freehand draw, and
-  signature/initial annotations; flatten and download via pdf-lib.
+  signature/initial annotations; page reorder/insert/delete/rotate; flatten and
+  download via pdf-lib.
 - **Import / Export:** open from URL or local file. Export `.docx`, `.xlsx`,
   `.pptx`, `.pdf`, and Markdown. Import Microsoft (`.docx` via mammoth, `.xlsx`
   via SheetJS, `.pptx` via OOXML/JSZip) and ODF (`.odt`, `.ods`, `.odp`) — slide
@@ -81,17 +146,14 @@ trustworthy.
 - **Storage:** local JSON store; PostgreSQL backend for multi-user installs;
   optional password auth (JWT) off by default.
 - **Single binary + PWA:** the Go binary embeds the built frontend; installable
-  as a desktop/mobile app.
+  as a desktop/mobile app; offline-first with LAN-endpoint failover.
 
 ### Gaps to close
 
 - **Fidelity:** track-and-fix import/export edge cases (nested tables, merged
   cells, embedded media, slide transitions) so round-trips are lossless.
-- **Versioning:** local document history / snapshots and restore.
-- **Autosave robustness:** conflict-free local recovery on crash; explicit dirty
-  state and offline-safe writes.
-- **PDF depth:** page reorder/insert/delete/rotate, form-field detection, true
-  text extraction (not just overlay annotations).
+- **PDF depth:** form-field detection and true text extraction (not just overlay
+  annotations).
 
 ### Explicit non-goals
 
@@ -142,6 +204,11 @@ for the signaling and relay primitives this builds on.
 - **Activity & version history:** per-document change feed and named snapshots
   derived from the CRDT op log.
 
+> **Status.** The client-side CRDT modules, comments, suggestions, presence, and
+> version history are shipped. The **live P2P doc-sync channel is dormant**
+> (`COLLAB-FABRIC-01`) — reconnecting it over the relay fabric is the top
+> "Next" item above.
+
 ### Explicit non-goals
 
 - **No bespoke collaboration backend.** Transport is the Vulos fabric; we do not
@@ -151,7 +218,7 @@ for the signaling and relay primitives this builds on.
 - **No global hosted document cloud** in the OSS core. Documents live on the
   user's instances/buckets; the cloud control plane only routes peers.
 - **Not real-time co-editing inside the PDF annotator** in v1 — PDF collaboration
-  is the signing flow (Section 3), not live canvas co-editing.
+  is the signing flow (§ 3), not live canvas co-editing.
 
 ---
 
@@ -165,6 +232,8 @@ cryptographic token** and appends to a **tamper-evident audit trail** — who
 signed, when, from where, and the document hash before and after. The result is
 a sealed, verifiable PDF plus a completion certificate. Where possible, signer
 identity ties to the **Vulos account**.
+
+This pillar is **shipped** (see Now). The notes below record its scope.
 
 ### Goals
 
@@ -189,16 +258,17 @@ identity ties to the **Vulos account**.
 - **Multi-signer & signing order:** sequential or parallel signing; the next
   signer is invited only when prior steps complete; status per signer.
 - **Cryptographic token per signature:** on completion, hash the document and
-  the signature event and sign it (server keypair / signer identity) to produce
-  a verifiable token bound to the document hash.
-- **Tamper-evident audit trail:** immutable, append-only log of every event
-  (sent, viewed, signed, declined) with timestamp, IP/identity, document hash
-  before/after, and the per-signature token.
+  the signature event and sign it (Ed25519 server keypair / signer identity) to
+  produce a verifiable token bound to the document hash.
+- **Tamper-evident audit trail:** immutable, append-only, hash-chained log of
+  every event (created, sent, viewed, signed, declined, voided, completed) with
+  timestamp, IP/identity, document hash before/after, and the per-signature token.
 - **Completion certificate:** a generated certificate page (and machine-readable
   manifest) summarizing all signers, tokens, hashes, and timestamps, embedded
   in / attached to the final sealed PDF.
-- **Verification:** a checker that re-hashes a sealed PDF and validates each
-  token + audit chain, flagging any tampering.
+- **Verification:** a checker (`POST /api/sign/verify` + `/verify` UI, with a
+  public `GET /api/sign/pubkey` endpoint) that re-hashes a sealed PDF and
+  validates each token + audit chain, flagging any tampering.
 - **Identity binding:** prefer authenticated Vulos account identity;
   fall back to link + email/typed identity for external signers.
 
@@ -226,7 +296,8 @@ as an Ofisi pillar. Vulos no longer builds comms: chat and video are provided by
 
 The **Vulos OS** is the shell that hosts the apps; it can link out to whatever
 comms app the user runs, but Ofisi never embeds chat or video, and neither is a
-first-party Vulos product.
+first-party Vulos product. The Spaces code built in an earlier wave is retained
+for history only.
 
 ---
 
@@ -281,72 +352,5 @@ connector** (`lilmail`, exposing `/v1`) that logs into your existing IMAP/SMTP m
 surfaces Calendar/Contacts widgets over it. There is no hosted Vulos mail. Ofisi installs
 alongside the rest of the suite regardless of whether the connector is configured. There
 is no "Mail tier" gating Ofisi.
-
----
-
-## Future work
-
-### Multi-target builds: web subdomain + OS-embed library for all apps
-Build each Ofisi app surface (docs, sheets, slides, pdf) as two targets:
-(1) a standalone web build served by **path** under the app hub (`app.vulos.org/office`), and
-(2) an embeddable library (`lib.jsx` export) consumed by the
-Vulos OS shell as a native app wrapper. Vite multi-entry config wires both outputs from the
-same source tree. The subdomain builds integrate with the `vulos-cloud` multi-target routing
-pipeline. Do not touch `src/apps/*/lib.jsx`, `vite.config.*`, or `package.json` — those are
-owned by the subdomain agent while it is active.
-
-### Deep-link routing per app ✓ (done — Wave E)
-`src/App.jsx` handles per-document deep links (e.g. `/pdf/:id`) as public routes. The
-`web+vulosoffice://` protocol handler is registered on mount; `?goto=<path>` is parsed and
-navigated. Coordinate with the multi-target build work above for OS launcher integration.
-
----
-
-## Current reality + near-term work (v1.1 wave — 2026-06)
-
-### What is live today
-
-- **Docs / Sheets / Slides / PDF** editing and signing are the core product, with
-  comments, suggestions (track-changes), and version history.
-  - **Docs** (TipTap): rich text, tables, task lists, images, links, pagination,
-    headers/footers, and equations.
-  - **Sheets** (Fortune Sheet): a comprehensive formula engine, number/conditional
-    formatting, data validation, charts, filters, pivots, named ranges, freeze panes.
-  - **Slides**: the **from-scratch positioned-object canvas** — drag/resize/rotate
-    text, shapes, and images in normalized slide space, per-element animations,
-    master slides, themes, presenter view. Reveal.js is used only for the
-    full-screen *present* transition, not authoring.
-- **Calendar** and **Contacts** moved to the mail connector (CalDAV/CardDAV via
-  lilmail `/v1/calendar` + `/v1/contacts`); Ofisi is documents-only.
-- **Org-bucket wiring** (`OfficeBackendConfig`) is fully wired (`FIX-OFFICE-STORE-WIRE-01`):
-  file CRUD and sealed PDFs read/write to the S3-compatible bucket (Tigris or MinIO)
-  when `VULOS_ORG_ID` is set; falls back to local storage otherwise.
-- **Import (MS + ODF)**: `.docx` (mammoth), `.xlsx`/`.ods` (SheetJS), and `.pptx`/`.odp`
-  (OOXML/ODF via JSZip) all import through one hardened trust boundary
-  (`lib/importBounds.js` — size, zip-bomb incl. lying-central-directory, zip-slip,
-  and XXE caps, then per-app sanitisers). Slide decks import as **positioned objects**
-  (text + geometry + embedded raster images), for both drag-and-drop and
-  backend-served files.
-  - **Honest fidelity ceiling**: imports target readable, editable content, not
-    pixel-perfect legacy layout. Known drops include non-raster/vector media, some
-    complex nested-table + merged-cell edge cases, slide transitions/SmartArt, and
-    character/paragraph styling beyond the supported subset. Macros/VBA are never
-    executed — a macro-laden file imports as inert data only.
-- **Deep-link routing**: per-document deep links + the `web+vulosoffice://` protocol
-  handler registered on mount; `?goto=` param parsed and navigated.
-- **Security**: per-file ACLs, append-only signing audit trail.
-- **CRDT**: client-side CRDT modules (`src/lib/crdt/`) are live. Live P2P document sync
-  over the peer fabric is **dormant** — the Go CRDT engine was removed; the live path is
-  REST + persistence.
-
-> Chat/Spaces and calling/meetings are third-party (Matrix/Element; Element Call /
-> Jitsi), not Vulos products, and are out of scope for this repo.
-
-### Near-term items
-
-- **Live P2P document collab over the relay** (`COLLAB-FABRIC-01`): re-introduce the
-  CRDT doc-sync channel over the Vulos relay fabric (WebRTC data channels + relay
-  fallback). This is the **real** Section 2 of the roadmap — currently dormant.
-- **Multi-target builds** (`vite.config.*`): build each app as both a standalone web
-  bundle (subdomain serving) and an embeddable `lib.jsx` export (OS shell). Currently
-  owned by the subdomain agent — do not edit these files in parallel.
+</content>
+</invoke>

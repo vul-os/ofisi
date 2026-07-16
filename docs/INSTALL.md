@@ -109,7 +109,7 @@ If you only want the office suite (no Vulos OS), run office
 directly and inject the storage endpoint yourself via
 [`OfficeBackendConfig`](../backend/storage/backendconfig.go) — there is no
 endpoint-selection logic inside vulos-office; it just receives what you give
-it. See `OFFICE-STORE-01` in [`TASKS.md`](../TASKS.md).
+it. See the storage/co-location notes in [`ROADMAP.md`](../ROADMAP.md).
 
 The two accepted shapes:
 

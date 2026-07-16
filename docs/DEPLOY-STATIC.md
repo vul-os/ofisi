@@ -52,7 +52,7 @@ Each deploy uploads to `<target>/<sha>/` in the bucket, served via Tigris static
 Static files are served under the Vulos app hub (`app.vulos.org`, Tigris-backed,
 configured in your `fly.toml` or DNS CNAME). Apps are reached by **path** under
 the app hub — there are no per-product subdomains. See
-[vulos-naming-and-urls](../vulos/docs/) for the canonical URL scheme.
+[vulos-naming-and-urls](../../vulos/docs/) for the canonical URL scheme.
 
 ## SPA Fallback
 
