@@ -126,7 +126,7 @@ export default function InstallPrompt() {
       {visible && (
         <div
           role="dialog"
-          aria-label="Install Vulos Office"
+          aria-label="Install Ofisi"
           data-testid="install-prompt"
           style={{
             position: 'fixed',

@@ -353,7 +353,7 @@ collapsed cycler), the app-home top bar (quick cycler), and Settings ▸ Appeara
 | `apps/pdf/PDFEditor.jsx` | Design-system `Topbar` with quiet meta-line, distinguished primary "Prepare to Sign" `Button`, warm-paper canvas + `paper-grain`, page thumbnails sidebar with 2-px accent rail on the selected slot, signature modal ported to design-system `Tabs` + `IconButton`, single-accent annotation overlays (no rainbow). |
 | `apps/pdf/SigningSetup.jsx` | Field type chips as `IconButton`s with serif-italic labels, signer roster as `Card`s with a per-signer colour stripe (name + email in serif italic), required toggle as a clear box-check control, signing-order picker (sequential / parallel) via underline `Tabs`. Drag-place + persist logic untouched. |
 | `components/EnvelopeDashboard.jsx` | Card-per-envelope with warm signal-hue status badges (sage / honey / persimmon), quiet horizontal accent progress bar, expandable per-signer rows in serif italic, remind/cancel as `IconButton`s + `Tooltip`s. |
-| `components/Verify.jsx` | Public verification page: warm paper drop-zone, serif "Verify a Vulos-signed document" headline, calm verdict reveal with sage `ShieldCheck` / persimmon `ShieldAlert`, collapsible per-signer rows in serif body, `Powered by Vulos Office` provenance footer. |
+| `components/Verify.jsx` | Public verification page: warm paper drop-zone, serif "Verify an Ofisi-signed document" headline, calm verdict reveal with sage `ShieldCheck` / persimmon `ShieldAlert`, collapsible per-signer rows in serif body, `Powered by Ofisi` provenance footer. |
 
 ## 10. Surfaces deferred to the next pass
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="public/icons/icon-512.png" alt="Ofisi" width="128" />
+<img src="docs/assets/ofisi-logo.png" alt="Ofisi" width="120" />
 
 # Ofisi
 

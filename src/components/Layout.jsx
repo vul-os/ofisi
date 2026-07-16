@@ -26,8 +26,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Home as HomeIcon, FileText, Table2, Presentation, FileSearch, PenTool,
-  LogOut, ChevronLeft, ChevronRight, Settings as SettingsIcon, Plus,
-  Menu, X, Bell,
+  LogOut, PanelLeftOpen, Settings as SettingsIcon, Plus,
+  Menu, Bell,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useFilesStore } from '../store/filesStore'
@@ -60,7 +60,7 @@ const RECENT_TINT = { doc: 'text-app-docs', sheet: 'text-app-sheets', slide: 'te
  * and the mobile drawer. `collapsed` only applies to the desktop column;
  * `onNavigate` is fired on any destination tap so the drawer can close itself.
  */
-function SidebarContent({ collapsed, onNavigate, onNewFile }) {
+function SidebarContent({ collapsed, onNavigate, onNewFile, onSetMode }) {
   const { status, logout } = useAuthStore()
   const { files } = useFilesStore()
   const navigate = useNavigate()
@@ -82,7 +82,7 @@ function SidebarContent({ collapsed, onNavigate, onNewFile }) {
 
   return (
     <>
-      <Sidebar.Brand name="Ofisi" />
+      <Sidebar.Brand name="Ofisi" onSetMode={onSetMode} />
 
       <Sidebar.Section>
         {/* "New" is the only emphatic button in the rail — primary accent. */}
@@ -192,60 +192,74 @@ function SidebarContent({ collapsed, onNavigate, onNewFile }) {
   )
 }
 
+const SIDEBAR_KEY = 'ofisi.sidebar'
+const SIDEBAR_MODES = ['expanded', 'mini', 'hidden']
+
 function Shell({ children }) {
-  const [collapsed, setCollapsed] = useState(false)
+  // Desktop rail state — persisted across sessions. 'expanded' | 'mini' | 'hidden'.
+  const [mode, setMode] = useState(() => {
+    try {
+      const m = localStorage.getItem(SIDEBAR_KEY)
+      return SIDEBAR_MODES.includes(m) ? m : 'expanded'
+    } catch { return 'expanded' }
+  })
   const [mobileOpen, setMobileOpen] = useState(false)
   const [showNew, setShowNew] = useState(false)
 
   const openNew = () => setShowNew(true)
   const closeMobile = () => setMobileOpen(false)
+  const collapsed = mode === 'mini'
+
+  const applyMode = (m) => {
+    setMode(m)
+    try { localStorage.setItem(SIDEBAR_KEY, m) } catch { /* private mode */ }
+  }
+
+  // Esc closes the mobile drawer.
+  useEffect(() => {
+    if (!mobileOpen) return
+    const onKey = (e) => { if (e.key === 'Escape') closeMobile() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mobileOpen])
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg text-ink">
-      {/* Persistent rail — ≥lg only */}
+      {/* Persistent rail — ≥lg only. The <Sidebar> animates its own width and
+          collapses to 0 when hidden, so the work surface reflows full-width. */}
       <div className="hidden lg:flex">
-        <Sidebar collapsed={collapsed}>
-          <SidebarContent collapsed={collapsed} onNewFile={openNew} />
-          {/* Appearance control + collapse toggle. Expanded → labelled
-              segmented theme switch over its own row, collapse toggle below;
-              collapsed → both shrink to single icon buttons side by side. */}
-          {collapsed ? (
-            <div className="flex flex-col items-center gap-1 px-2 pb-2 -mt-1">
-              <ThemeSwitch collapsed />
-              <Tooltip label="Expand sidebar" side="right">
-                <IconButton size="sm" onClick={() => setCollapsed(false)}>
-                  <ChevronRight size={14} />
-                </IconButton>
-              </Tooltip>
-            </div>
-          ) : (
-            <div className="px-3 pb-2.5 pt-1 space-y-2">
-              <ThemeSwitch />
-              <Tooltip label="Collapse sidebar" side="right" className="w-full">
-                <button
-                  type="button"
-                  onClick={() => setCollapsed(true)}
-                  className="flex items-center gap-1.5 w-full h-7 px-2 rounded-md text-ink-faint hover:text-ink hover:bg-bg-hover transition-colors duration-fast ease-out text-[11px] font-medium tracking-tightish"
-                >
-                  <ChevronLeft size={14} className="flex-shrink-0" />
-                  <span>Collapse</span>
-                </button>
-              </Tooltip>
-            </div>
-          )}
+        <Sidebar mode={mode}>
+          <SidebarContent collapsed={collapsed} onSetMode={applyMode} onNewFile={openNew} />
+          {/* Appearance control lives at the foot; the collapse control now sits
+              at the top of the rail (Sidebar.Brand). */}
+          <div className={collapsed ? 'flex flex-col items-center px-2 pb-2' : 'px-3 pb-3 pt-1'}>
+            <ThemeSwitch collapsed={collapsed} />
+          </div>
         </Sidebar>
       </div>
 
-      {/* Mobile drawer — <lg */}
+      {/* When fully hidden (≥lg), a slim floating control brings the rail back. */}
+      {mode === 'hidden' && (
+        <div className="hidden lg:block absolute left-3 top-3 z-30">
+          <Tooltip label="Show sidebar" side="right">
+            <IconButton size="md" onClick={() => applyMode('expanded')} title="Show sidebar"
+              className="bg-bg-elev1 border border-line shadow-e2">
+              <PanelLeftOpen size={17} />
+            </IconButton>
+          </Tooltip>
+        </div>
+      )}
+
+      {/* Mobile drawer — <lg: off-canvas overlay with scrim (backdrop + Esc close) */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
           <div
             className="absolute inset-0 bg-black/40 animate-fade-in"
             onClick={closeMobile}
             aria-hidden
           />
           <div className="absolute left-0 top-0 bottom-0 animate-drawer-in">
-            <Sidebar collapsed={false} className="h-full shadow-e3">
+            <Sidebar mode="expanded" className="h-full shadow-e3">
               <SidebarContent collapsed={false} onNavigate={closeMobile} onNewFile={openNew} />
               <div className="px-3 pb-3 pt-1">
                 <ThemeSwitch />
@@ -255,7 +269,7 @@ function Shell({ children }) {
         </div>
       )}
 
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-bg">
+      <main className="relative flex-1 flex flex-col min-w-0 overflow-hidden bg-bg">
         {/* Mobile header — only below lg, where the rail is off-canvas */}
         <header className="lg:hidden flex items-center gap-2.5 h-12 px-2 border-b border-line bg-bg-elev2 flex-shrink-0">
           <IconButton size="md" onClick={() => setMobileOpen(true)} title="Open navigation">

@@ -20,6 +20,7 @@
 
 import { createContext, useContext } from 'react'
 import { NavLink } from 'react-router-dom'
+import { PanelLeftClose, PanelLeftOpen, ChevronsLeft } from 'lucide-react'
 
 const SidebarCtx = createContext({ collapsed: false })
 
@@ -39,29 +40,47 @@ export function OfisiMark({ size = 32, className = '' }) {
       focusable="false"
     >
       <defs>
-        <linearGradient id="ofisi-mark-grad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#E86A3E" />
-          <stop offset="1" stopColor="#CF4620" />
+        <linearGradient id="ofisi-mark-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#E8703F" />
+          <stop offset="0.55" stopColor="#D0471F" />
+          <stop offset="1" stopColor="#B23A16" />
+        </linearGradient>
+        <linearGradient id="ofisi-mark-sheen" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#FFFFFF" stopOpacity="0.20" />
+          <stop offset="0.5" stopColor="#FFFFFF" stopOpacity="0" />
         </linearGradient>
       </defs>
       <rect x="1" y="1" width="30" height="30" rx="8.5" fill="url(#ofisi-mark-grad)" />
+      <rect x="1" y="1" width="30" height="30" rx="8.5" fill="url(#ofisi-mark-sheen)" />
       <circle cx="16" cy="16" r="8.4" fill="none" stroke="#FBF3E9" strokeWidth="4.4" />
       <circle cx="16" cy="16" r="2.2" fill="#FBF3E9" />
     </svg>
   )
 }
 
-function Sidebar({ collapsed, children, className = '' }) {
+/**
+ * <Sidebar mode> — three desktop states:
+ *   'expanded' (244px, icons + labels + doc list)
+ *   'mini'     (60px icon-only rail, native tooltips)
+ *   'hidden'   (0px, collapsed off; content goes full-width)
+ * `collapsed` is still accepted as a legacy alias for the mini state.
+ */
+function Sidebar({ mode, collapsed: collapsedProp, children, className = '' }) {
+  const resolved = mode || (collapsedProp ? 'mini' : 'expanded')
+  const collapsed = resolved === 'mini'
+  const hidden = resolved === 'hidden'
   return (
     <SidebarCtx.Provider value={{ collapsed }}>
       <aside
         className={[
           'relative flex flex-col flex-shrink-0',
-          'bg-bg-elev2 text-ink-muted border-r border-line',
-          'transition-[width] duration-base ease-out',
-          collapsed ? 'w-[60px]' : 'w-[244px]',
+          'bg-bg-elev2 text-ink-muted',
+          hidden ? 'border-r-0 overflow-hidden' : 'border-r border-line',
+          'transition-[width,opacity] duration-base ease-out motion-reduce:transition-none',
+          hidden ? 'w-0 opacity-0 pointer-events-none' : collapsed ? 'w-[60px]' : 'w-[244px]',
           className,
         ].join(' ')}
+        aria-hidden={hidden || undefined}
       >
         {children}
       </aside>
@@ -69,23 +88,58 @@ function Sidebar({ collapsed, children, className = '' }) {
   )
 }
 
-Sidebar.Brand = function SidebarBrand({ name = 'Ofisi' }) {
+/**
+ * Sidebar.Brand — mark + wordmark, plus the sidebar collapse control at the top.
+ * When `onSetMode` is provided (desktop rail) it renders the state control:
+ *   expanded → a "minimise" button (to the mini rail)
+ *   mini     → stacked "expand" + "hide" buttons
+ * The mobile drawer omits `onSetMode` (it closes via its own backdrop/Esc).
+ */
+Sidebar.Brand = function SidebarBrand({ name = 'Ofisi', onSetMode }) {
   const { collapsed } = useContext(SidebarCtx)
+
+  const ctrlBtn =
+    'flex items-center justify-center rounded-md text-ink-faint hover:text-ink ' +
+    'hover:bg-bg-hover transition-colors duration-fast ease-out ' +
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40'
+
+  if (collapsed) {
+    // Mini rail: mark on top, then two stacked controls (expand / hide).
+    return (
+      <div className="flex flex-col items-center gap-1.5 pt-2.5 pb-2 border-b border-line flex-shrink-0">
+        <OfisiMark size={28} className="flex-shrink-0 rounded-lg shadow-e1" />
+        {onSetMode && (
+          <div className="flex flex-col items-center gap-0.5">
+            <button type="button" title="Expand sidebar" aria-label="Expand sidebar"
+              onClick={() => onSetMode('expanded')} className={`${ctrlBtn} w-7 h-6`}>
+              <PanelLeftOpen size={15} />
+            </button>
+            <button type="button" title="Hide sidebar" aria-label="Hide sidebar"
+              onClick={() => onSetMode('hidden')} className={`${ctrlBtn} w-7 h-6`}>
+              <ChevronsLeft size={15} />
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
-    <div className={[
-      'flex items-center gap-2.5 h-14 border-b border-line flex-shrink-0',
-      collapsed ? 'justify-center px-0' : 'px-4',
-    ].join(' ')}>
+    <div className="flex items-center gap-2.5 h-14 px-4 border-b border-line flex-shrink-0">
       <OfisiMark size={30} className="flex-shrink-0 rounded-lg shadow-e1" />
-      {!collapsed && (
-        <div className="flex flex-col min-w-0">
-          <span className="font-display text-[20px] font-bold tracking-display text-ink truncate leading-none">
-            {name}
-          </span>
-          <span className="font-mono text-[8.5px] font-medium uppercase tracking-[0.22em] text-ink-faint leading-none mt-[5px]">
-            Office Suite
-          </span>
-        </div>
+      <div className="flex flex-col min-w-0">
+        <span className="font-display text-[20px] font-bold tracking-display text-ink truncate leading-none">
+          {name}
+        </span>
+        <span className="font-mono text-[8.5px] font-medium uppercase tracking-[0.22em] text-ink-faint leading-none mt-[5px]">
+          Office Suite
+        </span>
+      </div>
+      {onSetMode && (
+        <button type="button" title="Minimise sidebar" aria-label="Minimise sidebar"
+          onClick={() => onSetMode('mini')} className={`${ctrlBtn} ml-auto -mr-1 w-7 h-7`}>
+          <PanelLeftClose size={17} />
+        </button>
       )}
     </div>
   )
