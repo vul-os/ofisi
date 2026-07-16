@@ -1,8 +1,9 @@
-# Vulos Office — Design System
+# Ofisi — Design System
 
-This document describes the design language for **Vulos Office** and should be
-treated as the source of truth when extending the UI to new surfaces (Sheets,
-Slides, PDF Signing, Verify, and any sibling apps under the Vulos umbrella).
+This document describes the design language for **Ofisi**, a warm, human,
+real-time collaborative office suite (documents, spreadsheets, slides,
+whiteboards, PDF signing).  It is the source of truth when extending the UI to
+new surfaces.
 
 The system is **token-first**: every colour, font, spacing, radius, shadow,
 and motion value lives in [`tokens.css`](./tokens.css) as a CSS custom property,
@@ -12,69 +13,71 @@ or extend a token instead.
 
 ---
 
-## 1. Direction
+## 1. Direction — "Warm Workshop"
 
-The suite is **dark-first** and aligned with the vulos-cloud landing surface: a
-near-black, restrained, IDE / terminal aesthetic. No rainbow, no glow. Dark is
-the DEFAULT canvas; a clean light theme is opt-in via the app toggle.
+Ofisi has its **own** identity, deliberately distinct from the near-black IDE
+look of sibling products.  It is **light-first** (a workspace should feel like
+daylight), warm, and editorial: an ivory canvas, crisp white paper that pops,
+sand-toned chrome, warm-charcoal ink, and one confident signature accent —
+**ember** (a terracotta-coral).  A well-crafted **warm dark** theme (espresso,
+not slate/black) is a first-class opt-in.
 
 We are drawing from:
 
+- **Craft / Notion (warm mode)** — paper warmth; the document is the protagonist.
 - **Linear** — information density without clutter; quiet active states; keyboard polish.
-- **vulos-cloud / IDE chrome** — near-black surfaces, hairline 1px borders, one deliberate accent.
-- **Tana / Bear** — document-first; the editing surface is the protagonist.
-- **Vercel** — typographic discipline; uppercase mono eyebrows; tight tracking on chrome.
+- **Stripe / Vercel** — typographic discipline; uppercase mono eyebrows; measured tracking.
 
 We are explicitly **avoiding**:
 
 - shadcn defaults, Material Design, default Tailwind UI starters.
 - Glassmorphism, neumorphism, heavy gradients, bloom / glow shadows.
-- Slate-blue dark modes (`#0f172a`), generic react-icons sets, Bootstrap blue (`#3b82f6`).
+- Cold slate greys, the near-black IDE look, Bootstrap blue (`#3b82f6`), the "Inter sameness".
 
 ---
 
 ## 2. Colour
 
-The system is **near-black dark by default** (an IDE baseline), with an opt-in
-light theme. All values live in [`tokens.css`](./tokens.css); the table below
-is a summary — `tokens.css` is authoritative.
+The system is **warm light by default**, with a first-class warm-dark opt-in.
+All values live in [`tokens.css`](./tokens.css); the table below is a summary —
+`tokens.css` is authoritative.
 
 ### 2.1 Palette
 
-| Token           | Dark (default)          | Light (opt-in)         | Purpose                                       |
+| Token           | Light (default)         | Dark (opt-in)          | Purpose                                       |
 | --------------- | ----------------------- | ---------------------- | --------------------------------------------- |
-| `bg`            | `#0c0c0c`               | `#ffffff`              | Base app canvas                               |
-| `bg-elev-1` / `paper` | `#111111`         | `#ffffff`              | Panels, cards, primary surface                |
-| `bg-elev-2`     | `#1a1a1a`               | `#f7f7f7`              | Rails, headers, elevated chrome               |
-| `bg-sunk`       | `#090909`               | `#eeeeee`              | Deepest sunk wells                            |
-| `ink`           | `#e5e5e5`               | `#1a1a1a`              | Primary text                                  |
-| `ink-muted`     | `#cccccc`               | `#444444`              | Secondary text                               |
-| `ink-faint`     | `#888888`               | `#777777`              | Metadata, eyebrows, placeholders              |
-| `line`          | `#1a1a1a`               | `#e8e8e8`              | Hairline dividers, default borders            |
-| `line-strong`   | `#222222`               | `#dcdcdc`              | Input borders, hover-emphasised dividers      |
-| `accent`        | `#0f6a6c` (teal-600)    | `#0f6a6c` (teal-600)   | The one accent. Primary buttons, focus, links |
-| `accent-press`  | `#2dd4bf` (teal-300)    | `#0a4548`              | Bright active text/icon on dark               |
-| `accent-tint`   | `#0e1f1f`               | `#e6f2f1`              | Selected / hover tint on toolbars & anchors   |
-| `brand`         | `#C96AFF` (Vulos purple)| same                   | Occasional brand accent only — never a 2nd UI accent |
+| `bg`            | `#FBF7F1` (ivory)       | `#17130E` (espresso)   | Base app canvas                               |
+| `bg-elev-1` / `paper` | `#FFFFFF`         | `#201B15`              | Panels, cards, topbar — the surface that pops |
+| `bg-elev-2`     | `#F3ECE0` (sand)        | `#2A241C`              | Rail, chips, wells, table headers             |
+| `bg-sunk`       | `#EDE6D9`               | `#120F0A`              | Deepest sunk wells                            |
+| `ink`           | `#2A2723`               | `#F1EBE0`              | Primary text (warm charcoal / warm cream)     |
+| `ink-muted`     | `#6B655C`               | `#C3BAAC`              | Secondary text                                |
+| `ink-faint`     | `#8B8378`               | `#8E8677`              | Metadata, eyebrows, placeholders              |
+| `line`          | `#ECE4D6`               | `#2E2820`              | Hairline dividers, default borders            |
+| `line-strong`   | `#DFD6C6`               | `#3A332A`              | Input borders, hover-emphasised dividers      |
+| `accent`        | `#D0471F` (ember-600)   | `#D0471F` (ember-600)  | The one accent. Primary buttons, focus, links |
+| `accent-press`  | `#AE3917` (ember-700)   | `#FF8759`              | Active text/icon (brightens on dark)          |
+| `accent-tint`   | `#FBEADF`               | `#2E1C12`              | Selected / hover tint on toolbars & anchors   |
+| `brand`         | `#0E8B86` (teal)        | `#2CB5AE`              | Occasional brand mark — never a 2nd UI accent |
 
 ### 2.2 The accent rule
 
-**There is exactly one UI accent: deep teal (`#0f6a6c`).**  It reads calm +
-trustworthy on a Docs/Signing surface and is committed across office + cloud.
-Do not introduce a second UI accent.  **Vulos purple (`#C96AFF`)** exists as an
+**There is exactly one UI accent: ember (`#D0471F`).**  Warm, creative, and
+friendly — right for a delightful collaborative office suite.  Do not introduce
+a second UI accent.  **Teal (`#0E8B86`)** — ember's complement — exists as an
 occasional *brand* mark only (and doubles as the neutral `info` signal); it is
 never a general-purpose interactive accent.  When you need a new category colour
 (e.g. an app icon), use a signal hue or one of the per-app icon tints below.
 
 ### 2.3 Signal + per-app colours
 
-Signal colours are the cloud semantic set: `warning` amber (`#f59e0b`), `error`
-rose (`#f43f5e`), `success` teal (`#2dd4bf`), `info` purple (`#C96AFF`) — each
-with a low-alpha `-bg` companion so backgrounds never shout.  Each app carries
-one low-saturation icon tint so Docs / Sheets / Slides / PDF are
+Signal colours: `warning` amber (`#C77E12`), `error` rose (`#D63B3B`),
+`success` green (`#1E9E57`), `info` teal (`#0E8B86`) — each with a low-alpha
+`-bg` companion so backgrounds never shout (all re-tuned brighter for dark).
+Each app carries one calm icon tint so Docs / Sheets / Slides / PDF / Board are
 findable at a glance (`--app-docs` blue, `--app-sheets` green, `--app-slides`
-amber, `--app-pdf` red) — these colour the icon *stroke* in
-the rail and the Home card chip, never a row background.
+gold, `--app-pdf` rose, `--app-board` violet) — these colour the icon *stroke*
+in the rail and the Home card chip, never a row background.
 
 ---
 
@@ -82,23 +85,27 @@ the rail and the Home card chip, never a row background.
 
 ### 3.1 The trio
 
-| Role     | Token         | Stack                                                                                  |
-| -------- | ------------- | -------------------------------------------------------------------------------------- |
-| Chrome   | `--font-sans` | **Inter** (webfont), then `system-ui`, SF Pro, Segoe UI                                |
-| Document | `--font-serif`| `ui-serif`, then OS-native serifs (Iowan Old Style, Charter, Source Serif Pro, Cambria)|
-| Micro-UI | `--font-mono` | `ui-monospace`, SF Mono, Cascadia Code, Fira Code, JetBrains Mono, Menlo                |
+A warm, characterful trio — all **self-hosted via `@fontsource`** (imported at
+the top of `tokens.css`), never fetched from Google at runtime, so a self-host
+install leaks no IP and stays air-gappable.
 
-Chrome ships **Inter** as a webfont (imported at the top of `tokens.css`) to
-match the vulos-cloud landing exactly across every OS. The **mono** face carries
-the IDE feel: section eyebrows, `kbd` chips, and micro-UI labels (`.mono-label`)
-render in mono with wide tracking. Serif stays reserved for document bodies.
+| Role             | Token           | Face                                                              |
+| ---------------- | --------------- | ---------------------------------------------------------------- |
+| Chrome / UI      | `--font-sans`   | **Hanken Grotesk** — a friendly humanist grotesque               |
+| Document/display | `--font-serif`  | **Fraunces** (opsz) — a soft editorial serif with real warmth    |
+| Micro-UI         | `--font-mono`   | **JetBrains Mono** — crisp mono for eyebrows, kbd, labels        |
 
-**Optional swap**: to change the chrome face, override `--font-sans` in
-`tokens.css` — no other change is needed.
+Fraunces carries both document bodies **and** editorial display moments
+(`--font-display` aliases it): empty-state headlines, the login title, the
+`Ofisi` wordmark.  The **mono** face carries section eyebrows, `kbd` chips, and
+micro-UI labels (`.mono-label`) with wide tracking.
+
+**Optional swap**: to change any face, override `--font-sans` / `--font-serif` /
+`--font-mono` in `tokens.css` — no other change is needed.
 
 ### 3.2 Where each font goes
 
-- **Sans / Inter (chrome)**: the entire app shell, toolbars, sidebars, buttons,
+- **Sans / Hanken Grotesk (chrome)**: the entire app shell, toolbars, sidebars, buttons,
   metadata, comment author names, table headers.
 - **Mono (micro-UI)**: uppercase section eyebrows (`.mono-label`), keyboard
   hints, and terminal-flavoured labels.
@@ -113,8 +120,8 @@ you want an editorial moment (e.g. "Signed." on the post-submit page).
 ### 3.3 Scale and tracking
 
 The scale is `--text-2xs` (11px) → `--text-3xl` (36px), minor-third ratio
-anchored at 14 px.  Chrome uses the token-backed `tracking-tight` (`-0.014em`);
-uppercase mono eyebrows use `tracking-wider` (`0.12em`) for the IDE feel.
+anchored at 14 px.  Chrome uses the token-backed `tracking-tight` (`-0.011em`);
+uppercase mono eyebrows use `tracking-wider` (`0.14em`) for an editorial feel.
 
 Reach for the token-backed tracking utilities so refinement stays consistent.
 
@@ -131,18 +138,18 @@ Generous whitespace beats density — give every section room.
 
 | Token        | Use                                                  |
 | ------------ | ---------------------------------------------------- |
-| `rounded-xs` (4 px) | Inline marks, small chips, suggestion highlights |
-| `rounded-sm` (6 px) | Default buttons, inputs                          |
-| `rounded-md` (8 px) | Cards, segmented controls                        |
-| `rounded-lg` (12 px)| Modals, document canvas, large panels            |
-| `rounded-xl` (16 px)| Hero shells (use sparingly)                      |
+| `rounded-xs` (5 px) | Inline marks, small chips, suggestion highlights |
+| `rounded-sm` (8 px) | Default buttons, inputs                          |
+| `rounded-md` (10 px)| Cards, segmented controls                        |
+| `rounded-lg` (14 px)| Modals, document canvas, large panels            |
+| `rounded-xl` (20 px)| Hero shells (use sparingly)                      |
 | `rounded-pill`      | Badges, pill counters, toggle dots               |
 
 ### 4.3 Elevation
 
-Three steps only.  Shadows are deep and neutral (`rgba(0,0,0,…)` on the
-near-black dark canvas; a soft `rgba(20,20,20,…)` in light mode) with **no
-bloom** — the UI should look printed/inset, not floating.
+Three steps only.  Shadows are soft and warm (a low-alpha `rgba(74,52,30,…)`
+brown in light mode; `rgba(0,0,0,…)` on the espresso dark canvas) with **no
+bloom** — the UI should look printed/resting, not floating.
 
 | Token        | Use                                                       |
 | ------------ | --------------------------------------------------------- |
@@ -289,7 +296,7 @@ protagonist.  All these effects collapse under `prefers-reduced-motion`.
 - Don't use `shadow-2xl` or `shadow-lg`.  Use `e1` / `e2` / `e3`.
 - Don't use emerald / red-500 for success / error.  Use `success` / `error`.
 - Don't introduce a second UI accent — `brand` purple is a mark, not a control.
-- Don't swap Inter for a different chrome face inline.  Override `--font-sans`
+- Don't swap the chrome face inline.  Override `--font-sans`
   in `tokens.css` if a look is needed.
 - Don't introduce framer-motion / motion-one / react-spring without a
   cross-team review — CSS keyframes + Tailwind transitions cover 95 % of
@@ -297,25 +304,29 @@ protagonist.  All these effects collapse under `prefers-reduced-motion`.
 
 ---
 
-## 8. Theme model — dark by default
+## 8. Theme model — light by default, warm dark opt-in
 
-Dark is the **default** canvas (the IDE baseline); light is a first-class
-opt-in, not a grudging inversion.
+Light is the **default** canvas (a workspace should feel like daylight); a
+warm dark is a first-class opt-in, not a grudging inversion.
 
-- The `:root` default IS the dark theme (near-black `#0c0c0c` base, `#111111`
-  paper), matching vulos-cloud — **not** slate (`#0f172a`). `[data-theme="dark"]`
-  is an explicit alias of the default so the cycler has a concrete target.
-- `[data-theme="light"]` opts into the clean white/grey light theme (same teal
-  accent, per-app tints darkened for AA contrast on white).
-- The teal accent (`#0f6a6c`) is committed across both themes; on dark, active
-  text/icons brighten to `accent-press` (`teal-300 #2dd4bf`) for legibility.
-- Signal backgrounds ride a low (10–14 %) alpha overlay so they don't shout.
-- `.paper-grain` reduces its opacity / switches blend in dark so the texture
-  stays subtle.
+- The `:root` default IS the warm light theme (ivory `#FBF7F1` canvas, white
+  paper, sand chrome). `[data-theme="light"]` is an explicit alias of the
+  default so the cycler has a concrete target.
+- `[data-theme="dark"]` opts into the warm **espresso** dark (`#17130E`, **not**
+  slate/black), same ember accent, per-app tints + signals brightened for
+  legibility on the dark chrome.
+- The ember accent (`#D0471F`) is committed across both themes; on dark, active
+  text/icons brighten to `accent-press` (`#FF8759`) for legibility, while the
+  primary CTA keeps `#D0471F` so white button text stays AA.
+- Signal backgrounds ride a low (12–16 %) alpha overlay so they don't shout.
 
 The `useTheme()` hook (in `components/ui/useTheme.js`) provides explicit
-light / dark / system cycling, persisted to `localStorage['vulos.theme']`.
-The cycler IconButton lives in the sidebar footer.
+light / dark / **system** cycling, persisted to `localStorage['ofisi.theme']`
+(honouring a legacy key).  In `system` mode it resolves `prefers-color-scheme`
+to a concrete `data-theme` and follows OS changes live.  An early boot script in
+`index.html` applies the resolved theme before first paint so there is no flash.
+The control surfaces in **three** places: the sidebar footer (segmented +
+collapsed cycler), the app-home top bar (quick cycler), and Settings ▸ Appearance.
 
 ---
 
