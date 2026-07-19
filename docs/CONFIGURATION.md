@@ -43,24 +43,48 @@ storage:
     sslmode: "disable"
 
 persistence:
-  updatelog: false         # CRDT-native persistence, phase 1 (see below)
+  updatelog: false         # CRDT-native persistence (see below)
 ```
 
 ### `persistence.updatelog` — the CRDT update log
 
 Off by default. When `true`, Ofisi exposes the per-file **append-only CRDT
-update log** (`POST`/`GET /api/files/:id/updates`) — the phase-1 durability
+update log** (`POST`/`GET /api/files/:id/updates`) — the durability
 model that supersedes "single blob + 409 compare-and-swap". Every CRDT frame is
 kept (opaque, encrypted-or-plain Yjs / sheet / slide updates), so two clients
 that edited **offline** both converge with nothing discarded. It is **additive**:
 the whole-document PUT keeps working and the frontend dual-writes, so toggling
-this flag never loses a document. Frames live under `<data_dir>/updates/<id>/`
-(filesystem-backed in phase 1, independent of `storage.type`).
+this flag never loses a document.
+
+**Store backend** follows `storage.type` automatically — no separate setting:
+
+| `storage.type` | Update-log backend | Where frames live |
+|----------------|--------------------|-------------------|
+| `local` (default) | filesystem `LocalStore` | `<data_dir>/updates/<id>/` |
+| `s3` | filesystem `LocalStore` (fallback) | `<data_dir>/updates/<id>/` |
+| `postgres` | `PostgresStore` (shares the storage pool) | `office.file_updates` + `office.file_update_snapshots` |
+
+The Postgres backend derives its monotonic per-file seq under a
+transaction-scoped **per-file advisory lock** and runs snapshot-upsert + frame
+prune in one transaction. (S3 has no atomic append-with-monotonic-seq primitive,
+so its durable frame log stays on local disk; the whole-doc PUT still writes the
+object copy to the bucket.)
+
+**Quota**: a frame append passes the **same storage-quota gate** as a whole-doc
+PUT, so the log cannot be used to bypass a storage cap (standalone/unlimited →
+no-op).
+
+**Compaction** is client-driven; the server can only *nudge*. It cannot fold
+opaque CRDT frames into a snapshot itself, so when a file's un-compacted tail
+grows past `updatelog.CompactAdviseThreshold` (default 600) the append response
+returns `compact: true` and the client posts a snapshot. There is no server
+setting to tune here.
 
 The frontend only mirrors edits into the log when built with
-`VITE_UPDATE_LOG=on`; without it the server routes still exist but the client
-keeps using whole-document autosave (and self-disables the log path cleanly if
-the endpoint is absent). Enable both together.
+`VITE_UPDATE_LOG=on` (Docs, Whiteboard, Sheets, and Slides are all wired);
+without it the server routes still exist but the client keeps using
+whole-document autosave (and self-disables the log path cleanly if the endpoint
+is absent). Enable both together.
 
 ---
 

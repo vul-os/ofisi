@@ -96,8 +96,27 @@ flowchart TD
   replaying snapshot+frames converges byte-identically no matter how peers diverged
   offline, so this supersedes last-writer-wins for durability. It is **additive**:
   the frontend dual-writes (whole-doc autosave AND frame append), so the flag can be
-  toggled without losing a document. Phase 1 is filesystem-backed
-  (`data/updates/<id>/`); the server stays content-blind (frames are opaque bytes).
+  toggled without losing a document. The server stays content-blind (frames are
+  opaque bytes).
+  - **Store backends** mirror the primary storage choice: **local/S3 storage →
+    filesystem `LocalStore`** (`data/updates/<id>/`), **postgres storage →
+    `PostgresStore`** (`office.file_updates` + `office.file_update_snapshots`,
+    sharing the storage pool). The Postgres append derives its monotonic per-file
+    seq under a transaction-scoped **per-file advisory lock**, and the snapshot
+    upsert + frame prune run in the same transaction (S3 has no append-with-
+    monotonic-seq primitive, so it falls back to the filesystem log).
+  - **Frames are metered**: an append passes the **same storage-quota gate** as
+    the whole-doc PUT (`billing.GateStorage`), so the log is not a quota bypass
+    (standalone/unlimited → no-op).
+  - **Editors wired**: Docs and Whiteboard (both plain Y.Docs) use the Yjs
+    `UpdateLogSync`; Sheets (LWW grid) and Slides (fractional tree) are op-based
+    CRDTs and use `OpLogSync`, which carries discrete ops as frames and the
+    compacted state as snapshot frames.
+  - **Server-side compaction is advisory only**: the server *cannot* fold opaque
+    CRDT frames into a snapshot (it cannot interpret them). When a file's
+    un-compacted tail exceeds `updatelog.CompactAdviseThreshold` the append
+    response carries `compact: true` (a throttled WARN is also logged) and the
+    client compacts. Client-driven compaction stays primary.
 - **E-signing**: PDF is sealed with a cryptographic hash; audit manifest JSON captures all signer events.
 - **Auth**: JWT-based; configurable (`cfg.Auth.Enabled`). Per-user credentials stored in
   pure-Go SQLite (`backend/userauth/`).

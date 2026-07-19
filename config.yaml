@@ -24,10 +24,12 @@ storage:
     sslmode: "disable"
 
 persistence:
-  # CRDT-native persistence, phase 1. When true, expose the per-file append-only
-  # update log (POST/GET /api/files/:id/updates) that keeps every CRDT frame so
+  # CRDT-native persistence. When true, expose the per-file append-only update
+  # log (POST/GET /api/files/:id/updates) that keeps every CRDT frame so
   # divergent offline edits converge with nothing discarded. ADDITIVE: the
   # whole-document PUT keeps working and the frontend dual-writes, so toggling
-  # this never loses a document. Frames are stored under <data_dir>/updates/<id>/.
+  # this never loses a document. The store backend follows storage.type
+  # (local/s3 -> filesystem <data_dir>/updates/<id>/; postgres -> office.file_updates
+  # + office.file_update_snapshots). Frame appends are storage-quota metered.
   # Env override: VULOS_PERSISTENCE_UPDATELOG / OFISI_UPDATE_LOG.
   updatelog: false
