@@ -93,7 +93,7 @@ export function useCollabFabric({ sessionId, peerId, enabled = true }) {
       // see the HONESTY GUARD note above. On `local-only` we never touch
       // FabricClient at all: configured/joined stay false, giving an honest,
       // calm "Offline" pill instead of a false "Live".
-      const { transport, rendezvousBaseUrl } = await selectCollabTransport()
+      const { transport, rendezvousBaseUrl, rendezvousPrefix } = await selectCollabTransport()
       if (cancelled) return
       if (transport === TRANSPORT_LOCAL_ONLY) {
         console.info('[collab] no reachable transport for this session ' +
@@ -115,6 +115,7 @@ export function useCollabFabric({ sessionId, peerId, enabled = true }) {
           // against this relayd instead of /api/peering/*", derives its own
           // ICE from the relay, and ignores signalingUrl/iceUrl above.
           rendezvousBaseUrl,
+          ...(rendezvousPrefix ? { rendezvousPrefix } : {}),
         })
       } catch (err) {
         // FabricClient construction should not throw, but never let it break the

@@ -60,7 +60,7 @@ export class P2PCollabSession extends EventTarget {
    */
   constructor({
     room, cap, peerId, fileId,
-    signalingUrl, iceUrl, relayBaseUrl, authToken, rendezvousBaseUrl, fabric,
+    signalingUrl, iceUrl, relayBaseUrl, authToken, rendezvousBaseUrl, rendezvousPrefix, fabric,
   }) {
     super()
     if (!room || !room.encKey) throw new Error('P2PCollabSession: missing room keys')
@@ -93,6 +93,9 @@ export class P2PCollabSession extends EventTarget {
         relayBaseUrl: relayBaseUrl || '',
         authToken: authToken || null,
         rendezvousBaseUrl: rendezvousBaseUrl || '',
+        // Same-origin proxy mount (see transportSelection.js); the relay's own
+        // default is used when a caller passes nothing.
+        ...(rendezvousPrefix ? { rendezvousPrefix } : {}),
       })
     }
 

@@ -49,7 +49,7 @@ export class DocsCollabSession extends EventTarget {
    *                                         open rendezvous surface instead of
    *                                         a host box's /api/peering/*
    */
-  constructor({ fileId, peerId, signalingUrl, iceUrl, relayBaseUrl, authToken, rendezvousBaseUrl }) {
+  constructor({ fileId, peerId, signalingUrl, iceUrl, relayBaseUrl, authToken, rendezvousBaseUrl, rendezvousPrefix }) {
     super()
 
     this._fileId = fileId
@@ -71,6 +71,7 @@ export class DocsCollabSession extends EventTarget {
       relayBaseUrl: relayBaseUrl || '',
       authToken: authToken || null,
       rendezvousBaseUrl: rendezvousBaseUrl || '',
+      ...(rendezvousPrefix ? { rendezvousPrefix } : {}),
     })
 
     // Forward peer state events to callers.

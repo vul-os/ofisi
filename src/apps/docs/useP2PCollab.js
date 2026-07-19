@@ -108,7 +108,7 @@ export function useP2PCollab({ fileId, ctx, autoJoinFromLink = true, enabled = t
       // Resolve the three-way transport BEFORE touching the fabric: a
       // standalone server never mounts /api/peering/*, but a configured
       // rendezvous URL still gets a real session — only true local-only fails.
-      const { transport, rendezvousBaseUrl } = await selectCollabTransport()
+      const { transport, rendezvousBaseUrl, rendezvousPrefix } = await selectCollabTransport()
       if (cancelled) return
       if (transport === TRANSPORT_LOCAL_ONLY) {
         console.warn('[p2p] invite link opened, but this server has no reachable ' +
@@ -119,7 +119,7 @@ export function useP2PCollab({ fileId, ctx, autoJoinFromLink = true, enabled = t
       }
       try {
         const session = await YP2PCollabSession.fromInvite({
-          inviteLink, peerId, fileId, ctx, rendezvousBaseUrl,
+          inviteLink, peerId, fileId, ctx, rendezvousBaseUrl, rendezvousPrefix,
         })
         if (cancelled) { session.leave(); return }
         wireSession(session)
@@ -149,7 +149,7 @@ export function useP2PCollab({ fileId, ctx, autoJoinFromLink = true, enabled = t
     // Resolve BEFORE minting a room: on a bare standalone server (no host-box
     // peering AND no rendezvous URL configured) the room's invite links would
     // look real but never connect anyone.
-    const { transport, rendezvousBaseUrl } = await selectCollabTransport()
+    const { transport, rendezvousBaseUrl, rendezvousPrefix } = await selectCollabTransport()
     if (transport === TRANSPORT_LOCAL_ONLY) {
       setPeeringUnavailable(true)
       throw new Error('peering-unavailable')
@@ -170,7 +170,7 @@ export function useP2PCollab({ fileId, ctx, autoJoinFromLink = true, enabled = t
     const originBase = reachable || (typeof window !== 'undefined' ? window.location.origin : '')
     const baseUrl = originBase ? `${originBase}${pathname}` : undefined
     const { session, rwLink, roLink, roomId: rid } = await YP2PCollabSession.create({
-      peerId, fileId, baseUrl, ctx, rendezvousBaseUrl,
+      peerId, fileId, baseUrl, ctx, rendezvousBaseUrl, rendezvousPrefix,
     })
     wireSession(session)
     sessionRef.current = session
