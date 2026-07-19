@@ -91,6 +91,43 @@ is absent). Enable both together.
 
 ---
 
+### `VITE_SUBSTRATE_SYNC` — run Sheets on the shared substrate engine
+
+Off by default. Frontend build flag only; there is no server setting.
+
+Ofisi's Sheets grid ships two interchangeable CRDT implementations:
+
+* **off (default)** — `src/lib/crdt/grid.js`, the hand-rolled LWW map.
+* **`VITE_SUBSTRATE_SYNC=on`** — `src/lib/crdt/substrateGrid.js`, an LWW
+  register per [`substrate/SYNC.md`](../../dmtap/substrate/SYNC.md) §4.4
+  computed by the **shared** `dmtap-sync` engine (`third_party/dmtap-sync-wasm`)
+  — the same compiled core a Rust server runs, rather than a second
+  implementation of the same spec.
+
+Storage and transport are identical on both paths: the same `OpLogSync`
+adapter, the same server update log, the same fabric wire types. Only the merge
+algebra differs.
+
+**This must be uniform across a deployment.** The two engines are each
+convergent but do not share a total order — `grid.js` resolves a conflicting
+write by `(lamport counter, replicaId)` and ignores wall-clock time, while the
+substrate uses a full HLC `(wall, counter, author)`. For two concurrent writes
+to one cell they can pick different winners, so a build-time flag (rather than a
+per-user rollout) is what keeps every replica on one engine.
+
+**Cost.** The engine is WASM and loads by dynamic import: with the flag off a
+client downloads **nothing** extra. With it on, first opening a spreadsheet
+fetches ~22 kB of JS (5.4 kB gzipped) and a 395.9 kB WebAssembly module
+(157.5 kB gzipped), once. If that load fails the editor falls back to the
+`grid.js` path rather than presenting a grid that records nothing.
+
+Docs and Whiteboard are **not** affected: they use Yjs for rich text, which the
+substrate's algebra does not model. Slides is not affected either — see
+`src/lib/crdt/__tests__/substrateTree.mapping.test.js` for exactly how far the
+substrate's movable tree reproduces it and what remains.
+
+---
+
 ### `collab.rendezvous_url` — P2P collaboration with no Vulos OS / host box
 
 Blank by default. Ofisi's own backend never mediates live collaboration — the
