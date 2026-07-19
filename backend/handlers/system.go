@@ -63,19 +63,34 @@ func PublicBaseURL() string {
 // be a LAN-only address). When VULOS_OFFICE_PUBLIC_URL is unset the response's
 // public_base_url is empty and the client falls back to its own origin.
 //
-// It also surfaces `rendezvous_url` (config.yaml `collab.rendezvous_url` /
-// VULOS_RENDEZVOUS_URL) — the base URL of any vulos-relayd's OPEN rendezvous
-// surface the browser can talk to DIRECTLY, with no host-box `/api/peering/*`
-// at all. This is what lets a standalone Ofisi (see main.go — it mounts no
-// `/api/peering/*`) get real P2P collaboration: see docs/COLLABORATION.md §3
-// for the three-way transport selection (host-box peering | any relayd
-// rendezvous | local-only) this enables. Empty when unset, same honesty
-// contract as public_base_url.
+// It also surfaces the OS-free P2P discovery facts (see docs/COLLABORATION.md §3
+// for the three-way transport selection: host-box peering | any relayd
+// rendezvous | local-only):
+//
+//   - `rendezvous_url` — the operator's configured relayd (config.yaml
+//     `collab.rendezvous_url` / VULOS_RENDEZVOUS_URL). Reported for honesty:
+//     it names WHICH relay this deployment discovers peers through. Empty when
+//     unset, same contract as public_base_url.
+//   - `rendezvous_proxy_path` — the SAME-ORIGIN path the browser must actually
+//     call (`/api/rendezvous`). The browser cannot call the relayd's origin
+//     directly: relayd's rendezvous surface sends no CORS headers and 405s the
+//     preflight, so a cross-origin fetch fails in the browser. Ofisi therefore
+//     pass-through-proxies the protocol on its own origin — see
+//     rendezvous_proxy.go for what that does and does not change about the
+//     trust model (content-blind either way). Empty when no rendezvous is
+//     configured, and the client MUST treat empty as "not available" rather
+//     than guessing the path.
 func (h *SystemHandler) Reachability(c *gin.Context) {
+	rdv := strings.TrimRight(strings.TrimSpace(h.cfg.Collab.RendezvousURL), "/")
+	proxyPath := ""
+	if rdv != "" {
+		proxyPath = "/api" + RendezvousProxyPrefix
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"public_base_url": PublicBaseURL(),
-		"deploy_mode":     h.deployMode,
-		"rendezvous_url":  strings.TrimRight(strings.TrimSpace(h.cfg.Collab.RendezvousURL), "/"),
+		"public_base_url":       PublicBaseURL(),
+		"deploy_mode":           h.deployMode,
+		"rendezvous_url":        rdv,
+		"rendezvous_proxy_path": proxyPath,
 	})
 }
 
