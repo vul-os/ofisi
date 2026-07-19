@@ -259,20 +259,14 @@ func main() {
 	// no secrets, only the public base + deploy mode — so the collab layer can
 	// resolve a reachable base for P2P invite links before/around auth.
 	api.GET("/reachability", systemHandler.Reachability)
-	// OS-free P2P discovery: same-origin pass-through to the operator-configured
-	// vulos-relayd rendezvous surface. Mounted ONLY when collab.rendezvous_url is
-	// set — with no rendezvous configured these routes do not exist and collab
-	// stays honestly local-only. UNAUTHENTICATED for the same reason
-	// /api/reachability is: it carries no secrets, forwards no credentials
-	// upstream, and the rendezvous protocol authenticates itself with Ed25519
-	// signatures. It is content-blind (opaque sealed blobs) and is discovery
-	// only — document edits never traverse it. See
-	// backend/handlers/rendezvous_proxy.go and docs/COLLABORATION.md §3.
-	if rdvProxy := handlers.NewRendezvousProxyHandler(cfg.Collab.RendezvousURL); rdvProxy != nil {
-		api.Any(handlers.RendezvousProxyPrefix+"/*path", rdvProxy.Proxy)
-		log.Printf("[collab] rendezvous proxy: /api%s -> %s (discovery only, content-blind)",
-			handlers.RendezvousProxyPrefix, rdvProxy.Upstream())
-	}
+	// OS-free P2P discovery needs no route here: the browser calls the
+	// operator-configured vulos-relayd's rendezvous surface DIRECTLY, using the
+	// `rendezvous_url` that /api/reachability reports. Ofisi carried a
+	// same-origin pass-through proxy for exactly as long as relayd's rendezvous
+	// role sent no CORS headers; it does now, so the server is out of that path
+	// entirely and never sees the discovery envelopes. See
+	// docs/COLLABORATION.md §3.
+	//
 	// Rate-limit the self-service password change: it re-verifies the CURRENT
 	// password, so without a limit it is an online brute-force oracle. 5
 	// attempts/minute per client IP is ample for a human while blunting

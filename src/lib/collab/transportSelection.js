@@ -17,13 +17,13 @@
  *      no Vulos OS, no account. THE PAYOFF: this is what makes standalone
  *      Ofisi capable of real P2P.
  *
- *      The browser reaches that surface through Ofisi's OWN origin at
- *      `/api/rendezvous/*` (reported as `rendezvous_proxy_path`), not by
- *      calling the relayd's origin directly. That is forced by the relay, not
- *      chosen: relayd's rendezvous service sends no CORS headers and 405s the
- *      preflight, so a direct cross-origin fetch fails in the browser (proven
- *      in e2e-p2p/). The proxy is discovery-only and content-blind — see
- *      backend/handlers/rendezvous_proxy.go and docs/COLLABORATION.md §3.
+ *      The browser calls that relayd's origin DIRECTLY, cross-origin. Ofisi's
+ *      server is not in the discovery path at all, so it never sees even the
+ *      (already content-blind) rendezvous envelopes. This relies on relayd's
+ *      rendezvous role serving CORS, which e2e-p2p/ asserts against a real
+ *      relayd and a real browser. Ofisi previously pass-through-proxied the
+ *      protocol on its own origin because relayd sent no CORS headers and 405'd
+ *      the preflight; that proxy is gone. See docs/COLLABORATION.md §3.
  *   3. LOCAL_ONLY    — neither is available. The editor keeps working; it
  *      just never opens a transport. Honest "Offline" / disabled affordances,
  *      never a false "Live".
@@ -36,30 +36,25 @@
  */
 
 import { probePeeringAvailable } from './peeringAvailability.js'
-import { resolveRendezvous } from './reachableBase.js'
+import { resolveRendezvousUrl } from './reachableBase.js'
 
 export const TRANSPORT_HOST_PEERING = 'host-peering'
 export const TRANSPORT_RENDEZVOUS = 'rendezvous'
 export const TRANSPORT_LOCAL_ONLY = 'local-only'
 
 /**
- * The same-origin mount the backend proxies to the configured relayd. Must match
- * RendezvousProxyPrefix in backend/handlers/rendezvous_proxy.go. Used only as the
- * fallback when the server does not report `rendezvous_proxy_path` (an older
- * backend); a server that reports one wins.
+ * relayd's own mount prefix for the rendezvous protocol — its `-rendezvous-prefix`
+ * default, and what `collab.rendezvous_url` is expected to front.
  */
-export const RENDEZVOUS_PROXY_PREFIX = '/api/rendezvous'
+export const RENDEZVOUS_PREFIX = '/rendezvous'
 
 /**
  * @typedef {object} TransportChoice
  * @property {'host-peering'|'rendezvous'|'local-only'} transport
- * @property {string} rendezvousBaseUrl  origin the browser actually calls (our
- *   own, because of the relay's CORS posture); '' unless transport is 'rendezvous'
+ * @property {string} rendezvousBaseUrl  origin the browser calls — the
+ *   operator-configured relayd itself; '' unless transport is 'rendezvous'
  * @property {string} rendezvousPrefix  path prefix under that origin ('' unless
  *   transport is 'rendezvous')
- * @property {string} rendezvousUpstreamUrl  the operator-configured relayd this
- *   deployment discovers peers through — reporting/honesty only, never fetched
- *   by the browser ('' unless transport is 'rendezvous')
  */
 
 /**
@@ -69,14 +64,14 @@ export const RENDEZVOUS_PROXY_PREFIX = '/api/rendezvous'
  *
  * @param {object} [opts]
  * @param {() => Promise<boolean>} [opts.probeHostPeering] override for tests
- * @param {() => Promise<{url: string, proxyPath: string}>} [opts.resolveRendezvousFacts] override for tests
+ * @param {() => Promise<string>} [opts.resolveRendezvous] override for tests
  * @returns {Promise<TransportChoice>}
  */
 export async function selectCollabTransport({
   probeHostPeering = probePeeringAvailable,
-  resolveRendezvousFacts = resolveRendezvous,
+  resolveRendezvous = resolveRendezvousUrl,
 } = {}) {
-  const none = { transport: TRANSPORT_LOCAL_ONLY, rendezvousBaseUrl: '', rendezvousPrefix: '', rendezvousUpstreamUrl: '' }
+  const none = { transport: TRANSPORT_LOCAL_ONLY, rendezvousBaseUrl: '', rendezvousPrefix: '' }
 
   let hostAvailable = false
   try {
@@ -88,27 +83,19 @@ export async function selectCollabTransport({
     return { ...none, transport: TRANSPORT_HOST_PEERING }
   }
 
-  let facts = null
+  let url = ''
   try {
-    facts = await resolveRendezvousFacts()
+    const resolved = await resolveRendezvous()
+    url = typeof resolved === 'string' ? resolved : ''
   } catch {
-    facts = null
+    url = '' // fail safe — an unresolvable rendezvous means local-only, not a throw
   }
-  const upstream = facts && typeof facts.url === 'string' ? facts.url : ''
-  if (!upstream) return none
+  if (!url) return none
 
-  // The rendezvous protocol is served to the browser on OUR origin (the backend
-  // forwards it); a server that predates the proxy reports no proxyPath, and we
-  // fall back to the constant rather than calling the relayd cross-origin —
-  // which the browser would block anyway.
-  const prefix = (facts.proxyPath || RENDEZVOUS_PROXY_PREFIX).replace(/\/+$/, '')
-  const origin = typeof window !== 'undefined' && window.location ? window.location.origin : ''
-  if (!origin) return none
-
+  // Straight at the relay: no Ofisi origin in the discovery path.
   return {
     transport: TRANSPORT_RENDEZVOUS,
-    rendezvousBaseUrl: origin,
-    rendezvousPrefix: prefix,
-    rendezvousUpstreamUrl: upstream,
+    rendezvousBaseUrl: url.replace(/\/+$/, ''),
+    rendezvousPrefix: RENDEZVOUS_PREFIX,
   }
 }

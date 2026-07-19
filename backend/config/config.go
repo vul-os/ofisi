@@ -29,6 +29,12 @@ type CollabConfig struct {
 	// host-box `/api/peering/*` path when one is present, or local-only when it
 	// is not — byte-identical to behaviour before this option existed.
 	//
+	// Because the browser calls this URL CROSS-ORIGIN, the relayd behind it must
+	// serve its rendezvous role with CORS (every vulos-relay since the role
+	// shipped with CORS does; e2e-p2p/ asserts the posture against a real one).
+	// It must also be reachable from wherever users load Ofisi — an https page
+	// cannot call an http relay, so a public deployment needs TLS on the relay.
+	//
 	// Read-only from the browser's perspective: exposed at the unauthenticated
 	// GET /api/reachability as `rendezvous_url` so it can be picked up without a
 	// frontend rebuild. Env override: VULOS_RENDEZVOUS_URL / OFISI_RENDEZVOUS_URL.

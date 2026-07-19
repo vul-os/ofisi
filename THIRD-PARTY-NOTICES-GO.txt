@@ -4802,7 +4802,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-golang.org/x/image/font/gofont/goregular  v0.43.0
+golang.org/x/image  v0.43.0
 Licence declared by the component: BSD-3-Clause
 Source: https://cs.opensource.google/go/x/image/+/v0.43.0:LICENSE
 Ecosystem: Go

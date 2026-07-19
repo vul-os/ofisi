@@ -30,13 +30,15 @@
  *   • the negative control: with the relayd stopped, the same flow does not
  *     connect.
  *
- * ── Why the browser calls /api/rendezvous instead of the relayd ─────────────
+ * ── The browser calls the relayd DIRECTLY ───────────────────────────────────
  *
- * relayd's rendezvous surface sends no CORS headers and 405s the preflight, so
- * a direct cross-origin fetch from Ofisi's origin cannot work. That is asserted
- * below as a fact about the relay (not assumed), and it is why Ofisi
- * pass-through-proxies the protocol on its own origin. See
- * backend/handlers/rendezvous_proxy.go.
+ * There is no Ofisi server in the discovery path: the pages fetch the relay's
+ * own origin cross-origin, which works because relayd's rendezvous role serves
+ * CORS. That is asserted below as a measured fact about the relay (not assumed),
+ * including from a real browser, since only a browser enforces CORS. It also
+ * sharpens every assertion in this file: rendezvous traffic appears in the
+ * browsers' request logs pointed at the RELAY's origin, so "the signaling went
+ * through the relayd" is visible directly rather than inferred through a proxy.
  */
 
 import { test, expect } from '@playwright/test'
@@ -237,7 +239,10 @@ test('a standalone Ofisi advertises the rendezvous and mounts no host-box peerin
 
   const reach = await (await request.get(`${a.url}/api/reachability`)).json()
   expect(reach.rendezvous_url).toBe(stack.relayUrl)
-  expect(reach.rendezvous_proxy_path).toBe('/api/rendezvous')
+  // The browser is given the relay's own origin and calls it directly; this
+  // server mounts nothing for the rendezvous protocol.
+  expect((await request.get(`${a.url}/api/rendezvous/healthz`)).status(),
+    'Ofisi must not mount a rendezvous proxy — the browser talks to the relay').toBe(404)
 })
 
 test('THE PAYOFF — two standalone Ofisi servers collaborate P2P through the relayd', async ({ browser }) => {
@@ -267,16 +272,17 @@ test('THE PAYOFF — two standalone Ofisi servers collaborate P2P through the re
     const fragment = rwLink.split('#')[1]
     await openDoc(pageB, `${b.url}/docs/${docB}#${fragment}`)
 
-    // Both sides must announce themselves to the relay (through their own
-    // server's same-origin proxy) before anything can connect.
+    // Both sides must announce themselves to the relay — directly, cross-origin
+    // — before anything can connect. Note the URLs matched here are the RELAY's
+    // origin, not either Ofisi's: that is the whole point.
     await expect
-      .poll(() => reqA.filter((r) => r.url.includes('/api/rendezvous/')).length, {
+      .poll(() => reqA.filter((r) => r.url.startsWith(`${stack.relayUrl}/rendezvous/`)).length, {
         message: 'peer A never spoke the rendezvous protocol',
         timeout: 60_000,
       })
       .toBeGreaterThan(0)
     await expect
-      .poll(() => reqB.filter((r) => r.url.includes('/api/rendezvous/')).length, {
+      .poll(() => reqB.filter((r) => r.url.startsWith(`${stack.relayUrl}/rendezvous/`)).length, {
         message: 'peer B never spoke the rendezvous protocol',
         timeout: 60_000,
       })
@@ -285,7 +291,7 @@ test('THE PAYOFF — two standalone Ofisi servers collaborate P2P through the re
     // RELAY-SIDE GROUND TRUTH: the key each browser announced is really in the
     // relay's presence store. Read straight from the relay's own origin.
     const announcedKeys = [...reqA, ...reqB]
-      .filter((r) => r.url.includes('/api/rendezvous/announce') && r.postData)
+      .filter((r) => r.url.startsWith(`${stack.relayUrl}/rendezvous/announce`) && r.postData)
       .map((r) => { try { return JSON.parse(r.postData).key } catch { return null } })
       .filter(Boolean)
     expect(announcedKeys.length, 'no signed announce was sent to the relay').toBeGreaterThan(0)
@@ -344,7 +350,7 @@ test('THE PAYOFF — two standalone Ofisi servers collaborate P2P through the re
     const anyDirect = directPairs.some((p) => p.localType === 'host' && p.remoteType === 'host')
     // The relay circuit is the rendezvous MAILBOX (content-blind, ciphertext
     // only) — distinct from the signal inbox used for offer/answer/ICE.
-    const mailboxCalls = [...reqA, ...reqB].filter((r) => r.url.includes('/api/rendezvous/mailbox')).length
+    const mailboxCalls = [...reqA, ...reqB].filter((r) => r.url.startsWith(`${stack.relayUrl}/rendezvous/mailbox`)).length
 
     console.log('[p2p-e2e] transport — direct pairs:', JSON.stringify(directPairs),
       '| relay-circuit mailbox calls:', mailboxCalls)
@@ -444,13 +450,10 @@ test('NEGATIVE — with no rendezvous configured, standalone Ofisi reports local
   const lo = stack.localOnly
   expect(lo, 'the local-only instance must be booted for this test').toBeTruthy()
 
-  // The server tells the truth: no rendezvous, no proxy path, and the proxy
-  // routes do not exist at all.
+  // The server tells the truth: no rendezvous configured, and no host-box
+  // peering either — so there is nothing for the client to reach for.
   const reach = await (await request.get(`${lo.url}/api/reachability`)).json()
   expect(reach.rendezvous_url).toBe('')
-  expect(reach.rendezvous_proxy_path).toBe('')
-  expect((await request.get(`${lo.url}/api/rendezvous/healthz`)).status(),
-    'the rendezvous proxy must not be mounted when nothing is configured').toBe(404)
   expect((await request.get(`${lo.url}/api/peering/ice`)).status()).toBe(404)
 
   const docId = await createDoc(lo.url, 'Local Only')
@@ -473,7 +476,7 @@ test('NEGATIVE — with no rendezvous configured, standalone Ofisi reports local
     expect(links, 'a local-only deployment must not mint invite links').toHaveLength(0)
 
     // And it never reached for a transport it does not have.
-    expect(reqs.filter((r) => r.url.includes('/api/rendezvous/'))).toHaveLength(0)
+    expect(reqs.filter((r) => r.url.includes('/rendezvous/'))).toHaveLength(0)
     expect(reqs.filter((r) => r.url.includes('/api/peering/stream'))).toHaveLength(0)
   } finally {
     await ctx.close()

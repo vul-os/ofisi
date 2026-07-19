@@ -140,10 +140,7 @@ describe('useCollabFabric', () => {
       if (String(url).includes('/api/reachability')) {
         return {
           ok: true,
-          json: async () => ({
-            rendezvous_url: 'https://relay.example.org',
-            rendezvous_proxy_path: '/api/rendezvous',
-          }),
+          json: async () => ({ rendezvous_url: 'https://relay.example.org' }),
         }
       }
       return { ok: false, status: 404 }
@@ -158,11 +155,12 @@ describe('useCollabFabric', () => {
     await waitFor(() => expect(result.current.fabric).not.toBeNull())
     expect(result.current.configured).toBe(true)
     await waitFor(() => expect(result.current.joined).toBe(true))
-    // The fabric is pointed at OUR origin + the proxy prefix: relayd's
-    // rendezvous surface sends no CORS headers, so the browser reaches the
-    // configured relay THROUGH this server (backend/handlers/rendezvous_proxy.go).
-    expect(lastFabric.opts.rendezvousBaseUrl).toBe(window.location.origin)
-    expect(lastFabric.opts.rendezvousPrefix).toBe('/api/rendezvous')
+    // The fabric is pointed straight at the configured relayd's own origin —
+    // relayd's rendezvous role serves CORS, so the browser calls it directly and
+    // this server is not in the discovery path at all.
+    expect(lastFabric.opts.rendezvousBaseUrl).toBe('https://relay.example.org')
+    expect(lastFabric.opts.rendezvousPrefix).toBe('/rendezvous')
+    expect(lastFabric.opts.rendezvousBaseUrl).not.toBe(window.location.origin)
     expect(lastFabric.opts.sessionId).toBe('file-rv')
     expect(lastFabric.opts.peerId).toBe('rep-rv')
   })

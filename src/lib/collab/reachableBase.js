@@ -26,8 +26,10 @@
  * The SAME endpoint also surfaces `rendezvous_url` (config.yaml
  * `collab.rendezvous_url` / VULOS_RENDEZVOUS_URL — see backend/config/config.go):
  * the base URL of any vulos-relayd's OPEN rendezvous surface (announce/resolve/
- * signal/mailbox + ICE) that the BROWSER can talk to DIRECTLY, with no host-box
- * `/api/peering/*` in the loop at all. When set, a standalone Ofisi binary
+ * signal/mailbox + ICE) that the BROWSER talks to DIRECTLY — cross-origin, with
+ * no host-box `/api/peering/*` and no Ofisi server in the loop at all (relayd's
+ * rendezvous role serves CORS, so our origin never sees the discovery
+ * envelopes). When set, a standalone Ofisi binary
  * (which mounts no `/api/peering/*`, see main.go) can still get real
  * peer-to-peer collaboration — see transportSelection.js for how this and
  * host-box peering combine, and docs/COLLABORATION.md §3 for the full picture.
@@ -41,14 +43,12 @@
 const REACHABILITY_URL = '/api/reachability'
 const PROBE_TIMEOUT_MS = 2500
 
-/** @type {Promise<{ base: string, rendezvousUrl: string, rendezvousProxyPath: string }> | null} */
+/** @type {Promise<{ base: string, rendezvousUrl: string }> | null} */
 let cached = null
 /** @type {string} last synchronously-available resolved base ('' until first resolve) */
 let resolvedSync = ''
 /** @type {string} last synchronously-available resolved rendezvous URL */
 let resolvedRendezvousSync = ''
-/** @type {string} last synchronously-available same-origin rendezvous proxy path */
-let resolvedRendezvousProxySync = ''
 
 function windowOrigin() {
   return typeof window !== 'undefined' && window.location ? window.location.origin : ''
@@ -88,11 +88,10 @@ export function rendezvousUrlSync() {
  */
 function resolveReachability({ force = false } = {}) {
   if (!force && cached) return cached
-  const fallback = { base: windowOrigin(), rendezvousUrl: '', rendezvousProxyPath: '' }
+  const fallback = { base: windowOrigin(), rendezvousUrl: '' }
   if (typeof fetch !== 'function') {
     resolvedSync = fallback.base
     resolvedRendezvousSync = fallback.rendezvousUrl
-    resolvedRendezvousProxySync = fallback.rendezvousProxyPath
     return Promise.resolve(fallback)
   }
 
@@ -106,7 +105,6 @@ function resolveReachability({ force = false } = {}) {
         if (!res?.ok) {
           resolvedSync = fallback.base
           resolvedRendezvousSync = fallback.rendezvousUrl
-          resolvedRendezvousProxySync = fallback.rendezvousProxyPath
           return fallback
         }
         const body = await res.json()
@@ -114,19 +112,15 @@ function resolveReachability({ force = false } = {}) {
         const base = pub ? pub.replace(/\/+$/, '') : fallback.base
         const rv = body && typeof body.rendezvous_url === 'string' ? body.rendezvous_url.trim() : ''
         const rendezvousUrl = rv ? rv.replace(/\/+$/, '') : ''
-        const pp = body && typeof body.rendezvous_proxy_path === 'string' ? body.rendezvous_proxy_path.trim() : ''
-        const rendezvousProxyPath = rendezvousUrl && pp ? pp.replace(/\/+$/, '') : ''
         resolvedSync = base
         resolvedRendezvousSync = rendezvousUrl
-        resolvedRendezvousProxySync = rendezvousProxyPath
-        return { base, rendezvousUrl, rendezvousProxyPath }
+        return { base, rendezvousUrl }
       } finally {
         if (timer) clearTimeout(timer)
       }
     } catch {
       resolvedSync = fallback.base
       resolvedRendezvousSync = fallback.rendezvousUrl
-      resolvedRendezvousProxySync = fallback.rendezvousProxyPath
       return fallback
     }
   })()
@@ -163,43 +157,10 @@ export async function resolveRendezvousUrl(opts) {
 }
 
 /**
- * Resolve BOTH rendezvous facts at once, as transportSelection.js consumes them:
- *
- *   • `url`       — the operator-configured relayd (`rendezvous_url`). Identifies
- *                   WHICH relay this deployment discovers peers through; the
- *                   browser never fetches it directly (the relay serves no CORS).
- *   • `proxyPath` — the same-origin path Ofisi forwards that relayd's rendezvous
- *                   protocol on (`rendezvous_proxy_path`, normally
- *                   `/api/rendezvous`). '' when the server predates the proxy.
- *
- * Both are '' when no rendezvous is configured. Never throws — same fallback
- * contract as the rest of this module.
- *
- * @param {object} [opts]
- * @param {boolean} [opts.force=false] bypass the cache and re-resolve
- * @returns {Promise<{ url: string, proxyPath: string }>}
- */
-export async function resolveRendezvous(opts) {
-  const { rendezvousUrl, rendezvousProxyPath } = await resolveReachability(opts)
-  return { url: rendezvousUrl, proxyPath: rendezvousProxyPath }
-}
-
-/**
- * Synchronous best-effort same-origin rendezvous proxy path; '' until
- * `resolveRendezvous()` / `resolveReachableBase()` has completed, or when no
- * rendezvous is configured.
- * @returns {string}
- */
-export function rendezvousProxyPathSync() {
-  return resolvedRendezvousProxySync
-}
-
-/**
  * Test-only: clear the cached resolution so a fresh fetch runs.
  */
 export function _resetReachableBaseCache() {
   cached = null
   resolvedSync = ''
   resolvedRendezvousSync = ''
-  resolvedRendezvousProxySync = ''
 }
