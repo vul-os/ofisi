@@ -529,14 +529,14 @@ export class FabricClient extends EventTarget {
     if (!ps) return                       // peer limit reached
 
     if (type === 'offer') {
-      // GLARE GUARD (local patch — see VENDOR.md "Local patches").
+      // GLARE GUARD.
       //
       // Over the rendezvous transport BOTH peers see each other's `join` on the
       // shared presence board, so both call _initiatePeer() and both send an
       // offer. Without a tie-break each side then reset()s its own connection to
       // answer the other's offer, both offers are abandoned, and the negotiation
       // deadlocks until the 8s relay timer fires — observed failing ~1 run in 3
-      // in the real-transport E2E (ofisi e2e-p2p/).
+      // in the real-transport E2E.
       //
       // Standard perfect-negotiation resolution: exactly one side is "polite",
       // decided by a comparison both sides compute identically and oppositely.
@@ -595,7 +595,7 @@ export class FabricClient extends EventTarget {
 
   _setRelayTimer(remoteId, ps) {
     clearTimeout(ps.relayTimer)
-    // GLARE/FALLBACK SYMMETRY (local patch — see VENDOR.md "Local patches").
+    // GLARE/FALLBACK SYMMETRY.
     // Start listening on the relay circuit as soon as a negotiation is in
     // flight, not only once WE give up on it. The peer may give up before we do
     // (its timer, its NAT), and it then deposits into OUR mailbox — which we
@@ -611,16 +611,14 @@ export class FabricClient extends EventTarget {
   }
 
   /**
-   * Keep trying to rebuild a dropped peer connection (local patch — see
-   * VENDOR.md "Local patches").
+   * Keep trying to rebuild a dropped peer connection.
    *
    * The previous behaviour was ONE retry, 2s after the data channel closed. Over
    * the rendezvous transport that single attempt is often spent while the
    * network is still down (a sleeping laptop, a dropped link), and nothing ever
    * tries again: the peer's `join` is dispatched only once per peer from the
    * presence board, so the signaling layer will not re-trigger negotiation
-   * either. The session then stayed dead until a page reload — the exact case
-   * the offline-divergence E2E exercises.
+   * either. The session then stayed dead until a page reload.
    *
    * Retries with exponential back-off (2s → 16s), stops on success, on an
    * explicit peer `leave`, and when the client is torn down.
@@ -844,9 +842,8 @@ export class FabricClient extends EventTarget {
       this._relayedBytesIn += _byteSize(msg.data)
       // A blob arriving from this peer proves the relay circuit works in at
       // least one direction and that the peer has given up on direct. Adopt it
-      // for our own sends too (local patch — see VENDOR.md), otherwise our
-      // replies keep being dropped against a peer we still list as
-      // 'connecting' and the fallback stays half-open.
+      // for our own sends too, otherwise our replies keep being dropped against
+      // a peer we still list as 'connecting' and the fallback stays half-open.
       const senderPs = this._peers.get(blob.from)
       if (senderPs && senderPs.state !== 'connected' && senderPs.state !== 'relay') {
         clearTimeout(senderPs.relayTimer)
@@ -1197,7 +1194,7 @@ class PeerState {
     this.state = 'disconnected'
     this.relayTimer = null
     this.pendingCandidates = []
-    // Reconnect bookkeeping (local patch — see VENDOR.md "Local patches").
+    // Reconnect bookkeeping.
     this.reinitTimer = null
     this.reinitDelay = 0
     this.left = false         // peer sent an explicit 'leave' — do not chase it

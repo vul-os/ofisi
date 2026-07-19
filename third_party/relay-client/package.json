@@ -21,6 +21,7 @@
     "./fabric": "./src/fabric.js",
     "./rendezvous": "./src/rendezvous.js",
     "./rendezvousSignaling": "./src/rendezvousSignaling.js",
+    "./chunkProof": "./src/chunkProof.js",
     "./presence": "./src/presence.js",
     "./call": "./src/call/index.js",
     "./useLiveCursors": "./src/useLiveCursors.js",
