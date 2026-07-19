@@ -14,11 +14,15 @@
  *
  * Availability posture (also honest): a standalone Office binary never mounts
  * `/api/peering/*` — links minted here would look real but never connect
- * anyone. useP2PCollab's startShare() probes for this BEFORE minting a room
- * and, when unreachable, rejects instead of resolving with links — so callers
- * pass `unavailable` here rather than leaving this modal stuck on "Preparing
- * room…" forever (the previous behaviour when startShare's error was simply
- * swallowed by the caller).
+ * anyone, UNLESS this deployment has a rendezvous URL configured
+ * (config.yaml `collab.rendezvous_url` / VULOS_RENDEZVOUS_URL), in which case
+ * the session runs against that relayd directly with no host box at all (see
+ * transportSelection.js, docs/COLLABORATION.md §3). useP2PCollab's
+ * startShare() resolves the three-way transport BEFORE minting a room and,
+ * only when NEITHER is reachable, rejects instead of resolving with links —
+ * so callers pass `unavailable` here rather than leaving this modal stuck on
+ * "Preparing room…" forever (the previous behaviour when startShare's error
+ * was simply swallowed by the caller).
  */
 
 import { useState } from 'react'
@@ -57,8 +61,10 @@ export default function P2PShareModal({ open, onClose, links, onRotate, roomId, 
               <p className="text-ink-faint">
                 This is a standalone Office deployment — it doesn't serve the peering
                 fabric (<code>/api/peering/*</code>) that invite links need to connect
-                peers. Use account-based sharing instead, or run Office behind a Vulos
-                OS / Vulos Relay host to enable P2P links.
+                peers, and no rendezvous URL is configured either. Use account-based
+                sharing instead, run Office behind a Vulos OS / Vulos Relay host, or
+                (no OS or account needed) point this deployment at any self-hosted
+                relayd's rendezvous URL — see docs/CONFIGURATION.md.
               </p>
             </div>
           </div>

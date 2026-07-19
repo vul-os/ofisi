@@ -395,16 +395,20 @@ export default function DocsEditor() {
     )
   }, [p2p.inviteIgnored, showToast])
 
-  // Honesty guard: a `#vp2p=` invite link was opened, but this server doesn't
-  // serve the peering fabric (standalone Office binary — see main.go). Rather
-  // than silently doing nothing (the visitor would have no idea their invite
-  // link failed to connect them), tell them plainly.
+  // Honesty guard: a `#vp2p=` invite link was opened, but this server has NO
+  // reachable collaboration transport — neither its own peering fabric
+  // (standalone Office binary — see main.go) nor a configured rendezvous URL
+  // (config.yaml collab.rendezvous_url / VULOS_RENDEZVOUS_URL — see
+  // transportSelection.js). Rather than silently doing nothing (the visitor
+  // would have no idea their invite link failed to connect them), tell them
+  // plainly.
   useEffect(() => {
     if (!p2p.peeringUnavailable) return
     showToast(
       "This invite link needs P2P collaboration support this server doesn't provide " +
-      '(standalone deployment). Ask the document owner to share your account instead, ' +
-      'or host Office behind a Vulos OS/Relay server.',
+      '(standalone deployment, no rendezvous URL configured). Ask the document owner to ' +
+      'share your account instead, host Office behind a Vulos OS/Relay server, or point ' +
+      'this deployment at a self-hosted relayd.',
       'error',
     )
   }, [p2p.peeringUnavailable, showToast])
@@ -1658,9 +1662,10 @@ export default function DocsEditor() {
         // worse than no button).
         onSwitchToLink={!collabEnabled ? undefined : async () => {
           setShowP2PShare(true)
-          // startShare() rejects (peeringUnavailable=true) when this server
-          // doesn't serve the fabric — surfaced in the modal itself (its
-          // `unavailable` prop below), not by this catch.
+          // startShare() rejects (peeringUnavailable=true) only when NEITHER
+          // this server's own peering fabric NOR a configured rendezvous URL
+          // is reachable — surfaced in the modal itself (its `unavailable`
+          // prop below), not by this catch.
           try { if (!p2p.links) await p2p.startShare() } catch (err) {
             console.warn('[p2p] share unavailable:', err?.message)
           }

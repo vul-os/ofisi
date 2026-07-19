@@ -18,8 +18,11 @@
  *     DocsEditor seeds its Y.Doc from the document's content, and saved back to
  *     the file's own storage.
  *
- * Standalone (no peering fabric) → local-only + autosave, and an honest "Offline"
- * pill rather than a fake "Live".
+ * Transport is the three-way choice in transportSelection.js: this server's own
+ * peering fabric (`/api/peering/*`) when present, else any configured
+ * rendezvous URL (no Vulos OS / host box needed at all), else local-only +
+ * autosave with an honest "Offline" pill rather than a fake "Live". See
+ * docs/COLLABORATION.md §3.
  */
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
@@ -191,8 +194,9 @@ export default function WhiteboardEditor() {
     if (!p2p.peeringUnavailable) return
     showToast(
       "This invite link needs P2P collaboration support this server doesn't provide " +
-      '(standalone deployment). Ask the whiteboard owner to share your account instead, ' +
-      'or host Office behind a Vulos OS/Relay server.',
+      '(standalone deployment, no rendezvous URL configured). Ask the whiteboard owner to ' +
+      'share your account instead, host Office behind a Vulos OS/Relay server, or point ' +
+      'this deployment at a self-hosted relayd.',
       'error',
     )
   }, [p2p.peeringUnavailable, showToast])
@@ -272,7 +276,7 @@ export default function WhiteboardEditor() {
               </span>
             )}
             {collabEnabled && p2p.peeringUnavailable && !p2p.active && (
-              <Tooltip label="This deployment has no peering fabric, so live co-editing is unavailable. Your changes still save.">
+              <Tooltip label="This deployment has no reachable peer-to-peer transport (no peering fabric, no rendezvous URL configured), so live co-editing is unavailable. Your changes still save.">
                 <span
                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-pill bg-bg-elev2 text-ink-muted border border-line"
                   data-testid="whiteboard-offline-pill"
