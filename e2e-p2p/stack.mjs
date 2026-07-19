@@ -144,11 +144,11 @@ export async function startStack({ offices = 2, localOnlyOffice = false } = {}) 
   // ── relayd: rendezvous role on, tunnel role unused ────────────────────────
   const relayPort = await freePort()
   const relayAdminPort = await freePort()
-  // relayd refuses to run with no agent grants even when only the rendezvous
-  // role is wanted, so give it one that is never used by this suite.
-  const tokensFile = path.join(root, 'relay-tokens.json')
-  writeFileSync(tokensFile, JSON.stringify([{ token: 'e2e-unused-token', names: ['e2e'] }]))
-
+  // No -tokens-file: relayd starts ROLE-ONLY when it is given no agent grants,
+  // and its reverse-tunnel surface then authorizes nobody (an explicit deny-all
+  // token store, not an empty one that might fail open). That is exactly the
+  // shape this suite wants — a pure rendezvous node — and it means the tunnel
+  // role cannot be what makes any assertion below pass.
   const relayd = spawnLogged(relaydBin, [
     '-rendezvous',
     // The rendezvous surface is served on the relay's APEX host, so any -domain
@@ -156,7 +156,6 @@ export async function startStack({ offices = 2, localOnlyOffice = false } = {}) 
     '-domain', 'rdv.e2e.invalid',
     '-addr', `127.0.0.1:${relayPort}`,
     '-admin-addr', `127.0.0.1:${relayAdminPort}`,
-    '-tokens-file', tokensFile,
     // No public STUN: every candidate in this suite is a loopback host
     // candidate, and reaching out to a public STUN server would make the test
     // depend on internet access and add gathering latency for nothing.
@@ -226,8 +225,10 @@ export async function startStack({ offices = 2, localOnlyOffice = false } = {}) 
  * announce, and read back here straight from the relay's origin (from Node, so no
  * CORS is involved). A client cannot fabricate it.
  *
- * NOTE: relayd exports no rendezvous counters on its /metrics surface (only the
- * tunnel role is instrumented there), which is why this reads presence instead.
+ * Presence (rather than relayd's /metrics, which does now carry rendezvous
+ * counters) is deliberate: a counter only says "some announce happened", while a
+ * presence record keyed by the exact key the browser signed says THIS peer got
+ * through — which is the claim under test.
  *
  * @returns {Promise<{status: number, body: any}>}
  */

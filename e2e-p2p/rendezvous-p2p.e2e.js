@@ -146,22 +146,34 @@ async function mintInviteLink(page) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('relayd rendezvous is reachable but NOT cross-origin usable — the reason Ofisi proxies it', async ({ request }) => {
+test('relayd rendezvous is browser-reachable cross-origin — the guarantee the direct transport rests on', async ({ request, browser }) => {
   // Server-to-server (no browser, no CORS): the relay is up and speaking the
   // protocol.
   const health = await request.get(`${stack.relayUrl}/rendezvous/healthz`)
   expect(health.ok()).toBe(true)
   expect((await health.json()).role).toBe('rendezvous')
 
-  // …but it emits no CORS headers, and answers a preflight with 405. This is
-  // the measured fact that forces the same-origin proxy. If a future relayd
-  // grows CORS, this assertion fails and the proxy can be revisited — better
-  // than silently carrying a workaround forever.
+  // ── The CORS contract, asserted as a REQUIREMENT ──────────────────────────
+  //
+  // Ofisi's browser code calls this relayd's origin directly. That only works
+  // because relayd's rendezvous role sends CORS headers, so this suite pins the
+  // exact posture the transport depends on: a relayd that regressed it would
+  // break every standalone deployment, and this test is what catches that here
+  // rather than in the field. (Ofisi carried a same-origin proxy until relayd
+  // shipped this; see docs/COLLABORATION.md §3.)
   const ice = await request.get(`${stack.relayUrl}/rendezvous/ice`, {
     headers: { Origin: stack.offices[0].url },
   })
-  expect(ice.headers()['access-control-allow-origin'], 'relayd rendezvous CORS posture changed').toBeUndefined()
+  expect(ice.ok()).toBe(true)
+  expect(ice.headers()['access-control-allow-origin'],
+    'relayd must allow cross-origin reads of the rendezvous surface').toBe('*')
+  // Credentials must NEVER be allowed: the rendezvous protocol authenticates
+  // with Ed25519 signatures in the body, so an allow-credentials wildcard would
+  // add ambient-authority risk for no benefit.
+  expect(ice.headers()['access-control-allow-credentials'],
+    'the rendezvous surface must not allow credentialed cross-origin requests').toBeUndefined()
 
+  // A real preflight for the announce POST must be answered, not 405'd.
   const preflight = await request.fetch(`${stack.relayUrl}/rendezvous/announce`, {
     method: 'OPTIONS',
     headers: {
@@ -170,12 +182,50 @@ test('relayd rendezvous is reachable but NOT cross-origin usable — the reason 
       'Access-Control-Request-Headers': 'content-type',
     },
   })
-  expect(preflight.status()).toBe(405)
+  expect(preflight.status(), 'the announce preflight must succeed').toBeLessThan(300)
+  expect(preflight.headers()['access-control-allow-origin']).toBe('*')
+  expect((preflight.headers()['access-control-allow-methods'] || '')).toContain('POST')
+  expect((preflight.headers()['access-control-allow-headers'] || '').toLowerCase()).toContain('content-type')
 
-  // And the same-origin proxy each standalone Ofisi mounts DOES reach it.
-  const viaProxy = await request.get(`${stack.offices[0].url}/api/rendezvous/healthz`)
-  expect(viaProxy.ok()).toBe(true)
-  expect((await viaProxy.json()).role).toBe('rendezvous')
+  // ── …and the same thing from a REAL browser on a DIFFERENT origin ─────────
+  //
+  // Header assertions above are necessary but not sufficient: only a browser
+  // enforces CORS. This runs the actual fetches from an Ofisi page, so a
+  // preflight that a raw HTTP client accepts but Chromium rejects cannot pass.
+  const ctx = await browser.newContext()
+  const page = await ctx.newPage()
+  try {
+    await page.goto(stack.offices[0].url)
+    const out = await page.evaluate(async (relayUrl) => {
+      const result = {}
+      try {
+        const r = await fetch(`${relayUrl}/rendezvous/ice`)
+        result.ice = { status: r.status, body: await r.json() }
+      } catch (err) { result.iceError = String(err) }
+      try {
+        // A deliberately invalid announce: the point is that the browser can
+        // READ the relay's answer (a 400 with a JSON error), not an opaque
+        // network failure. This is a real preflighted POST.
+        const r = await fetch(`${relayUrl}/rendezvous/announce`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        })
+        result.announce = { status: r.status, body: await r.text() }
+      } catch (err) { result.announceError = String(err) }
+      return result
+    }, stack.relayUrl)
+
+    expect(out.iceError, 'a browser on another origin could not read GET /rendezvous/ice').toBeUndefined()
+    expect(out.ice.status).toBe(200)
+    expect(out.ice.body).toHaveProperty('ice_servers')
+    expect(out.announceError, 'the preflighted announce POST was blocked by the browser').toBeUndefined()
+    // Readable rejection, not an opaque failure — apps can show a real error.
+    expect(out.announce.status).toBe(400)
+    expect(out.announce.body.length, 'the error body must be readable cross-origin').toBeGreaterThan(0)
+  } finally {
+    await ctx.close()
+  }
 })
 
 test('a standalone Ofisi advertises the rendezvous and mounts no host-box peering', async ({ request }) => {
