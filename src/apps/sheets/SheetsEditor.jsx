@@ -24,6 +24,8 @@ import {
   clampProtectedRanges, getProtectedRanges, mergeProtectedRanges,
 } from './protectedRanges.js'
 import { GridSession, getGridReplicaId } from '../../lib/crdt/grid.js'
+import { OpLogSync } from '../../lib/collab/opLogSync.js'
+import { updateLogEnabled } from '../../lib/flags.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { usePresence } from '@vulos/relay-client/presence'
@@ -487,6 +489,28 @@ export default function SheetsEditor() {
     gridSessionRef.current = session
     session.requestSnapshot()
 
+    // CRDT-native persistence (phase 2): when the server exposes the per-file
+    // update log AND the client flag is on, mirror grid cell ops into that
+    // durable append-only log IN ADDITION to the whole-doc autosave. Applied log
+    // ops re-enter through the SAME 'remoteOp' path as fabric ops (onRemote), so
+    // hydrated/converged cells render exactly like a peer edit. Self-disables on
+    // 404, so this never changes behaviour on a deployment without the flag.
+    let opLog = null
+    if (updateLogEnabled()) {
+      opLog = new OpLogSync({
+        fileId: id,
+        subscribeLocal: (cb) => {
+          const h = (e) => cb(e.detail.op)
+          session.addEventListener('localOp', h)
+          return () => session.removeEventListener('localOp', h)
+        },
+        applyOp: (op) => session.applyLogOp(op),
+        applySnapshot: (snap) => session.applyLogSnapshot(snap),
+        encodeSnapshot: () => session.logSnapshotData(),
+      })
+      opLog.hydrate().then((ok) => { if (ok) opLog.start() }).catch(() => {})
+    }
+
     const onRemote = (ev) => {
       // WAVE-54: a chart op carries a chart payload; merge it into sheet.charts
       // (LWW-by-id: last upsert wins, delete removes). Cell ops fall through.
@@ -603,6 +627,7 @@ export default function SheetsEditor() {
     session.addEventListener('remoteOp', onRemote)
     return () => {
       session.removeEventListener('remoteOp', onRemote)
+      if (opLog) opLog.stop().catch(() => {})
       session.destroy()
       gridSessionRef.current = null
     }

@@ -186,6 +186,7 @@ export class GridSession extends EventTarget {
     this._crdt.apply(op)
     this._broadcast({ type: 'grid_op', session: this._session, op })
     this._persistOp(op)
+    this._emitLocalOp(op)
   }
 
   /** Tombstone a cell and broadcast the op. */
@@ -195,6 +196,36 @@ export class GridSession extends EventTarget {
     this._crdt.apply(op)
     this._broadcast({ type: 'grid_op', session: this._session, op })
     this._persistOp(op)
+    this._emitLocalOp(op)
+  }
+
+  // -------------------------------------------------------------------------
+  // Durable update-log bridge (CRDT-native persistence). These let a
+  // collab/OpLogSync mirror the SAME cell ops into the server's append-only
+  // per-file update log — the op-based analogue of Docs' Yjs UpdateLogSync. The
+  // fabric transport is live/ephemeral; the update log is durable + convergent.
+  // -------------------------------------------------------------------------
+
+  /** Fire a 'localOp' event so an update-log sync can append the op as a frame. */
+  _emitLocalOp(op) {
+    this.dispatchEvent(new CustomEvent('localOp', { detail: { op } }))
+  }
+
+  /** Apply an op that arrived from the durable log (idempotent LWW). Uses the
+   * SAME ingest path as a fabric op, so clock-observe + re-render fire once. */
+  applyLogOp(op) {
+    return this._ingestGridOp(op)
+  }
+
+  /** Merge a full snapshot from the durable log (per-cell LWW union — never a
+   * blind replace, so a concurrent local edit is not clobbered). */
+  applyLogSnapshot(cells) {
+    if (Array.isArray(cells)) this._ingestSnapshotCells(cells)
+  }
+
+  /** The full compacted state to post as a durable snapshot frame. */
+  logSnapshotData() {
+    return this._crdt.snapshot()
   }
 
   // -------------------------------------------------------------------------
@@ -342,17 +373,7 @@ export class GridSession extends EventTarget {
     if (!msg || msg.session !== this._session) return
 
     if (msg.type === 'grid_op' && msg.op) {
-      const op = msg.op
-      // Advance clock past remote counter.
-      if (op.id) {
-        const parts = op.id.split('_')
-        this._clock.observe(parseInt(parts[1], 10) || 0)
-      }
-      const changed = this._crdt.apply(op)
-      if (changed) {
-        this._persistOp(op)
-        this.dispatchEvent(new CustomEvent('remoteOp', { detail: { op } }))
-      }
+      this._ingestGridOp(msg.op)
     } else if (msg.type === 'chart_op') {
       // Advance clock past the remote op id, then surface a chart event. The
       // editor owns the charts array; we just relay the intent to merge.
@@ -391,23 +412,46 @@ export class GridSession extends EventTarget {
       })
     } else if (msg.type === 'grid_snapshot' && msg.cells) {
       // Cold-join: merge incoming snapshot cells.
-      for (const cell of msg.cells) {
-        if (cell.opId) {
-          // DATA-INTEGRITY: advance our Lamport clock past every counter in the
-          // snapshot BEFORE the joiner makes any edit. Otherwise the clock stays
-          // low, our first setCell() mints a smaller OpID than the cell already
-          // holds, and LWW (higher OpID wins) DROPS the joiner's edit — the user
-          // types a value that silently reverts to the peer's. The grid_op path
-          // and _loadLocal already observe; this cold-join path must too.
-          const parts = String(cell.opId).split('_')
-          this._clock.observe(parseInt(parts[1], 10) || 0)
-          const kind = cell.deleted ? GRID_OP_CLEAR : GRID_OP_SET
-          this._crdt.apply({ kind, id: cell.opId, key: { r: cell.r, c: cell.c }, v: cell.value })
-        }
-      }
-      this.saveLocal()
-      this.dispatchEvent(new CustomEvent('remoteOp', { detail: { snapshot: true } }))
+      this._ingestSnapshotCells(msg.cells)
     }
+  }
+
+  /** Ingest one grid cell op (from the fabric OR the durable log): advance the
+   * Lamport clock, apply (LWW), and on a real change persist + surface remoteOp.
+   * Returns whether the op changed local state. */
+  _ingestGridOp(op) {
+    if (!op) return false
+    // Advance clock past remote counter.
+    if (op.id) {
+      const parts = String(op.id).split('_')
+      this._clock.observe(parseInt(parts[1], 10) || 0)
+    }
+    const changed = this._crdt.apply(op)
+    if (changed) {
+      this._persistOp(op)
+      this.dispatchEvent(new CustomEvent('remoteOp', { detail: { op } }))
+    }
+    return changed
+  }
+
+  /** Merge a snapshot's cells (cold-join / durable-log hydrate). */
+  _ingestSnapshotCells(cells) {
+    for (const cell of cells) {
+      if (cell.opId) {
+        // DATA-INTEGRITY: advance our Lamport clock past every counter in the
+        // snapshot BEFORE the joiner makes any edit. Otherwise the clock stays
+        // low, our first setCell() mints a smaller OpID than the cell already
+        // holds, and LWW (higher OpID wins) DROPS the joiner's edit — the user
+        // types a value that silently reverts to the peer's. The grid_op path
+        // and _loadLocal already observe; this cold-join path must too.
+        const parts = String(cell.opId).split('_')
+        this._clock.observe(parseInt(parts[1], 10) || 0)
+        const kind = cell.deleted ? GRID_OP_CLEAR : GRID_OP_SET
+        this._crdt.apply({ kind, id: cell.opId, key: { r: cell.r, c: cell.c }, v: cell.value })
+      }
+    }
+    this.saveLocal()
+    this.dispatchEvent(new CustomEvent('remoteOp', { detail: { snapshot: true } }))
   }
 
   /** Request the current snapshot from peers (call on first join). */

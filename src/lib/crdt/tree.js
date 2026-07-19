@@ -578,6 +578,7 @@ export class TreeSession extends EventTarget {
     this._crdt.apply(op)
     this._broadcast({ type: 'tree_op', session: this._session, op })
     this._persistOp(op)
+    this._emitLocalOp(op)
 
     // Set initial content — object-granular so it merges with concurrent edits.
     if (data !== undefined) this.setSlide(id, data)
@@ -606,6 +607,7 @@ export class TreeSession extends EventTarget {
     this._crdt.apply(op)
     this._broadcast({ type: 'tree_op', session: this._session, op })
     this._persistOp(op)
+    this._emitLocalOp(op)
   }
 
   /** Move / reorder a slide. */
@@ -615,6 +617,7 @@ export class TreeSession extends EventTarget {
     this._crdt.apply(op)
     this._broadcast({ type: 'tree_op', session: this._session, op })
     this._persistOp(op)
+    this._emitLocalOp(op)
   }
 
   /** Delete a slide. */
@@ -624,6 +627,36 @@ export class TreeSession extends EventTarget {
     this._crdt.apply(op)
     this._broadcast({ type: 'tree_op', session: this._session, op })
     this._persistOp(op)
+    this._emitLocalOp(op)
+  }
+
+  // -------------------------------------------------------------------------
+  // Durable update-log bridge (CRDT-native persistence) — the op-based analogue
+  // of Docs' Yjs UpdateLogSync. A collab/OpLogSync mirrors the SAME tree ops
+  // into the server's append-only per-file log so divergent offline slide edits
+  // converge on reload with nothing discarded.
+  // -------------------------------------------------------------------------
+
+  /** Fire a 'localOp' event so an update-log sync can append the op as a frame. */
+  _emitLocalOp(op) {
+    this.dispatchEvent(new CustomEvent('localOp', { detail: { op } }))
+  }
+
+  /** Apply an op that arrived from the durable log (idempotent LWW). Same ingest
+   * path as a fabric op, so clock-observe + re-render fire once. */
+  applyLogOp(op) {
+    this._ingestTreeOp(op)
+  }
+
+  /** Merge a full snapshot from the durable log (per-object/per-scalar LWW union
+   * — never a blind replace). */
+  applyLogSnapshot(nodes) {
+    if (Array.isArray(nodes)) this._ingestSnapshotNodes(nodes)
+  }
+
+  /** The full compacted state to post as a durable snapshot frame. */
+  logSnapshotData() {
+    return this._crdt.snapshot()
   }
 
   // -------------------------------------------------------------------------
@@ -708,17 +741,7 @@ export class TreeSession extends EventTarget {
     if (!msg || msg.session !== this._session) return
 
     if (msg.type === 'tree_op' && msg.op) {
-      const op = msg.op
-      // Advance clock.
-      for (const field of [op.id, op.target]) {
-        if (field && typeof field === 'string') {
-          const parts = field.split('_')
-          this._clock.observe(parseInt(parts[1], 10) || 0)
-        }
-      }
-      this._crdt.apply(op)
-      this._persistOp(op)
-      this.dispatchEvent(new CustomEvent('remoteOp', { detail: { op } }))
+      this._ingestTreeOp(msg.op)
     } else if (msg.type === 'tree_snapshot_request') {
       this._broadcast({
         type: 'tree_snapshot',
@@ -726,7 +749,28 @@ export class TreeSession extends EventTarget {
         nodes: this._crdt.snapshot(),
       })
     } else if (msg.type === 'tree_snapshot' && msg.nodes) {
-      for (const n of msg.nodes) {
+      this._ingestSnapshotNodes(msg.nodes)
+    }
+  }
+
+  /** Ingest one tree op (fabric OR durable log): advance the Lamport clock,
+   * apply, persist, and surface remoteOp for a re-render. */
+  _ingestTreeOp(op) {
+    if (!op) return
+    for (const field of [op.id, op.target]) {
+      if (field && typeof field === 'string') {
+        const parts = field.split('_')
+        this._clock.observe(parseInt(parts[1], 10) || 0)
+      }
+    }
+    this._crdt.apply(op)
+    this._persistOp(op)
+    this.dispatchEvent(new CustomEvent('remoteOp', { detail: { op } }))
+  }
+
+  /** Merge a tree snapshot's nodes (cold-join / durable-log hydrate). */
+  _ingestSnapshotNodes(nodes) {
+    for (const n of nodes) {
         // DATA-INTEGRITY: advance our Lamport clock past every counter carried in
         // the snapshot BEFORE the joiner edits anything. Otherwise the clock stays
         // low, our first setSlide/moveSlide mints a smaller OpID than the node
@@ -772,10 +816,9 @@ export class TreeSession extends EventTarget {
         if (n.deleted) {
           this._crdt.apply({ kind: TREE_OP_DELETE, id: n.ordId || n.id, target: n.id })
         }
-      }
-      this.saveLocal()
-      this.dispatchEvent(new CustomEvent('remoteOp', { detail: { snapshot: true } }))
     }
+    this.saveLocal()
+    this.dispatchEvent(new CustomEvent('remoteOp', { detail: { snapshot: true } }))
   }
 
   /** Request a snapshot from peers on first join. */

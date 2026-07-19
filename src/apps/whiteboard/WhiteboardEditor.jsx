@@ -32,7 +32,8 @@ import { api } from '../../lib/api'
 import { useAuthStore } from '../../store/authStore'
 import { useResolvedTheme } from '../../components/ui/useTheme'
 import { Topbar, IconButton, Tooltip, SaveStatus, LoadingState, useToast } from '../../components/ui'
-import { docsCollabEnabled, DOCS_COLLAB_OFF_NOTICE } from '../../lib/flags.js'
+import { docsCollabEnabled, DOCS_COLLAB_OFF_NOTICE, updateLogEnabled } from '../../lib/flags.js'
+import { UpdateLogSync } from '../../lib/collab/updateLog.js'
 import { Y, SEED_ORIGIN } from '../../lib/crdt/ydoc.js'
 import {
   createBoardYContext,
@@ -115,6 +116,27 @@ export default function WhiteboardEditor() {
     }
     setSeeded(true)
   }, [ctx, file, seeded])
+
+  // ── CRDT-native persistence (phase 2): mirror the board Y.Doc into the durable
+  // per-file update log (behind the flag), IN ADDITION to the whole-scene
+  // autosave below. The whiteboard is a plain Y.Doc, so it reuses the SAME
+  // Yjs UpdateLogSync as Docs verbatim: on open it applies snapshot + missing
+  // frames; on edit it appends the debounced delta. Runs only after the local
+  // seed so the deterministic content seed is not logged; self-disables on 404.
+  useEffect(() => {
+    if (!updateLogEnabled()) return
+    if (!ctx?.ydoc || !id || !seeded) return
+    let cancelled = false
+    const sync = new UpdateLogSync({ ydoc: ctx.ydoc, fileId: id })
+    sync.hydrate().then((ok) => {
+      if (cancelled || !ok) return
+      sync.start()
+    }).catch(() => { /* transport down — whole-scene autosave still covers durability */ })
+    return () => {
+      cancelled = true
+      sync.stop().catch(() => {})
+    }
+  }, [ctx, id, seeded])
 
   // ── Bind Excalidraw <-> Y.Doc once the editor API is available ──────────────
   useEffect(() => {

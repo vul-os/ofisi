@@ -39,6 +39,8 @@ import {
 } from './slideArrange.js'
 import { playAnimationsOn } from './slideAnimations.js'
 import { TreeSession, getTreeReplicaId, ordKeyBetween } from '../../lib/crdt/tree.js'
+import { OpLogSync } from '../../lib/collab/opLogSync.js'
+import { updateLogEnabled } from '../../lib/flags.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { usePresence } from '@vulos/relay-client/presence'
@@ -374,6 +376,28 @@ export default function SlidesEditor() {
 
     session.requestSnapshot()
 
+    // CRDT-native persistence (phase 2): mirror slide-tree ops into the server's
+    // durable per-file update log (behind the flag), in ADDITION to the whole-doc
+    // autosave. Applied log ops re-enter via the SAME 'remoteOp' path, so
+    // converged slides render like a peer edit. start() runs only AFTER hydrate,
+    // so the deterministic seed above (re-derived from file content on every
+    // open, like Docs' SEED_ORIGIN) is not double-logged. Self-disables on 404.
+    let opLog = null
+    if (updateLogEnabled()) {
+      opLog = new OpLogSync({
+        fileId: id,
+        subscribeLocal: (cb) => {
+          const h = (e) => cb(e.detail.op)
+          session.addEventListener('localOp', h)
+          return () => session.removeEventListener('localOp', h)
+        },
+        applyOp: (op) => session.applyLogOp(op),
+        applySnapshot: (snap) => session.applyLogSnapshot(snap),
+        encodeSnapshot: () => session.logSnapshotData(),
+      })
+      opLog.hydrate().then((ok) => { if (ok) opLog.start() }).catch(() => {})
+    }
+
     const onRemote = () => {
       const crdtSlides = session.orderedSlides()
       if (crdtSlides.length === 0) return
@@ -402,6 +426,7 @@ export default function SlidesEditor() {
     return () => {
       clearTimeout(seedTimer)
       session.removeEventListener('remoteOp', onRemote)
+      if (opLog) opLog.stop().catch(() => {})
       session.destroy()
       treeSessionRef.current = null
     }
