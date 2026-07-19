@@ -55,9 +55,17 @@ export class YP2PCollabSession extends EventTarget {
    * @param {string} opts.peerId
    * @param {string} opts.fileId
    * @param {object} opts.ctx     { ydoc, shadow, schema } from createYContext()
+   * @param {string} [opts.rendezvousBaseUrl]  base URL of any vulos-relayd's
+   *   OPEN rendezvous surface (see transportSelection.js). When set, the
+   *   underlying FabricClient runs its whole signaling lifecycle against that
+   *   relayd instead of the host box's `/api/peering/*` — no Vulos OS / host
+   *   box required for a REAL P2P session. Ignored when `fabric` is injected.
    * @param {FabricClient} [opts.fabric]  inject a transport (tests)
    */
-  constructor({ room, cap, peerId, fileId, ctx, signalingUrl, iceUrl, relayBaseUrl, authToken, fabric }) {
+  constructor({
+    room, cap, peerId, fileId, ctx,
+    signalingUrl, iceUrl, relayBaseUrl, authToken, rendezvousBaseUrl, fabric,
+  }) {
     super()
     if (!room || !room.encKey) throw new Error('YP2PCollabSession: missing room keys')
     if (cap !== CAP_RW && cap !== CAP_RO) throw new Error(`YP2PCollabSession: bad cap "${cap}"`)
@@ -94,6 +102,10 @@ export class YP2PCollabSession extends EventTarget {
         iceUrl: iceUrl || '/api/peering/ice',
         relayBaseUrl: relayBaseUrl || '',
         authToken: authToken || null,
+        // Non-empty only in rendezvous mode (see transportSelection.js): the
+        // FabricClient then runs offer/answer/ICE against this relayd's open
+        // surface and ignores signalingUrl/iceUrl above.
+        rendezvousBaseUrl: rendezvousBaseUrl || '',
       })
     }
 

@@ -17,6 +17,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { _resetPeeringProbeCache } from '../peeringAvailability.js'
+import { _resetReachableBaseCache } from '../reachableBase.js'
 
 // ── Mock the relay-client fabric with a controllable fake ─────────────────────
 let lastFabric = null
@@ -54,6 +55,7 @@ beforeEach(() => {
   lastFabric = null
   joinBehaviour = 'resolve'
   _resetPeeringProbeCache()
+  _resetReachableBaseCache()
   // Default: the peering fabric IS reachable (hosted mode) — individual tests
   // override this to exercise the standalone/unreachable path.
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
@@ -108,8 +110,12 @@ describe('useCollabFabric', () => {
     // No throw escaped — the hook still returned a value; editor keeps working.
   })
 
-  it('never constructs a fabric when the peering endpoint is unreachable (standalone server)', async () => {
+  it('never constructs a fabric when neither host-box peering nor a rendezvous URL is available (standalone server)', async () => {
     _resetPeeringProbeCache()
+    _resetReachableBaseCache()
+    // Both /api/peering/ice (probeHostPeering) and /api/reachability
+    // (resolveRendezvousUrl) 404 — a bare standalone server with no rendezvous
+    // configured either.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404 }))
     const { result } = renderHook(() =>
       useCollabFabric({ sessionId: 'f', peerId: 'me' }),
@@ -122,6 +128,33 @@ describe('useCollabFabric', () => {
     // The whole point: FabricClient is never even constructed, so there is no
     // false-positive "Live" pill possible for a session nobody can reach.
     expect(lastFabric).toBeNull()
+  })
+
+  it('THE PAYOFF — builds a rendezvous-native fabric when host-box peering is absent but a rendezvous URL is configured', async () => {
+    _resetPeeringProbeCache()
+    _resetReachableBaseCache()
+    // /api/peering/ice 404s (standalone: no host-box peering) but
+    // /api/reachability reports a configured rendezvous_url — the deployment
+    // pointed Ofisi at a self-hosted relayd with no Vulos OS involved at all.
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (String(url).includes('/api/reachability')) {
+        return { ok: true, json: async () => ({ rendezvous_url: 'https://relay.example.org' }) }
+      }
+      return { ok: false, status: 404 }
+    }))
+
+    const { result } = renderHook(() =>
+      useCollabFabric({ sessionId: 'file-rv', peerId: 'rep-rv' }),
+    )
+
+    // A fabric IS constructed — this is the payoff: standalone + rendezvous
+    // configured gets a REAL transport, not local-only.
+    await waitFor(() => expect(result.current.fabric).not.toBeNull())
+    expect(result.current.configured).toBe(true)
+    await waitFor(() => expect(result.current.joined).toBe(true))
+    expect(lastFabric.opts.rendezvousBaseUrl).toBe('https://relay.example.org')
+    expect(lastFabric.opts.sessionId).toBe('file-rv')
+    expect(lastFabric.opts.peerId).toBe('rep-rv')
   })
 
   it('does not create a fabric when disabled', async () => {

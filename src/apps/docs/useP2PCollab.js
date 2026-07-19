@@ -14,22 +14,34 @@
  * relay stays content-blind. There is no text-diff contract any more: the editor's
  * Y.Doc IS the document, and the session simply carries its updates.
  *
- * HONESTY GUARDS:
+ * HONESTY GUARDS — three-way reality (see docs/COLLABORATION.md §3):
  *   • Live co-editing can be gated off for the whole deployment (`enabled`, from
  *     VITE_DOCS_COLLAB). Then this hook is inert: no invite is joined, no room is
  *     minted, nothing is sent or applied — and `collabDisabled` / `inviteIgnored`
  *     let the caller SAY so instead of showing affordances that do nothing.
- *   • A standalone Office binary never mounts `/api/peering/*` (see main.go).
- *     Both entry points probe that BEFORE touching the fabric, so an invite link
- *     that cannot connect anyone reports `peeringUnavailable` instead of failing
- *     silently, and startShare() rejects rather than minting links that will
- *     never sync.
+ *   • Otherwise, both entry points resolve transportSelection.js's three-way
+ *     choice BEFORE touching the fabric:
+ *       1. HOST-BOX PEERING — this server mounts `/api/peering/*` (Vulos OS /
+ *          Vulos Relay in front of Ofisi). Unchanged default.
+ *       2. ANY RELAYD RENDEZVOUS — no host-box peering, but a rendezvous URL is
+ *          configured (config.yaml `collab.rendezvous_url` /
+ *          VULOS_RENDEZVOUS_URL). The invite-link session then runs entirely
+ *          against that relayd — no Vulos OS / host box required. THE PAYOFF:
+ *          a standalone Office binary (no `/api/peering/*` at all, see main.go)
+ *          gets a REAL P2P session, not a false "Live".
+ *       3. LOCAL-ONLY — neither is available: an invite link cannot connect
+ *          anyone, so `peeringUnavailable` is surfaced instead of failing
+ *          silently, and startShare() rejects rather than minting links that
+ *          will never sync.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { YP2PCollabSession } from '../../lib/crdt/yP2PSession.js'
-import { probePeeringAvailable } from '../../lib/collab/peeringAvailability.js'
 import { resolveReachableBase } from '../../lib/collab/reachableBase.js'
+import {
+  selectCollabTransport,
+  TRANSPORT_LOCAL_ONLY,
+} from '../../lib/collab/transportSelection.js'
 
 /** True when the current location carries a P2P invite fragment. */
 export function hasInviteInLocation() {
@@ -93,19 +105,22 @@ export function useP2PCollab({ fileId, ctx, autoJoinFromLink = true, enabled = t
     const inviteLink = window.location.href
 
     ;(async () => {
-      // Probe BEFORE touching the fabric: a standalone server never mounts
-      // /api/peering/*, so a session here would silently never connect anyone.
-      const available = await probePeeringAvailable()
+      // Resolve the three-way transport BEFORE touching the fabric: a
+      // standalone server never mounts /api/peering/*, but a configured
+      // rendezvous URL still gets a real session — only true local-only fails.
+      const { transport, rendezvousBaseUrl } = await selectCollabTransport()
       if (cancelled) return
-      if (!available) {
-        console.warn('[p2p] invite link opened, but this server does not serve the ' +
-          'peering fabric (/api/peering/*) — a standalone Office binary cannot make a ' +
-          'P2P connection. Staying in local/cloud mode.')
+      if (transport === TRANSPORT_LOCAL_ONLY) {
+        console.warn('[p2p] invite link opened, but this server has no reachable ' +
+          'collaboration transport (no /api/peering/*, and no rendezvous URL configured) ' +
+          '— a standalone Office binary cannot make a P2P connection. Staying in local/cloud mode.')
         setPeeringUnavailable(true)
         return
       }
       try {
-        const session = await YP2PCollabSession.fromInvite({ inviteLink, peerId, fileId, ctx })
+        const session = await YP2PCollabSession.fromInvite({
+          inviteLink, peerId, fileId, ctx, rendezvousBaseUrl,
+        })
         if (cancelled) { session.leave(); return }
         wireSession(session)
         sessionRef.current = session
@@ -131,10 +146,11 @@ export function useP2PCollab({ fileId, ctx, autoJoinFromLink = true, enabled = t
     if (!enabled) throw new Error('collab-disabled')
     if (!ctx) throw new Error('document not ready')
 
-    // Probe BEFORE minting a room: on a standalone server the room's invite links
-    // would look real but never connect anyone.
-    const available = await probePeeringAvailable()
-    if (!available) {
+    // Resolve BEFORE minting a room: on a bare standalone server (no host-box
+    // peering AND no rendezvous URL configured) the room's invite links would
+    // look real but never connect anyone.
+    const { transport, rendezvousBaseUrl } = await selectCollabTransport()
+    if (transport === TRANSPORT_LOCAL_ONLY) {
       setPeeringUnavailable(true)
       throw new Error('peering-unavailable')
     }
@@ -154,7 +170,7 @@ export function useP2PCollab({ fileId, ctx, autoJoinFromLink = true, enabled = t
     const originBase = reachable || (typeof window !== 'undefined' ? window.location.origin : '')
     const baseUrl = originBase ? `${originBase}${pathname}` : undefined
     const { session, rwLink, roLink, roomId: rid } = await YP2PCollabSession.create({
-      peerId, fileId, baseUrl, ctx,
+      peerId, fileId, baseUrl, ctx, rendezvousBaseUrl,
     })
     wireSession(session)
     sessionRef.current = session

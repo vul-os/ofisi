@@ -18,29 +18,46 @@
  *   3. Hand the SAME fabric to the caller so it can (a) wire it into the CRDT
  *      session for op sync and (b) feed useLiveCursors + usePresence.
  *
- * Fails graceful: if join() rejects (no peering backend configured, offline,
+ * Fails graceful: if join() rejects (no transport reachable, offline,
  * single-user), the editor keeps working locally — we simply surface an
  * `offline` status and an empty roster. No throws escape the hook.
  *
  * ADDITIVE & sync-safe: this hook does NOT change how ops are diffed/applied.
  * It only provisions the transport the existing CRDT session was already
- * designed to consume. When the peering backend is absent, behaviour is
- * identical to the previous `fabricClient: null` path (local-only).
+ * designed to consume. When no transport is reachable, behaviour is identical
+ * to the previous `fabricClient: null` path (local-only).
  *
- * HONESTY GUARD: a standalone Office binary never mounts `/api/peering/*`
- * (see main.go), but FabricClient.join() resolves anyway — it fire-and-forgets
- * the signaling WebSocket connect and its ICE fetch silently falls back on a
- * 404. Without a check, `configured`/`joined` would flip true regardless, and
- * the Sheets/Slides status pill (deriveStatusPill in presenceCommon.js) would
+ * HONESTY GUARD — three-way reality (see docs/COLLABORATION.md §3):
+ *
+ *   1. HOST-BOX PEERING — this server mounts `/api/peering/*` (Vulos OS /
+ *      Vulos Relay in front of Ofisi). Unchanged default behaviour.
+ *   2. ANY RELAYD RENDEZVOUS — no host-box peering, but this deployment has a
+ *      configured rendezvous URL (config.yaml `collab.rendezvous_url` /
+ *      VULOS_RENDEZVOUS_URL). The browser talks DIRECTLY to that relayd's
+ *      open rendezvous surface — no Vulos OS, no host box required at all.
+ *      This is what makes a STANDALONE Ofisi capable of real P2P collab.
+ *   3. LOCAL-ONLY — neither is available.
+ *
+ * A standalone Office binary never mounts `/api/peering/*` (see main.go), but
+ * FabricClient.join() resolves anyway — it fire-and-forgets the signaling
+ * WebSocket connect and its ICE fetch silently falls back on a 404. Without a
+ * check, `configured`/`joined` would flip true regardless, and the
+ * Sheets/Slides status pill (deriveStatusPill in presenceCommon.js) would
  * settle on a false-positive "Live" for a session nobody can ever join. So we
- * probe the fabric's reachability BEFORE constructing a FabricClient at all;
- * when it is unreachable we never construct one, and `configured` stays
- * `false` — an honest, calm "Offline" — for the life of the mount.
+ * resolve transportSelection.js's three-way choice BEFORE constructing a
+ * FabricClient at all: on `local-only` we never construct one and `configured`
+ * stays `false` — an honest, calm "Offline" — for the life of the mount. On
+ * `rendezvous` we construct a genuinely-reachable transport with NO host box
+ * in the loop, so `configured`/`joined` are just as true as in host-peering
+ * mode — there is no second-class "fake connected" state here.
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { FabricClient } from '@vulos/relay-client/fabric'
-import { probePeeringAvailable } from './peeringAvailability.js'
+import {
+  selectCollabTransport,
+  TRANSPORT_LOCAL_ONLY,
+} from './transportSelection.js'
 
 /**
  * @param {object} opts
@@ -72,15 +89,16 @@ export function useCollabFabric({ sessionId, peerId, enabled = true }) {
     const wsBase = window.location.origin.replace(/^http/, 'ws') + '/api/peering/stream'
 
     ;(async () => {
-      // Probe reachability BEFORE constructing a transport — see the HONESTY
-      // GUARD note above. On a standalone server this resolves false and we
-      // never touch FabricClient at all: configured/joined stay false, giving
-      // an honest, calm "Offline" pill instead of a false "Live".
-      const available = await probePeeringAvailable()
+      // Resolve the three-way transport choice BEFORE constructing anything —
+      // see the HONESTY GUARD note above. On `local-only` we never touch
+      // FabricClient at all: configured/joined stay false, giving an honest,
+      // calm "Offline" pill instead of a false "Live".
+      const { transport, rendezvousBaseUrl } = await selectCollabTransport()
       if (cancelled) return
-      if (!available) {
-        console.info('[collab] peering fabric not reachable on this origin ' +
-          '(standalone server, or offline) — presence/live-sync unavailable; editor stays local-only')
+      if (transport === TRANSPORT_LOCAL_ONLY) {
+        console.info('[collab] no reachable transport for this session ' +
+          '(no host-box peering, no rendezvous URL configured, or offline) — ' +
+          'presence/live-sync unavailable; editor stays local-only')
         return
       }
 
@@ -92,6 +110,11 @@ export function useCollabFabric({ sessionId, peerId, enabled = true }) {
           iceUrl: '/api/peering/ice',
           relayBaseUrl: '',
           authToken: null,
+          // Set only in `rendezvous` mode — the FabricClient itself treats a
+          // non-empty rendezvousBaseUrl as "run the whole signaling lifecycle
+          // against this relayd instead of /api/peering/*", derives its own
+          // ICE from the relay, and ignores signalingUrl/iceUrl above.
+          rendezvousBaseUrl,
         })
       } catch (err) {
         // FabricClient construction should not throw, but never let it break the

@@ -44,8 +44,12 @@ export class DocsCollabSession extends EventTarget {
    * @param {string}  [opts.iceUrl]        - ICE credentials endpoint
    * @param {string}  [opts.relayBaseUrl]  - relay base URL (same-origin default)
    * @param {string}  [opts.authToken]     - Bearer JWT (optional)
+   * @param {string}  [opts.rendezvousBaseUrl]  - see transportSelection.js;
+   *                                         when set, runs against any relayd's
+   *                                         open rendezvous surface instead of
+   *                                         a host box's /api/peering/*
    */
-  constructor({ fileId, peerId, signalingUrl, iceUrl, relayBaseUrl, authToken }) {
+  constructor({ fileId, peerId, signalingUrl, iceUrl, relayBaseUrl, authToken, rendezvousBaseUrl }) {
     super()
 
     this._fileId = fileId
@@ -66,6 +70,7 @@ export class DocsCollabSession extends EventTarget {
       iceUrl: iceUrl || '/api/peering/ice',
       relayBaseUrl: relayBaseUrl || '',
       authToken: authToken || null,
+      rendezvousBaseUrl: rendezvousBaseUrl || '',
     })
 
     // Forward peer state events to callers.

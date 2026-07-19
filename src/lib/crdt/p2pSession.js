@@ -53,9 +53,15 @@ export class P2PCollabSession extends EventTarget {
    * @param {string}  [opts.iceUrl]
    * @param {string}  [opts.relayBaseUrl]
    * @param {string}  [opts.authToken]
+   * @param {string}  [opts.rendezvousBaseUrl]  see transportSelection.js — when
+   *   set, runs the FabricClient against any relayd's open rendezvous surface
+   *   instead of a host box's /api/peering/*.
    * @param {FabricClient} [opts.fabric]  inject a transport (tests / custom hosts)
    */
-  constructor({ room, cap, peerId, fileId, signalingUrl, iceUrl, relayBaseUrl, authToken, fabric }) {
+  constructor({
+    room, cap, peerId, fileId,
+    signalingUrl, iceUrl, relayBaseUrl, authToken, rendezvousBaseUrl, fabric,
+  }) {
     super()
     if (!room || !room.encKey) throw new Error('P2PCollabSession: missing room keys')
     if (cap !== CAP_RW && cap !== CAP_RO) throw new Error(`P2PCollabSession: bad cap "${cap}"`)
@@ -86,6 +92,7 @@ export class P2PCollabSession extends EventTarget {
         iceUrl: iceUrl || '/api/peering/ice',
         relayBaseUrl: relayBaseUrl || '',
         authToken: authToken || null,
+        rendezvousBaseUrl: rendezvousBaseUrl || '',
       })
     }
 
