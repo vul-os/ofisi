@@ -62,10 +62,20 @@ func PublicBaseURL() string {
 // actually reach, rather than blindly trusting window.location.origin (which may
 // be a LAN-only address). When VULOS_OFFICE_PUBLIC_URL is unset the response's
 // public_base_url is empty and the client falls back to its own origin.
+//
+// It also surfaces `rendezvous_url` (config.yaml `collab.rendezvous_url` /
+// VULOS_RENDEZVOUS_URL) — the base URL of any vulos-relayd's OPEN rendezvous
+// surface the browser can talk to DIRECTLY, with no host-box `/api/peering/*`
+// at all. This is what lets a standalone Ofisi (see main.go — it mounts no
+// `/api/peering/*`) get real P2P collaboration: see docs/COLLABORATION.md §3
+// for the three-way transport selection (host-box peering | any relayd
+// rendezvous | local-only) this enables. Empty when unset, same honesty
+// contract as public_base_url.
 func (h *SystemHandler) Reachability(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"public_base_url": PublicBaseURL(),
 		"deploy_mode":     h.deployMode,
+		"rendezvous_url":  strings.TrimRight(strings.TrimSpace(h.cfg.Collab.RendezvousURL), "/"),
 	})
 }
 

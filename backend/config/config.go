@@ -12,6 +12,27 @@ type Config struct {
 	Auth        AuthConfig        `yaml:"auth"`
 	Storage     StorageConfig     `yaml:"storage"`
 	Persistence PersistenceConfig `yaml:"persistence"`
+	Collab      CollabConfig      `yaml:"collab"`
+}
+
+// CollabConfig configures the browser-side P2P collaboration transport (see
+// docs/COLLABORATION.md §3). Ofisi's OWN backend never mediates live
+// collaboration — this section exists only to tell the BROWSER where to find a
+// peering/rendezvous surface when this server doesn't serve its own.
+type CollabConfig struct {
+	// RendezvousURL is the base URL of any vulos-relayd's OPEN rendezvous
+	// surface (announce/resolve/signal/mailbox + ICE), consumed DIRECTLY by the
+	// browser — no Vulos OS / host-box `/api/peering/*` required. When set, a
+	// STANDALONE Ofisi (which mounts no `/api/peering/*` — see main.go) still
+	// gets real peer-to-peer collaboration: any self-hosted relayd is enough.
+	// When unset (default), every collab session stays on the existing
+	// host-box `/api/peering/*` path when one is present, or local-only when it
+	// is not — byte-identical to behaviour before this option existed.
+	//
+	// Read-only from the browser's perspective: exposed at the unauthenticated
+	// GET /api/reachability as `rendezvous_url` so it can be picked up without a
+	// frontend rebuild. Env override: VULOS_RENDEZVOUS_URL / OFISI_RENDEZVOUS_URL.
+	RendezvousURL string `yaml:"rendezvous_url"`
 }
 
 // PersistenceConfig gates optional durability models layered ON TOP of the
@@ -80,6 +101,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v, ok := boolEnv("VULOS_PERSISTENCE_UPDATELOG", "OFISI_UPDATE_LOG"); ok {
 		cfg.Persistence.UpdateLog = v
 	}
+	if v, ok := stringEnv("VULOS_RENDEZVOUS_URL", "OFISI_RENDEZVOUS_URL"); ok {
+		cfg.Collab.RendezvousURL = v
+	}
 }
 
 // boolEnv returns the parsed value of the first set env var among names, and
@@ -98,6 +122,17 @@ func boolEnv(names ...string) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+// stringEnv returns the trimmed value of the first set (non-empty lookup,
+// value may be blank) env var among names, and whether any was found present.
+func stringEnv(names ...string) (string, bool) {
+	for _, n := range names {
+		if raw, present := os.LookupEnv(n); present {
+			return strings.TrimSpace(raw), true
+		}
+	}
+	return "", false
 }
 
 func Default() *Config {
