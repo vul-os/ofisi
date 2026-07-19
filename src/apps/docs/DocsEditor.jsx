@@ -61,13 +61,14 @@ import CommentsPanel from '../../components/CommentsPanel'
 import SuggestionPanel from '../../components/SuggestionPanel'
 import ActivityFeed from '../../components/ActivityFeed'
 import { useP2PCollab } from './useP2PCollab.js'
-import { docsCollabEnabled, DOCS_COLLAB_OFF_NOTICE } from '../../lib/flags.js'
+import { docsCollabEnabled, DOCS_COLLAB_OFF_NOTICE, updateLogEnabled } from '../../lib/flags.js'
 import {
   Y, createYContext, Y_FRAGMENT,
   seedUpdateFromPMJSON, isFragmentEmpty, SEED_ORIGIN,
 } from '../../lib/crdt/ydoc.js'
 import { YCollab } from './collabExtension.js'
 import { useCollabFabric } from '../../lib/collab/useCollabFabric.js'
+import { UpdateLogSync } from '../../lib/collab/updateLog.js'
 import P2PShareModal from './components/P2PShareModal.jsx'
 import AccountShareModal from '../../components/AccountShareModal.jsx'
 import { useAuthStore } from '../../store/authStore'
@@ -444,6 +445,28 @@ export default function DocsEditor() {
   // authoritative content. Until then the editor must stay read-only. When collab
   // is off there is nothing to wait for.
   const collabReady = !collabEnabled || hydrated
+
+  // ── CRDT-native persistence, phase 1 (dual-write) ──────────────────────────
+  // When the server exposes the per-file update log (persistence.updatelog) AND
+  // the client flag is on, mirror local Yjs edits into that append-only log in
+  // ADDITION to the whole-document autosave. On open it applies the snapshot +
+  // any frames the local copy is missing; on edit it appends the debounced
+  // delta. It self-disables if the endpoint is absent (404), so this never
+  // changes behaviour on a deployment without the flag. See lib/collab/updateLog.js.
+  useEffect(() => {
+    if (!updateLogEnabled()) return
+    if (!collabEnabled || !yctx?.ydoc || !id || !hydrated) return
+    let cancelled = false
+    const sync = new UpdateLogSync({ ydoc: yctx.ydoc, fileId: id })
+    sync.hydrate().then((ok) => {
+      if (cancelled || !ok) return
+      sync.start()
+    }).catch(() => { /* transport down — whole-doc autosave still covers durability */ })
+    return () => {
+      cancelled = true
+      sync.stop().catch(() => {})
+    }
+  }, [collabEnabled, yctx, id, hydrated])
 
   // Subscribe to save state changes for this file
   useEffect(() => {

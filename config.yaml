@@ -22,3 +22,12 @@ storage:
     password: ""
     database: "vulos_office"
     sslmode: "disable"
+
+persistence:
+  # CRDT-native persistence, phase 1. When true, expose the per-file append-only
+  # update log (POST/GET /api/files/:id/updates) that keeps every CRDT frame so
+  # divergent offline edits converge with nothing discarded. ADDITIVE: the
+  # whole-document PUT keeps working and the frontend dual-writes, so toggling
+  # this never loses a document. Frames are stored under <data_dir>/updates/<id>/.
+  # Env override: VULOS_PERSISTENCE_UPDATELOG / OFISI_UPDATE_LOG.
+  updatelog: false

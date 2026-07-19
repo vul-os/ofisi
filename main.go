@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"vulos-office/backend/seam"
 	"vulos-office/backend/session"
 	"vulos-office/backend/storage"
+	"vulos-office/backend/updatelog"
 	"vulos-office/backend/userauth"
 
 	"github.com/gin-contrib/cors"
@@ -297,6 +299,26 @@ func main() {
 	protected.GET("/files/:id/collaborators", fileHandler.Collaborators)
 	// Per-file sharing (owner/admin grants or revokes another account's access).
 	writes.POST("/files/:id/share", fileHandler.Share)
+
+	// ── CRDT-native persistence, phase 1 (persistence.updatelog) ──────────────
+	// The per-file append-only CRDT update log — the durability model that
+	// supersedes "single blob + 409 CAS": every CRDT frame (opaque, encrypted-
+	// or-plain Yjs / sheet / slide update) is kept, so divergent offline edits
+	// merge with nothing discarded (see backend/updatelog). Registered ONLY when
+	// the flag is on; the whole-doc PUT above always keeps working, and the
+	// frontend dual-writes during the transition. Filesystem-backed for phase 1
+	// (data/updates/<id>/), independent of the primary storage backend.
+	if cfg.Persistence.UpdateLog {
+		ulStore, err := updatelog.NewLocalStore(filepath.Join(cfg.Server.DataDir, "updates"))
+		if err != nil {
+			log.Fatalf("[persistence] failed to open update log: %v", err)
+		}
+		ulHandler := handlers.NewUpdateLogHandler(ulStore, store)
+		protected.GET("/files/:id/updates", ulHandler.List)
+		writes.POST("/files/:id/updates", ulHandler.Append)
+		log.Printf("[persistence] CRDT update-log ENABLED (append-only frames under %s)",
+			filepath.Join(cfg.Server.DataDir, "updates"))
+	}
 
 	// Parity: folder tree (per-account, ACL-owned like files).
 	folderHandler := handlers.NewFolderHandler(store)

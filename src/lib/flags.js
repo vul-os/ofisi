@@ -71,6 +71,20 @@ export function docsCollabEnabled() {
   return boolFlag('VITE_DOCS_COLLAB', true)
 }
 
+/**
+ * True when Docs should mirror local edits into the server's per-file CRDT
+ * update log (CRDT-native persistence, phase 1) IN ADDITION to the existing
+ * whole-document autosave (dual-write). Off by default: the whole-doc PUT
+ * remains the sole durability path and no extra requests are made. Turn on with
+ * VITE_UPDATE_LOG=on at build time, paired with the server flag
+ * persistence.updatelog=true (the client also self-disables if the endpoint is
+ * absent, so a mismatch degrades cleanly rather than erroring). See
+ * src/lib/collab/updateLog.js and backend/updatelog.
+ */
+export function updateLogEnabled() {
+  return boolFlag('VITE_UPDATE_LOG', false)
+}
+
 /** User-facing copy for why co-editing is unavailable (kept in one place). */
 export const DOCS_COLLAB_OFF_NOTICE =
   'Live co-editing is turned off on this deployment. You can still share this ' +

@@ -84,6 +84,20 @@ flowchart TD
   peer-to-peer room (`p2pRoom.js`) on the `@vulos/relay-client` fabric. There is
   no server-mediated collab transport (no SSE op-stream, no doc-state hub) — the
   server's only collaboration role is content-blind peer discovery.
+- **Durability — whole-doc PUT + optional CRDT update log**: the primary store is
+  a whole-document blob (`PUT /api/files/:id`) guarded by an optimistic-concurrency
+  rev (a stale write is a `409` the client reconciles). Layered on top — behind
+  `persistence.updatelog` (`backend/updatelog/`) — is a **per-file append-only
+  CRDT update log** (`GET`/`POST /api/files/:id/updates`): every CRDT frame
+  (opaque, encrypted-or-plain Yjs / sheet / slide update) is kept with a monotonic
+  seq, and a client periodically posts a compacting `snapshot` frame (whole state +
+  a `floor` seq) so the server can prune the frames it subsumes — while preserving
+  any frame above the floor. Because CRDT updates are commutative + idempotent,
+  replaying snapshot+frames converges byte-identically no matter how peers diverged
+  offline, so this supersedes last-writer-wins for durability. It is **additive**:
+  the frontend dual-writes (whole-doc autosave AND frame append), so the flag can be
+  toggled without losing a document. Phase 1 is filesystem-backed
+  (`data/updates/<id>/`); the server stays content-blind (frames are opaque bytes).
 - **E-signing**: PDF is sealed with a cryptographic hash; audit manifest JSON captures all signer events.
 - **Auth**: JWT-based; configurable (`cfg.Auth.Enabled`). Per-user credentials stored in
   pure-Go SQLite (`backend/userauth/`).

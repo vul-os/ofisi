@@ -305,6 +305,21 @@ export const api = {
     return res.json()
   },
 
+  // CRDT-native persistence, phase 1 (server flag persistence.updatelog). The
+  // per-file append-only update log: getUpdates fetches the snapshot + frames a
+  // client is missing (since = highest seq it already holds); appendUpdate posts
+  // one opaque CRDT frame (base64) — kind 'update' or a compacting 'snapshot'
+  // (whose `floor` is the seq it incorporates). These are ADDITIVE to the
+  // whole-doc PUT (dual-write). When the server flag is off the routes 404 and
+  // callers fall back to the whole-doc autosave. See backend/updatelog.
+  getUpdates: (id, since = 0) =>
+    request(`/files/${id}/updates${since ? `?since=${since}` : ''}`),
+  appendUpdate: (id, { kind = 'update', data, floor = 0 } = {}) =>
+    request(`/files/${id}/updates`, {
+      method: 'POST',
+      body: JSON.stringify({ kind, data, floor }),
+    }),
+
   // NOTE: Office collaboration is peer-to-peer (Yjs over E2E-encrypted WebRTC,
   // see src/lib/crdt/yP2PSession.js). There is deliberately NO server-mediated
   // collab API here — no op relay, no doc-state hub, no server presence. The only

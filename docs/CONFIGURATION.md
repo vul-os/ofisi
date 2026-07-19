@@ -41,7 +41,26 @@ storage:
     password: ""
     database: "vulos_office"
     sslmode: "disable"
+
+persistence:
+  updatelog: false         # CRDT-native persistence, phase 1 (see below)
 ```
+
+### `persistence.updatelog` — the CRDT update log
+
+Off by default. When `true`, Ofisi exposes the per-file **append-only CRDT
+update log** (`POST`/`GET /api/files/:id/updates`) — the phase-1 durability
+model that supersedes "single blob + 409 compare-and-swap". Every CRDT frame is
+kept (opaque, encrypted-or-plain Yjs / sheet / slide updates), so two clients
+that edited **offline** both converge with nothing discarded. It is **additive**:
+the whole-document PUT keeps working and the frontend dual-writes, so toggling
+this flag never loses a document. Frames live under `<data_dir>/updates/<id>/`
+(filesystem-backed in phase 1, independent of `storage.type`).
+
+The frontend only mirrors edits into the log when built with
+`VITE_UPDATE_LOG=on`; without it the server routes still exist but the client
+keeps using whole-document autosave (and self-disables the log path cleanly if
+the endpoint is absent). Enable both together.
 
 ---
 
@@ -69,6 +88,12 @@ Precedence (first match wins): `vk_` API key → per-product session JWT → SSO
 
 - Self-host single-user box: leave `IDENTITY_URL` unset. Nothing else to do.
 - Cloud / multi-user: set `IDENTITY_URL=https://api.vulos.org` and `VULOS_CP_TOKEN=<CP shared secret>` (plus `auth.enabled: true` / `VULOS_OFFICE_JWT_SECRET` if you also keep native JWT logins).
+
+### Persistence
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VULOS_PERSISTENCE_UPDATELOG` / `OFISI_UPDATE_LOG` | Enable the CRDT update log (overrides `persistence.updatelog`). Accepts `1/true/on/yes`. | `false` |
 
 ### Database paths (SQLite)
 
