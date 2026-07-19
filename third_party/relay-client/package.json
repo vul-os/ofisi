@@ -1,0 +1,52 @@
+{
+  "name": "@vulos/relay-client",
+  "private": false,
+  "version": "0.3.0",
+  "description": "Vendored copy of the JS client SDK for the Vulos peer-fabric — endpoint failover, offline bootstrap, WebRTC signaling, presence, live cursors. See vendor/relay-client/VENDOR.md for the sync-from-upstream step.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "exports": {
+    ".": {
+      "source": "./src/index.js",
+      "import": "./src/index.js",
+      "require": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./errors": "./src/errors.js",
+    "./endpoints": "./src/endpoints.js",
+    "./offlineBootstrap": "./src/offlineBootstrap.js",
+    "./signaling": "./src/signaling.js",
+    "./fabric": "./src/fabric.js",
+    "./presence": "./src/presence.js",
+    "./call": "./src/call/index.js",
+    "./useLiveCursors": "./src/useLiveCursors.js",
+    "./health": "./src/health.js",
+    "./roundTripCheck": "./src/roundTripCheck.js",
+    "./regionPop": "./src/regionPop.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "xlsx": ">=0.18.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "xlsx": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0"
+  }
+}

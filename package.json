@@ -111,7 +111,7 @@
     "@tiptap/pm": "^2.11.7",
     "@tiptap/react": "^2.11.7",
     "@tiptap/starter-kit": "^2.11.7",
-    "@vulos/relay-client": "file:../vulos-relay/client",
+    "@vulos/relay-client": "file:third_party/relay-client",
     "docx": "^9.5.0",
     "dompurify": "^3.4.5",
     "file-saver": "^2.0.5",
