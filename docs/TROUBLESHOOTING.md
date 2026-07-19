@@ -167,7 +167,7 @@ Only relevant when `VULOS_CP_BASE_URL` / `IDENTITY_URL` are set — with them un
 
 ## 12. Embedding & CORS
 
-When embedding `@vulos/office-client` panels or calling the API from another origin:
+When embedding `ofisi` library panels or calling the API from another origin:
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
