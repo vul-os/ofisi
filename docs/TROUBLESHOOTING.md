@@ -246,7 +246,7 @@ Security-sensitive findings: follow [SECURITY.md](../SECURITY.md) instead of a p
 ## See also
 
 - [USER-GUIDE.md](USER-GUIDE.md) — everyday use of Docs, Sheets, Slides, and Signing
-- [COLLABORATION.md](COLLABORATION.md) — how the three sync transports and E2E rooms actually work
+- [COLLABORATION.md](COLLABORATION.md) — how the peer-to-peer CRDT sync and E2E rooms actually work
 - [ADMIN-GUIDE.md](ADMIN-GUIDE.md) — deployment, configuration, storage, backup
 - [CONFIGURATION.md](CONFIGURATION.md) — the full environment-variable matrix
 - [API.md](API.md) — the `/v1` REST API and its status codes

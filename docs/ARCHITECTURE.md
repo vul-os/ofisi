@@ -5,7 +5,8 @@
 Ofisi is a collaborative document editing + e-signing service. It exposes:
 - File CRUD with version history
 - REST persistence plus real-time collaboration (comments, suggestions, live
-  co-editing) over three complementary transports — see the note below
+  co-editing). Live co-editing is always peer-to-peer over one E2E-encrypted
+  room, in two CRDT flavours — see the note below
 - E-signing workflow (envelope → sign → sealed PDF)
 
 > **Scope:** Ofisi is documents-only (Docs, Sheets, Slides, Whiteboards, PDF/Signing). Calendar
@@ -17,13 +18,26 @@ Ofisi is a collaborative document editing + e-signing service. It exposes:
 > **Collaboration transport note:** Live co-editing is CRDT-based and runs
 > **entirely peer-to-peer — there is NO central document server.** The Ofisi
 > binary hosts no op-relay, no doc-state hub, and no server-mediated collab
-> endpoint.
-> - **The document** rides an **end-to-end-encrypted room** as **Yjs** updates
->   (`YP2PCollabSession`, `src/lib/crdt/yP2PSession.js`). Peers connect **directly**
->   over WebRTC data channels (STUN-assisted); a **content-blind relay** circuit is
->   used only as a hard-NAT fallback (per-session X25519 box — ciphertext only).
->   Frames are sealed AES-256-GCM under an HKDF-derived room key carried in the URL
->   **fragment** (`#vp2p=…`), which never reaches any server.
+> endpoint (confirmed in `main.go` at the `/v1` route block: "Office
+> collaboration is ALWAYS peer-to-peer … deliberately NO central document
+> server"). There are **two CRDT session flavours**, both riding the **same**
+> end-to-end-encrypted room (`src/lib/crdt/p2pRoom.js`) over the same
+> `@vulos/relay-client` fabric transport:
+> - **Yjs session** (`YP2PCollabSession`, `src/lib/crdt/yP2PSession.js`) — the
+>   structure-aware path used by **Docs**. The document is a Yjs document
+>   (`src/lib/crdt/ydoc.js`), kept in lock-step with ProseMirror by
+>   y-prosemirror; peers exchange Yjs updates + state-vector resyncs. The
+>   whiteboard document type rides the same session with an Excalidraw-scene
+>   validator (`boardYdoc.js`).
+> - **Custom-CRDT session** (`P2PCollabSession`, `src/lib/crdt/p2pSession.js`) —
+>   the hand-rolled CRDT path (text RGA, grid LWW, tree fractional-index —
+>   `src/lib/crdt/{text,grid,tree}.js`) with an `{op, snap-req, snap}` wire
+>   vocabulary and offline-buffer-then-sync convergence.
+> - In both cases peers connect **directly** over WebRTC data channels
+>   (STUN-assisted); a **content-blind relay** circuit is used only as a hard-NAT
+>   fallback (per-session X25519 box — ciphertext only). Frames are sealed
+>   AES-256-GCM under an HKDF-derived room key carried in the URL **fragment**
+>   (`#vp2p=…`), which never reaches any server.
 > - **Presence** (cursors + roster) rides the **same E2E room**, so the host never
 >   learns who is in a room; it is ephemeral and never persisted. A read-only peer
 >   holds the decryption key but not the RW-authority MAC, so its writes are
@@ -57,11 +71,19 @@ flowchart TD
 ## Key Design Decisions
 
 - **Gin framework**: chosen for its middleware ecosystem and existing codebase.
-- **Client-side CRDT modules** (`src/lib/crdt/`): text (RGA), grid (LWW), tree
-  (fractional-index), comment, and suggestion CRDTs run in the browser for
-  ordering + offline-tolerant merge, and drive live sync over all three collab
-  transports (server-SSE, cloud-fabric P2P, E2E-encrypted P2P). The text RGA
-  mirrors the Go `backend/crdt/text.go` for interop.
+- **Client-side CRDT modules** (`src/lib/crdt/`): all merge logic lives in the
+  browser — there is no server-side CRDT. Two families coexist:
+  - **Yjs** (`ydoc.js`, `yP2PSession.js`) — the structure-aware path Docs (and
+    the whiteboard document type) use; converges with no central authority.
+  - **Hand-rolled CRDTs** — text (RGA, `text.js`), grid (LWW, `grid.js`), tree
+    (fractional-index, `tree.js`), plus comment/suggestion ordering — for
+    ordering + offline-tolerant merge, driven by the custom-CRDT P2P session
+    (`p2pSession.js`).
+
+  Both families sync over the **single** collab transport: the E2E-encrypted
+  peer-to-peer room (`p2pRoom.js`) on the `@vulos/relay-client` fabric. There is
+  no server-mediated collab transport (no SSE op-stream, no doc-state hub) — the
+  server's only collaboration role is content-blind peer discovery.
 - **E-signing**: PDF is sealed with a cryptographic hash; audit manifest JSON captures all signer events.
 - **Auth**: JWT-based; configurable (`cfg.Auth.Enabled`). Per-user credentials stored in
   pure-Go SQLite (`backend/userauth/`).
