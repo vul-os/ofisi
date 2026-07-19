@@ -100,10 +100,18 @@ key in the invite link's URL fragment.
 | `VULOS_RELAYD_BIN` | optional prebuilt relayd — what CI uses, so a broken relay checkout is reported as such and never mistaken for a failed claim |
 | Chromium flags | `playwright.p2p.config.js` sets `--disable-features=WebRtcHideLocalIpsWithMdns` so two loopback contexts can actually see each other's host candidates. This affects candidate visibility only — no protocol, signaling path or crypto changes. |
 
-What it asserts: the relay is reachable but **not** cross-origin usable (which
-is why Ofisi proxies it same-origin); a standalone Ofisi serves no
+What it asserts: the relay is reachable **and** cross-origin usable by a
+browser — `Allow-Origin: *`, a preflight that succeeds, no `Allow-Credentials`,
+verified both by header inspection and by fetching the relay from a real
+Chromium page on an Ofisi origin, since only a browser enforces CORS. That is
+the guarantee the direct-to-relay transport rests on, so a relayd that regressed
+it fails here rather than in the field. (Ofisi used to carry a same-origin proxy
+because the relay served no CORS; that is gone, and the suite asserts Ofisi
+mounts nothing for discovery.) It also asserts: a standalone Ofisi serves no
 `/api/peering/*`; two browsers converge in both directions with the relay's own
-presence state confirming the signaling went through it; offline divergence
+presence state confirming the signaling went through it — with the browsers'
+request logs showing the rendezvous calls aimed at the **relay's** origin, not
+either Ofisi's; offline divergence
 merges as a union on reconnect; and — the negative control — an unconfigured
 deployment reports local-only and refuses to mint invite links. The transport
 that carried the edits is asserted as *either* a direct host/host WebRTC pair

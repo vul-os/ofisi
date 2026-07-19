@@ -107,14 +107,18 @@ content-blind peer-discovery surface, and Ofisi picks one of three, in order:
    **standalone** Ofisi binary (which mounts no `/api/peering/*` — see
    `main.go`) gets **real** peer-to-peer collaboration.
 
-   Setting it also mounts `/api/rendezvous/*`, a same-origin pass-through to
-   that relayd. The browser calls **that**, not the relayd's origin, because
-   relayd's rendezvous surface sends no CORS headers and 405s the preflight —
-   a direct cross-origin call fails in the browser. The pass-through is
-   discovery-only and content-blind; see
-   [COLLABORATION.md](COLLABORATION.md) §3 for exactly what it does and does
-   not expose, and `backend/handlers/rendezvous_proxy.go` for its guards. With
-   no rendezvous URL configured those routes do not exist at all.
+   The browser calls that relayd's origin **directly**, cross-origin. Ofisi
+   mounts nothing for discovery and is not in that path at all, so it never
+   sees even the (content-blind) rendezvous envelopes — see
+   [COLLABORATION.md](COLLABORATION.md) §3 for exactly what the relay does and
+   does not see. Two things this puts on you as the operator:
+
+   - The relayd must serve **CORS** on its rendezvous role. Every `vulos-relay`
+     that has the role does; `npm run test:e2e:p2p` asserts the posture against
+     a real one, from a real browser.
+   - It must be reachable from wherever users load Ofisi, over a scheme the
+     page can call: an **https** Ofisi cannot call an **http** relay, so a
+     public deployment needs TLS on the relay.
 3. **Local-only** — neither is reachable; the editor keeps working, autosaves,
    and says so honestly (an "Offline" pill) instead of showing a false "Live".
 
@@ -136,9 +140,10 @@ externally-reachable origin:
 |----------|-------------|---------|
 | `VULOS_OFFICE_PUBLIC_URL` | This Office instance's externally-reachable origin (a public domain, or a vulos-relay tunnel URL when behind NAT/CGNAT). Used to build P2P invite links / signaling targets an external peer can actually reach, instead of blindly trusting `window.location.origin` (which may be a LAN-only address). | — (falls back to the visitor's own origin) |
 
-The same response carries `rendezvous_proxy_path` (`/api/rendezvous`, or `""`
-when nothing is configured) — the path the client must call. Clients treat an
-empty value as "not available" rather than guessing.
+`rendezvous_url` is `""` when nothing is configured, and clients treat empty as
+"not available" rather than guessing a default — that is what keeps an
+unconfigured deployment honestly local-only instead of minting invite links that
+could never connect anyone.
 
 See `backend/config/config.go` and `src/lib/collab/transportSelection.js` for
 the selection logic, and `src/lib/collab/reachableBase.js` for the client-side

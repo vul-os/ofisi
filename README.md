@@ -226,7 +226,9 @@ room id, never any content — and that role can be filled either by a Vulos OS 
 Vulos Relay host in front of Ofisi, **or by pointing this deployment's own
 `config.yaml` (`collab.rendezvous_url` / `VULOS_RENDEZVOUS_URL`) at any
 self-hosted `vulos-relayd`**, so a bare standalone binary gets real P2P collab
-with no Vulos OS or account at all. See
+with no Vulos OS or account at all. In that mode the browser talks to the relayd
+**directly** — Ofisi's own server is not in the discovery path and sees nothing
+of it. See
 [docs/COLLABORATION.md](docs/COLLABORATION.md) §3 and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
