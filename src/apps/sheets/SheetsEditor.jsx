@@ -25,7 +25,7 @@ import {
 } from './protectedRanges.js'
 import { GridSession, getGridReplicaId } from '../../lib/crdt/grid.js'
 import { OpLogSync } from '../../lib/collab/opLogSync.js'
-import { updateLogEnabled } from '../../lib/flags.js'
+import { updateLogEnabled, substrateSyncEnabled } from '../../lib/flags.js'
 import CommentsPanel from '../../components/CommentsPanel'
 import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
 import { usePresence } from '@vulos/relay-client/presence'
@@ -485,30 +485,46 @@ export default function SheetsEditor() {
   // backend) this is exactly the previous local-only path.
   useEffect(() => {
     if (!id) return
-    const session = new GridSession({ sessionId: id, replicaId, fabricClient: fabric || null })
-    gridSessionRef.current = session
-    session.requestSnapshot()
-
-    // CRDT-native persistence (phase 2): when the server exposes the per-file
-    // update log AND the client flag is on, mirror grid cell ops into that
-    // durable append-only log IN ADDITION to the whole-doc autosave. Applied log
-    // ops re-enter through the SAME 'remoteOp' path as fabric ops (onRemote), so
-    // hydrated/converged cells render exactly like a peer edit. Self-disables on
-    // 404, so this never changes behaviour on a deployment without the flag.
+    let cancelled = false
+    let session = null
     let opLog = null
-    if (updateLogEnabled()) {
-      opLog = new OpLogSync({
-        fileId: id,
-        subscribeLocal: (cb) => {
-          const h = (e) => cb(e.detail.op)
-          session.addEventListener('localOp', h)
-          return () => session.removeEventListener('localOp', h)
-        },
-        applyOp: (op) => session.applyLogOp(op),
-        applySnapshot: (snap) => session.applyLogSnapshot(snap),
-        encodeSnapshot: () => session.logSnapshotData(),
-      })
-      opLog.hydrate().then((ok) => { if (ok) opLog.start() }).catch(() => {})
+
+    // Open a grid session and wire everything that hangs off it. Called once,
+    // either synchronously (the default grid.js path) or after the substrate
+    // engine's WASM has loaded — hence the `cancelled` guard: the effect can be
+    // torn down while that load is still in flight.
+    const open = (s, onRemote) => {
+      if (cancelled) { s.destroy(); return }
+      session = s
+      gridSessionRef.current = s
+      s.requestSnapshot()
+
+      // CRDT-native persistence (phase 2): when the server exposes the per-file
+      // update log AND the client flag is on, mirror grid cell ops into that
+      // durable append-only log IN ADDITION to the whole-doc autosave. Applied log
+      // ops re-enter through the SAME 'remoteOp' path as fabric ops (onRemote), so
+      // hydrated/converged cells render exactly like a peer edit. Self-disables on
+      // 404, so this never changes behaviour on a deployment without the flag.
+      //
+      // Both session classes implement the SAME four-callback adapter, so the
+      // persistence layer is identical on either path — the point of keeping the
+      // storage seam untouched by the substrate adoption.
+      if (updateLogEnabled()) {
+        opLog = new OpLogSync({
+          fileId: id,
+          subscribeLocal: (cb) => {
+            const h = (e) => cb(e.detail.op)
+            s.addEventListener('localOp', h)
+            return () => s.removeEventListener('localOp', h)
+          },
+          applyOp: (op) => s.applyLogOp(op),
+          applySnapshot: (snap) => s.applyLogSnapshot(snap),
+          encodeSnapshot: () => s.logSnapshotData(),
+        })
+        opLog.hydrate().then((ok) => { if (ok) opLog.start() }).catch(() => {})
+      }
+
+      s.addEventListener('remoteOp', onRemote)
     }
 
     const onRemote = (ev) => {
@@ -624,11 +640,37 @@ export default function SheetsEditor() {
       markDirty(id)
     }
 
-    session.addEventListener('remoteOp', onRemote)
+    const opts = { sessionId: id, replicaId, fabricClient: fabric || null }
+    if (substrateSyncEnabled()) {
+      // The shared DMTAP Sync substrate engine (src/lib/crdt/substrateGrid.js).
+      // It is WASM, so it must finish loading before a session exists — the grid
+      // renders from a live CRDT and cannot be handed a half-initialised one.
+      //
+      // If the load fails, fall back to the grid.js path rather than leaving the
+      // user with an editor that accepts keystrokes and records nothing. A
+      // deployment-wide flag means every replica is on the same engine; a single
+      // client that fell back is only isolated for the session, which is strictly
+      // better than that client's edits vanishing.
+      // Imported DYNAMICALLY, so a flag-off build pays literally nothing: the
+      // substrate session, the wasm-bindgen glue and the .wasm asset all land in
+      // a separate chunk that is never requested unless this branch runs.
+      import('../../lib/crdt/substrateGrid.js')
+        .then(async (m) => {
+          await m.initSubstrateSync()
+          if (!cancelled) open(new m.SubstrateGridSession(opts), onRemote)
+        })
+        .catch(() => { if (!cancelled) open(new GridSession(opts), onRemote) })
+    } else {
+      open(new GridSession(opts), onRemote)
+    }
+
     return () => {
-      session.removeEventListener('remoteOp', onRemote)
+      cancelled = true
       if (opLog) opLog.stop().catch(() => {})
-      session.destroy()
+      if (session) {
+        session.removeEventListener('remoteOp', onRemote)
+        session.destroy()
+      }
       gridSessionRef.current = null
     }
   }, [id, fabric]) // eslint-disable-line — recreate session when the fabric attaches

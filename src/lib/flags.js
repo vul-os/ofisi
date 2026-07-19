@@ -85,6 +85,34 @@ export function updateLogEnabled() {
   return boolFlag('VITE_UPDATE_LOG', false)
 }
 
+/**
+ * True when Sheets should run its grid CRDT on the SHARED DMTAP Sync substrate
+ * engine (`dmtap-sync-wasm`, an LWW register per §4.4 of substrate/SYNC.md)
+ * instead of the hand-rolled LWW map in src/lib/crdt/grid.js.
+ *
+ * Off by default, and additive exactly as VITE_UPDATE_LOG was: with the flag
+ * off, not one byte of the substrate is loaded or executed and Sheets behaves
+ * precisely as before. Turn on with VITE_SUBSTRATE_SYNC=on at build time.
+ *
+ * WHY A FLAG AND NOT A CUTOVER. The two engines are each internally convergent
+ * but they do not share a TOTAL ORDER: grid.js resolves a conflicting write by
+ * (lamport counter, replicaId) and ignores wall-clock time, while the substrate
+ * resolves by a full HLC (wall, counter, author) per §3. For two concurrent
+ * writes to the same cell they can therefore pick different winners. Every
+ * replica in a deployment must run the SAME path, which a build-time flag
+ * guarantees and a gradual rollout would not.
+ *
+ * The substrate engine is WASM and loads asynchronously, so the Sheets editor
+ * awaits initSubstrateSync() before opening a session. If that load fails, the
+ * editor falls back to the grid.js path rather than leaving the user with a
+ * grid that silently records nothing.
+ *
+ * See src/lib/crdt/substrateGrid.js and third_party/dmtap-sync-wasm/VENDOR.md.
+ */
+export function substrateSyncEnabled() {
+  return boolFlag('VITE_SUBSTRATE_SYNC', false)
+}
+
 /** User-facing copy for why co-editing is unavailable (kept in one place). */
 export const DOCS_COLLAB_OFF_NOTICE =
   'Live co-editing is turned off on this deployment. You can still share this ' +
