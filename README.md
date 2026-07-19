@@ -222,8 +222,13 @@ Real-time collaboration is **CRDT-based and always peer-to-peer**: Docs and
 whiteboards sync as Yjs updates, Sheets and Slides use LWW/tree CRDTs, all inside
 an end-to-end-encrypted room whose key never reaches any server. The only server
 role is **content-blind peer discovery** — it learns *that* peers share a random
-room id, never any content. See [docs/COLLABORATION.md](docs/COLLABORATION.md)
-and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+room id, never any content — and that role can be filled either by a Vulos OS /
+Vulos Relay host in front of Ofisi, **or by pointing this deployment's own
+`config.yaml` (`collab.rendezvous_url` / `VULOS_RENDEZVOUS_URL`) at any
+self-hosted `vulos-relayd`**, so a bare standalone binary gets real P2P collab
+with no Vulos OS or account at all. See
+[docs/COLLABORATION.md](docs/COLLABORATION.md) §3 and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 

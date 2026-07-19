@@ -42,10 +42,16 @@ Ofisi is a collaborative document editing + e-signing service. It exposes:
 >   learns who is in a room; it is ephemeral and never persisted. A read-only peer
 >   holds the decryption key but not the RW-authority MAC, so its writes are
 >   cryptographically refused.
-> - **The only server role** is content-blind peer **discovery** (signaling + ICE
->   at `/api/peering/*`), provided by the host (Vulos OS / Relay) — never document
->   content. A bare standalone binary mounts none of it, so collaboration stays
->   **local-only** and autosaves; the UI reports "Offline" honestly.
+> - **The only server role** is content-blind peer **discovery** (signaling + ICE),
+>   resolved as a three-way choice (`src/lib/collab/transportSelection.js`, see
+>   docs/COLLABORATION.md §3): (1) this server's own `/api/peering/*`, provided
+>   by a host (Vulos OS / Relay) in front of Ofisi; else (2) a configured
+>   rendezvous URL (`config.yaml` `collab.rendezvous_url` / `VULOS_RENDEZVOUS_URL`)
+>   pointing at ANY self-hosted `vulos-relayd`'s open rendezvous surface — no
+>   Vulos OS, no account, no host-box backend, and the standalone binary's own
+>   `main.go` still mounts none of `/api/peering/*`; else (3) neither is
+>   reachable and collaboration stays **local-only** and autosaves, with the UI
+>   reporting "Offline" honestly.
 >
 > Ingress is validated **fail-closed**: every untrusted update is shadow-applied,
 > converted against the real schema, and image/link-clamped before it can touch
@@ -83,7 +89,10 @@ flowchart TD
   Both families sync over the **single** collab transport: the E2E-encrypted
   peer-to-peer room (`p2pRoom.js`) on the `@vulos/relay-client` fabric. There is
   no server-mediated collab transport (no SSE op-stream, no doc-state hub) — the
-  server's only collaboration role is content-blind peer discovery.
+  server's only collaboration role is content-blind peer discovery, which can be
+  served either by this server's own `/api/peering/*` or by a configured
+  rendezvous URL pointing at any self-hosted `vulos-relayd` (see the
+  collaboration-transport note above and `src/lib/collab/transportSelection.js`).
 - **Durability — whole-doc PUT + optional CRDT update log**: the primary store is
   a whole-document blob (`PUT /api/files/:id`) guarded by an optimistic-concurrency
   rev (a stale write is a `409` the client reconciles). Layered on top — behind

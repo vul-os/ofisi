@@ -190,7 +190,7 @@ Related behavior to be aware of:
 
 - **Embedding**: every editor surface ships as the npm library `ofisi` with entries `ofisi/docs`, `ofisi/sheets`, `ofisi/slides`, `ofisi/whiteboard`, `ofisi/pdf` — the Vulos OS (or your own app) mounts them as native panels. Built by `vite.config.lib.js` into `dist-lib/`. (The Go module and binary are historically named `vulos-office`.)
 - **Identity**: on a Vulos box or cloud cell, set `IDENTITY_URL` so Ofisi introspects the shared `vc_session` cookie — Ofisi deliberately holds no session-signing power in that mode.
-- **Peering fabric**: the OS/Relay host provides `/api/peering/stream` (WebSocket signaling) and `/api/peering/ice`; Ofisi's collab code discovers them same-origin and lights up P2P collaboration + presence automatically. Without them it degrades gracefully.
+- **Peering fabric**: the OS/Relay host provides `/api/peering/stream` (WebSocket signaling) and `/api/peering/ice`; Ofisi's collab code discovers them same-origin and lights up P2P collaboration + presence automatically. Without a host-box fabric, setting `collab.rendezvous_url` / `VULOS_RENDEZVOUS_URL` to any self-hosted `vulos-relayd` gets the same result with no OS involved (see [CONFIGURATION.md](CONFIGURATION.md)); with neither, it degrades gracefully to local-only.
 - **Control plane** (managed/multi-tenant): `VULOS_CP_BASE_URL` + `VULOS_CP_TOKEN` + `VULOS_ORG_ID` enable entitlements (`GET {CP}/api/entitlements`, fails open on transient CP outage), usage metering (fire-and-forget `POST {CP}/api/usage`), and `vk_` API-key introspection for `/v1` (fail-closed `503` if the CP is unreachable during key validation). See [SELFHOST.md](SELFHOST.md) for the full seam contract.
 
 ---

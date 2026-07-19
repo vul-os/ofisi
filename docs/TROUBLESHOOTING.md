@@ -55,7 +55,7 @@ Collaboration is **peer-to-peer — there is no central document server** to che
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Editor shows "Offline"; nobody else appears | This deployment has **no peering fabric** — a bare standalone Ofisi binary does not mount `/api/peering/*`, so peers can't discover each other | Run Ofisi behind a **Vulos OS / Relay host** that provides `/api/peering/*` (signaling + ICE). Your edits still autosave to your storage regardless |
+| Editor shows "Offline"; nobody else appears | This deployment has **no peering fabric** (a bare standalone Ofisi binary does not mount `/api/peering/*`) **and no rendezvous URL configured** — peers can't discover each other | Run Ofisi behind a **Vulos OS / Relay host** (provides `/api/peering/*`), **or** set `collab.rendezvous_url` / `VULOS_RENDEZVOUS_URL` to any self-hosted `vulos-relayd` (no OS or account needed — see [CONFIGURATION.md](CONFIGURATION.md)). Your edits still autosave to your storage regardless |
 | An invite link opens but nobody connects | Discovery unreachable (proxy dropped the `/api/peering/stream` WebSocket) **or** both peers are behind hard NATs with no TURN | Forward `Upgrade`/`Connection` on the discovery WS and keep read timeouts long; ensure the host's ICE config includes a reachable STUN and, for hard NATs, a TURN server (see [ADMIN-GUIDE.md](ADMIN-GUIDE.md) §6) |
 | Two people edit the same doc but never see each other | They opened **different** rooms — each `#vp2p=` link is its own room/key | Everyone must open the **same** invite link with the fragment intact (the `#vp2p=…` part). Forwarding the link text (not a re-share) is fine |
 | A read-only peer's edits never land | Expected: the ro link holds the decryption key but **not** the RW-authority MAC, so rw peers cryptographically refuse its writes | Share the **read-write** link if the person should edit |
@@ -68,7 +68,7 @@ Collaboration is **peer-to-peer — there is no central document server** to che
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Presence pill says offline/local; peer count stays 0 | The peering fabric isn't there: standalone Ofisi does **not** serve `/api/peering/stream` or `/api/peering/ice` — those come from a Vulos OS / Relay host | Check Network tab: is the WebSocket to `/api/peering/stream` 404/failing? If standalone, that's expected — use account sharing instead |
+| Presence pill says offline/local; peer count stays 0 | Neither transport is reachable: the peering fabric isn't there (standalone Ofisi does **not** serve `/api/peering/stream` or `/api/peering/ice` — those come from a Vulos OS / Relay host) **and** no rendezvous URL is configured | Check Network tab: is the WebSocket to `/api/peering/stream` 404/failing, and does `GET /api/reachability` report a blank `rendezvous_url`? If both, that's expected on a bare standalone server — set `collab.rendezvous_url` (self-hosted relayd, no OS needed) or use account sharing instead |
 | Invite link opens the doc but no P2P session starts | The `#vp2p=…` **fragment was lost** — chat apps, redirects, or link "sanitizers" often strip URL fragments | Re-copy the link from the share modal (Copy button) and send it through a channel that preserves `#…`; verify the received URL still contains `#vp2p=` |
 | Console: `[p2p] join from link failed: …` | Malformed/tampered/truncated invite payload — join **fails closed** by design | Get a fresh link from the sharer (Rotate mints new ones) |
 | Link worked yesterday, dead today | The sharer **rotated** the room — rotation revokes all previous links | Ask for the new link |
@@ -225,8 +225,8 @@ All verified against the code; hitting one of these is expected behavior, not a 
 
 Thirty seconds in DevTools → Network answers most collab tickets. (Collaboration is peer-to-peer — you should **never** see a `/v1/documents/*/collab/*` request; there is no document server.)
 
-1. **WebSocket to `/api/peering/stream` connected?** Peer discovery is up. If it's `404`, you're on a bare standalone server — no peering fabric, by design; collaboration is local-only until you run behind a Vulos OS/Relay host.
-2. **`#vp2p=` in the address bar?** You're in a collaboration room. Everyone must have the **same** link (fragment intact). A WebRTC connection should follow discovery — the document bytes travel inside it, not any HTTP request.
+1. **WebSocket to `/api/peering/stream` connected?** Host-box peer discovery is up. If it's `404`, check `GET /api/reachability`'s `rendezvous_url`: non-blank means discovery is instead going straight to that self-hosted relayd (no Vulos OS involved); blank means this is a bare standalone server with neither transport configured — collaboration is local-only until you run behind a Vulos OS/Relay host **or** set `collab.rendezvous_url`.
+2. **`#vp2p=` in the address bar?** You're in a collaboration room. Everyone must have the **same** link (fragment intact). A WebRTC connection should follow discovery (via whichever transport won the check above) — the document bytes travel inside it, not any HTTP request.
 3. **See a `/v1/documents/*/collab/*` request at all?** That's a **regression** — Ofisi has no server-mediated collab endpoint. File an issue.
 4. **None of the above?** You're local-only: autosave + drafts still protect the work; check auth (`/api/auth/status`) and connectivity.
 

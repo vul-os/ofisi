@@ -44,6 +44,9 @@ storage:
 
 persistence:
   updatelog: false         # CRDT-native persistence (see below)
+
+collab:
+  rendezvous_url: ""       # Self-hosted relayd for OS-free P2P collab (see below)
 ```
 
 ### `persistence.updatelog` — the CRDT update log
@@ -85,6 +88,49 @@ The frontend only mirrors edits into the log when built with
 without it the server routes still exist but the client keeps using
 whole-document autosave (and self-disables the log path cleanly if the endpoint
 is absent). Enable both together.
+
+---
+
+### `collab.rendezvous_url` — P2P collaboration with no Vulos OS / host box
+
+Blank by default. Ofisi's own backend never mediates live collaboration — the
+Docs/Whiteboard invite-link path and the Sheets/Slides presence layer both talk
+peer-to-peer over `@vulos/relay-client`'s `FabricClient` (see
+[COLLABORATION.md](COLLABORATION.md) §3). That transport needs a lightweight,
+content-blind peer-discovery surface, and Ofisi picks one of three, in order:
+
+1. **This server's own peering fabric** (`/api/peering/*`) — present only when
+   a Vulos OS / Vulos Relay deployment fronts Ofisi. Unchanged default.
+2. **A configured rendezvous URL** — the base URL of any **self-hosted
+   `vulos-relayd`**'s OPEN rendezvous surface (announce/resolve/signal/mailbox
+   + ICE). The browser talks to it **directly** — no Vulos OS, no account, no
+   host-box backend required at all. Set it and a bare **standalone** Ofisi
+   binary (which mounts no `/api/peering/*` — see `main.go`) gets **real**
+   peer-to-peer collaboration.
+3. **Local-only** — neither is reachable; the editor keeps working, autosaves,
+   and says so honestly (an "Offline" pill) instead of showing a false "Live".
+
+```yaml
+collab:
+  rendezvous_url: "https://relay.example.org"   # any self-hosted vulos-relayd
+```
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VULOS_RENDEZVOUS_URL` / `OFISI_RENDEZVOUS_URL` | Overrides `collab.rendezvous_url`. Any URL a `vulos-relayd` serves its rendezvous surface on. | — (unset) |
+
+Exposed **read-only** to the browser at the unauthenticated `GET /api/reachability`
+(as `rendezvous_url`), so setting the env var takes effect without a frontend
+rebuild — the same endpoint also carries `public_base_url`, this server's own
+externally-reachable origin:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VULOS_OFFICE_PUBLIC_URL` | This Office instance's externally-reachable origin (a public domain, or a vulos-relay tunnel URL when behind NAT/CGNAT). Used to build P2P invite links / signaling targets an external peer can actually reach, instead of blindly trusting `window.location.origin` (which may be a LAN-only address). | — (falls back to the visitor's own origin) |
+
+See `backend/config/config.go` and `src/lib/collab/transportSelection.js` for
+the selection logic, and `src/lib/collab/reachableBase.js` for the client-side
+fetch/cache.
 
 ---
 
