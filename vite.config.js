@@ -47,8 +47,8 @@ function manualChunks(id) {
 
 // Default config: monolithic vulos-office build (dist/).
 // For the subdomain build use vite.config.office.js.
-// (Talk/Spaces is now the standalone vulos-talk product; Calendar/Contacts
-// moved to the Vulos Mail/PIM product.)
+// (Chat/video are third-party per the VulOS standard, not built by Office;
+// Calendar/Contacts are bring-your-own PIM via lilmail.)
 // For library build use vite.config.lib.js.
 export default defineConfig({
   test: {

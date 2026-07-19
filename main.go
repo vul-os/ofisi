@@ -95,9 +95,9 @@ func main() {
 		log.Fatal("Storage init failed:", err)
 	}
 
-	// Calendar + Contacts moved to the standalone Vulos Mail/PIM product
-	// (vulos-mail CalDAV/CardDAV + lilmail /v1/calendar + /v1/contacts). Office
-	// is documents-only; their durable stores no longer live here.
+	// Calendar + Contacts are bring-your-own PIM via lilmail (CalDAV/CardDAV,
+	// /v1/calendar + /v1/contacts). Office is documents-only; their durable
+	// stores never lived here.
 
 	// ── Org-bucket object store ───────────────────────────────────────────────
 	// ResolveOrgBucket reads VULOS_ORG_ID (cloud-injected org identifier) and
@@ -482,9 +482,9 @@ func main() {
 		log.Printf("[local-files] auth enabled (multi-tenant): local-files browse/serve routes disabled to avoid cross-tenant exposure of the server's home directory")
 	}
 
-	// Team chat + huddles ("Spaces") is now the standalone Vulos Talk product:
-	// its meeting/lobby/TURN/recording + spaces/presence API moved to vulos-talk.
-	// Office hands those routes off via seam-C (the SPA redirects to talk.vulos.org).
+	// Team chat + huddles ("Spaces") are not an Office feature. Per the VulOS
+	// product standard, comms are third-party (Matrix/Element for chat,
+	// Element Call/Jitsi for video) — Office neither hosts nor proxies them.
 
 	// OFFICE-41: envelope CRUD (field-placement setup).
 	envelopeHandler := handlers.NewEnvelopeHandler(store)
@@ -535,9 +535,9 @@ func main() {
 	writes.POST("/sheets/:id/import", sheetsHandler.Import)
 	protected.GET("/sheets/:id/export", sheetsHandler.Export)
 
-	// Calendar + Contacts APIs moved to the standalone Vulos Mail/PIM product
-	// (vulos-mail CalDAV/CardDAV + lilmail /v1/calendar + /v1/contacts). Office
-	// no longer serves /calendar/* or /contacts/* — it is documents-only.
+	// Calendar + Contacts are bring-your-own PIM via lilmail (CalDAV/CardDAV,
+	// /v1/calendar + /v1/contacts). Office does not serve /calendar/* or
+	// /contacts/* — it is documents-only.
 
 	// Admin: invite-token issuance (mint/list/revoke) + audit-log viewer.
 	// Every handler additionally enforces the admin scope (requireAdmin).
@@ -547,9 +547,10 @@ func main() {
 	writes.DELETE("/admin/invites/:id", adminHandler.RevokeInvite)
 	protected.GET("/admin/audit", adminHandler.ListAudit)
 
-	// NOTE: Vulos Spaces (presence + channels/DMs/threads/messages) moved to the
-	// standalone Vulos Talk product (vulos-talk). The /spaces/* and /meet/* APIs
-	// are served there; Office redirects those deep-links via seam-C.
+	// NOTE: presence/channels/DMs/threads/messages and meeting APIs are not
+	// served by Office. Per the VulOS product standard, chat and video are
+	// third-party (Matrix/Element, Element Call/Jitsi) — Office neither hosts
+	// nor redirects to them.
 
 	// Serve embedded frontend (SPA fallback to index.html)
 	staticFS, err := fs.Sub(distFS, "dist")
