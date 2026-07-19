@@ -194,6 +194,27 @@ func TestPostgresStaleSnapshotRejected(t *testing.T) {
 	}
 }
 
+func TestPostgresPendingCountsUncompactedTail(t *testing.T) {
+	s, cleanup := newPostgresStore(t)
+	const id = "pg-ul-pending-1"
+	cleanup(id)
+	t.Cleanup(func() { cleanup(id) })
+
+	if n, _ := s.Pending(id); n != 0 {
+		t.Fatalf("empty Pending = %d, want 0", n)
+	}
+	for i := 0; i < 5; i++ {
+		s.Append(id, FrameKindUpdate, []byte{byte(i)}, "p", 0)
+	}
+	if n, _ := s.Pending(id); n != 5 {
+		t.Fatalf("Pending after 5 appends = %d, want 5", n)
+	}
+	s.Append(id, FrameKindSnapshot, []byte("S"), "p", 3)
+	if n, _ := s.Pending(id); n != 2 {
+		t.Fatalf("Pending after snapshot(floor=3) = %d, want 2", n)
+	}
+}
+
 // TestPostgresConcurrentAppendMonotonic is the payoff of a real database: N
 // goroutines append to the SAME file at once; the per-file advisory lock must
 // serialise them so every seq from 1..N is assigned exactly once (no dup, no

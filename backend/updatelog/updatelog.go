@@ -86,7 +86,25 @@ type Store interface {
 	Load(fileID string, since int64) (*Log, error)
 	// Head returns the highest seq assigned for a file (0 when empty).
 	Head(fileID string) (int64, error)
+	// Pending returns the number of un-compacted update frames — those with
+	// seq ABOVE the latest snapshot's floor (or all frames when no snapshot
+	// exists). It is the server-side compaction-pressure signal: when it grows
+	// large the log should be compacted by a client posting a fresh snapshot (the
+	// server CANNOT compact opaque CRDT frames itself). Cheap — it never
+	// materialises frame payloads.
+	Pending(fileID string) (int64, error)
 }
+
+// CompactAdviseThreshold is the number of un-compacted update frames at which
+// the server advises the appending client to post a snapshot NOW (see
+// Store.Pending). Client-driven compaction stays primary — the server never
+// fabricates a snapshot; it can only nudge, because it cannot merge opaque CRDT
+// frames. The threshold is set well above the client's own snapshotEvery (150)
+// so it only fires when NO single client is accumulating enough edits to
+// self-compact (e.g. many short-lived clients each appending a few frames). It
+// is a var (not a const) purely so tests can drive the nudge without appending
+// hundreds of frames; production never mutates it.
+var CompactAdviseThreshold int64 = 600
 
 // ---- LocalStore (filesystem) ----
 
@@ -306,6 +324,30 @@ func (s *LocalStore) Head(fileID string) (int64, error) {
 	defer s.mu.Unlock()
 	head, _, _, err := headLocked(dir)
 	return head, err
+}
+
+func (s *LocalStore) Pending(fileID string) (int64, error) {
+	dir, err := s.fileDir(fileID)
+	if err != nil {
+		return 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, snap, frames, err := headLocked(dir)
+	if err != nil {
+		return 0, err
+	}
+	var floor int64
+	if snap != nil {
+		floor = snap.Floor
+	}
+	var n int64
+	for _, f := range frames {
+		if f.Seq > floor {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // writeJSON writes v to path atomically-ish (write temp, rename) so a crashed

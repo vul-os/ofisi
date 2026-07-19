@@ -3,9 +3,12 @@ package handlers
 import (
 	"encoding/base64"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"vulos-office/backend/billing"
 	"vulos-office/backend/storage"
@@ -13,6 +16,28 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// compactWarnThrottle rate-limits the "un-compacted tail" WARN so a hot document
+// that keeps appending above the threshold logs at most once per interval per
+// file (the compact HINT is still returned on every over-threshold append; only
+// the operator log line is throttled).
+var (
+	compactWarnMu   sync.Mutex
+	compactWarnLast = map[string]time.Time{}
+)
+
+const compactWarnInterval = 5 * time.Minute
+
+func shouldWarnCompaction(fileID string) bool {
+	compactWarnMu.Lock()
+	defer compactWarnMu.Unlock()
+	now := time.Now()
+	if last, ok := compactWarnLast[fileID]; ok && now.Sub(last) < compactWarnInterval {
+		return false
+	}
+	compactWarnLast[fileID] = now
+	return true
+}
 
 // Per-frame ceilings. A single incremental update must fit inside the P2P
 // fabric's per-frame cap once base64-inflated (see src/lib/crdt/ydoc.js
@@ -149,5 +174,24 @@ func (h *UpdateLogHandler) Append(c *gin.Context) {
 	// The frame is durable — promote the reservation to committed usage and emit
 	// the storage Usage event through the seam.
 	res.Commit(c.Request.Context())
-	c.JSON(http.StatusOK, gin.H{"seq": frame.Seq, "kind": frame.Kind, "floor": frame.Floor})
+
+	// SERVER-SIDE COMPACTION SAFETY NET (advisory only). The server CANNOT fold
+	// opaque CRDT frames into a snapshot itself — it cannot interpret them, so it
+	// can never fabricate the compacted state. What it CAN do is detect that a log
+	// has grown a large un-compacted tail (e.g. many short-lived clients each
+	// appending a few frames, so no single client ever hits its own snapshotEvery)
+	// and NUDGE the appending client to post a snapshot now. Client-driven
+	// compaction stays primary; this is a conservative retention signal. Only on
+	// update appends (a snapshot just compacted, so there is nothing to advise).
+	resp := gin.H{"seq": frame.Seq, "kind": frame.Kind, "floor": frame.Floor}
+	if kind == updatelog.FrameKindUpdate {
+		if pending, perr := h.log.Pending(id); perr == nil && pending >= updatelog.CompactAdviseThreshold {
+			resp["compact"] = true
+			if shouldWarnCompaction(id) {
+				log.Printf("[persistence] update-log for file=%s has %d un-compacted frames "+
+					"(>= %d) — advising client to snapshot", id, pending, updatelog.CompactAdviseThreshold)
+			}
+		}
+	}
+	c.JSON(http.StatusOK, resp)
 }

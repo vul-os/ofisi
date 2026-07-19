@@ -154,6 +154,27 @@ func TestStaleSnapshotRejected(t *testing.T) {
 	}
 }
 
+// TestPendingCountsUncompactedTail verifies the server-side compaction-pressure
+// signal: Pending counts only update frames ABOVE the snapshot floor, and a
+// snapshot that compacts the tail drops the count back to what remains above it.
+func TestPendingCountsUncompactedTail(t *testing.T) {
+	s := newStore(t)
+	if n, _ := s.Pending("d"); n != 0 {
+		t.Fatalf("empty Pending = %d, want 0", n)
+	}
+	for i := 0; i < 5; i++ { // seqs 1..5
+		s.Append("d", FrameKindUpdate, []byte{byte(i)}, "p", 0)
+	}
+	if n, _ := s.Pending("d"); n != 5 {
+		t.Fatalf("Pending after 5 appends = %d, want 5", n)
+	}
+	// Compact up to floor 3 → frames 1..3 pruned, 4..5 remain above the floor.
+	s.Append("d", FrameKindSnapshot, []byte("S"), "p", 3)
+	if n, _ := s.Pending("d"); n != 2 {
+		t.Fatalf("Pending after snapshot(floor=3) = %d, want 2", n)
+	}
+}
+
 // TestConvergenceFrameSetUnion is the storage-level analogue of the frontend
 // "two clients diverge offline → both append → reload converges" guarantee: two
 // peers each append offline frames; after both flush, a fresh reader receives

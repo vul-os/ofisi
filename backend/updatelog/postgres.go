@@ -269,6 +269,21 @@ func (s *PostgresStore) Load(fileID string, since int64) (*Log, error) {
 	return out, rows.Err()
 }
 
+func (s *PostgresStore) Pending(fileID string) (int64, error) {
+	if !idPattern.MatchString(fileID) {
+		return 0, fmt.Errorf("invalid file id")
+	}
+	ctx := context.Background()
+	// Count update frames above the current snapshot floor (0 when no snapshot).
+	var n int64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM file_updates
+		WHERE file_id = $1
+		  AND seq > COALESCE((SELECT floor FROM file_update_snapshots WHERE file_id = $1), 0)`,
+		fileID).Scan(&n)
+	return n, err
+}
+
 func (s *PostgresStore) Head(fileID string) (int64, error) {
 	if !idPattern.MatchString(fileID) {
 		return 0, fmt.Errorf("invalid file id")

@@ -157,7 +157,11 @@ export class UpdateLogSync {
       this._flushedSV = Y.encodeStateVector(this._ydoc)
       this._dirty = false
       this._appendsSinceSnapshot++
-      if (this._appendsSinceSnapshot >= this._snapshotEvery) {
+      // Compact when EITHER our own local budget is reached OR the server advises
+      // it (resp.compact) — the server's compaction safety net fires when a log
+      // has grown a large un-compacted tail that no single client is snapshotting
+      // (it cannot fold opaque frames itself, so it nudges a client to do it).
+      if (this._appendsSinceSnapshot >= this._snapshotEvery || (resp && resp.compact)) {
         await this.snapshot()
       }
     } catch (err) {

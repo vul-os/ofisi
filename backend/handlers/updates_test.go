@@ -201,6 +201,49 @@ func TestUpdateLogSuspendedBlocked(t *testing.T) {
 	}
 }
 
+// The server advises compaction (compact:true) once the un-compacted frame tail
+// crosses CompactAdviseThreshold, and a fresh append below the threshold does
+// not. The server never fabricates the snapshot — it only nudges the client.
+func TestUpdateLogAdvisesCompaction(t *testing.T) {
+	fh, uh := newUpdateLogSetup(t)
+	r := updatesRouter(fh, uh, "alice")
+	id := createFileAs(t, fh, "alice")
+
+	// Drive the nudge at a low threshold so the test does not append hundreds of
+	// frames (LocalStore append is O(frames) per call).
+	orig := updatelog.CompactAdviseThreshold
+	updatelog.CompactAdviseThreshold = 5
+	t.Cleanup(func() { updatelog.CompactAdviseThreshold = orig })
+
+	compactAt := func(body string) bool {
+		w := doReq(r, http.MethodPost, "/files/"+id+"/updates", gin.H{"kind": "update", "data": b64([]byte(body))})
+		if w.Code != http.StatusOK {
+			t.Fatalf("append: expected 200, got %d (%s)", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Compact bool `json:"compact"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		return resp.Compact
+	}
+
+	// Below the threshold: no advice.
+	if compactAt("x") {
+		t.Fatal("did not expect compaction advice on the first append")
+	}
+	// Drive the tail up to the threshold; the append that reaches it must advise.
+	var advised bool
+	for i := int64(1); i < updatelog.CompactAdviseThreshold+2; i++ {
+		if compactAt("y") {
+			advised = true
+			break
+		}
+	}
+	if !advised {
+		t.Fatalf("expected compaction advice once the tail reached %d frames", updatelog.CompactAdviseThreshold)
+	}
+}
+
 func TestUpdateLogRejectsBadInput(t *testing.T) {
 	fh, uh := newUpdateLogSetup(t)
 	r := updatesRouter(fh, uh, "alice")
