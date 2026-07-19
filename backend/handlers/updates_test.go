@@ -1,13 +1,17 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"testing"
 
+	"vulos-office/backend/billing"
 	"vulos-office/backend/fileacl"
 	"vulos-office/backend/middleware"
+	"vulos-office/backend/seam"
 	"vulos-office/backend/updatelog"
 
 	"github.com/gin-gonic/gin"
@@ -123,6 +127,77 @@ func TestUpdateLogAclEnforced(t *testing.T) {
 	// Sanity: the owner still can.
 	if w := doReq(alice, http.MethodPost, "/files/"+id+"/updates", gin.H{"kind": "update", "data": b64([]byte("ok"))}); w.Code != http.StatusOK {
 		t.Fatalf("append as owner: expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+// --- storage-quota metering on frame appends (phase 2, task 3) ---
+
+type stubEnt struct{ ent seam.Entitlement }
+
+func (s stubEnt) For(context.Context, string) (seam.Entitlement, error) { return s.ent, nil }
+func (s stubEnt) Allowed(context.Context, string, string) bool          { return true }
+
+type recUsage struct {
+	mu sync.Mutex
+	ev []seam.UsageEvent
+}
+
+func (r *recUsage) Report(_ context.Context, ev seam.UsageEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ev = append(r.ev, ev)
+}
+func (r *recUsage) count() int { r.mu.Lock(); defer r.mu.Unlock(); return len(r.ev) }
+
+func withBilling(t *testing.T, ent seam.Entitlement) *recUsage {
+	t.Helper()
+	u := &recUsage{}
+	billing.Configure(seam.Provider{Entitlements: stubEnt{ent: ent}, Usage: u})
+	t.Cleanup(func() {
+		billing.Configure(seam.NewStandaloneProvider(func() ([]byte, error) { return nil, nil }, false))
+	})
+	return u
+}
+
+// A frame append is subject to the SAME storage quota as a whole-doc PUT: an
+// over-cap append is rejected 402 (no quota bypass), and a successful append
+// meters the appended bytes through the Usage seam.
+func TestUpdateLogMetersAndGatesStorage(t *testing.T) {
+	fh, uh := newUpdateLogSetup(t)
+	r := updatesRouter(fh, uh, "alice")
+	id := createFileAs(t, fh, "alice")
+	// Install the tight cap AFTER creating the file (Configure resets the
+	// per-process usage counters). Cap at 4 bytes so the first small frame fits
+	// and the second overflows.
+	usage := withBilling(t, seam.Entitlement{MaxStorageBytes: 4})
+
+	// 3-byte frame fits under the 4-byte cap → 200, and is metered.
+	if w := doReq(r, http.MethodPost, "/files/"+id+"/updates", gin.H{"kind": "update", "data": b64([]byte("abc"))}); w.Code != http.StatusOK {
+		t.Fatalf("first append: expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	if usage.count() != 1 {
+		t.Fatalf("expected 1 metered storage event, got %d", usage.count())
+	}
+
+	// A second frame would push committed+new over the cap → 402 (bypass closed).
+	if w := doReq(r, http.MethodPost, "/files/"+id+"/updates", gin.H{"kind": "update", "data": b64([]byte("de"))}); w.Code != http.StatusPaymentRequired {
+		t.Fatalf("over-cap append: expected 402, got %d (%s)", w.Code, w.Body.String())
+	}
+	// The rejected append reserved nothing durable — still exactly one metered event.
+	if usage.count() != 1 {
+		t.Fatalf("over-cap append must not meter; got %d events", usage.count())
+	}
+}
+
+// A suspended account cannot append frames (the office gate already blocks it,
+// but the storage gate is a second fail-closed guard).
+func TestUpdateLogSuspendedBlocked(t *testing.T) {
+	fh, uh := newUpdateLogSetup(t)
+	r := updatesRouter(fh, uh, "alice")
+	id := createFileAs(t, fh, "alice")
+	withBilling(t, seam.Entitlement{Suspended: true})
+	if w := doReq(r, http.MethodPost, "/files/"+id+"/updates", gin.H{"kind": "update", "data": b64([]byte("x"))}); w.Code == http.StatusOK {
+		t.Fatalf("suspended append should be blocked, got 200")
 	}
 }
 

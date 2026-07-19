@@ -119,8 +119,21 @@ func (h *UpdateLogHandler) Append(c *gin.Context) {
 		return
 	}
 
+	// STORAGE GATE: update-log frames are durable bytes exactly like a whole-doc
+	// PUT, so they must pass the SAME storage quota — otherwise the append path is
+	// a quota bypass (a suspended / over-limit account could keep writing frames
+	// forever). Atomically check AND reserve the appended bytes BEFORE persisting;
+	// commit on success, release if the append fails. Standalone / unlimited →
+	// no-op (the seam default), consistent with GateStorage everywhere else.
+	d, res := billing.GateStorage(c.Request.Context(), account, int64(len(raw)))
+	if !d.Allowed() {
+		c.JSON(d.Code, gin.H{"error": d.Reason})
+		return
+	}
+
 	frame, err := h.log.Append(id, kind, raw, account, req.Floor)
 	if err != nil {
+		res.Release()
 		// A stale snapshot (floor regressed) is a client-reconcilable conflict.
 		if strings.Contains(err.Error(), "stale snapshot") {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -133,5 +146,8 @@ func (h *UpdateLogHandler) Append(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// The frame is durable — promote the reservation to committed usage and emit
+	// the storage Usage event through the seam.
+	res.Commit(c.Request.Context())
 	c.JSON(http.StatusOK, gin.H{"seq": frame.Seq, "kind": frame.Kind, "floor": frame.Floor})
 }
