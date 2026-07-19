@@ -328,65 +328,59 @@ export class SignalingClient extends EventTarget {
       this._reconnectAttempts = 0
       this._degraded = false
       this.dispatchEvent(new CustomEvent('signaling-open'))
-      // Announce ourselves to the session room. Publish the deposit signing
-      // public key (when available) so the server can bind it to our
-      // authenticated peerId and verify relay deposit signatures.
-      const join = { type: 'join', session: this._session }
-      const depositPubKey = this._getDepositPubKey?.() ?? null
-      if (depositPubKey) join.depositPubKey = depositPubKey
-      const boxPubKey = this._getBoxPubKey?.() ?? null
-      if (boxPubKey) join.boxPubKey = boxPubKey
-      // Publish the signed prekey {id, pub, sig} so peers can establish a
-      // forward-secret (X3DH/v2) relay session. The pub is signed by our ECDSA
-      // identity (mirroring boxPubKey/depositPubKey); peers verify it before use.
-      const signedPreKey = this._getSignedPreKey?.() ?? null
-      if (signedPreKey) join.signedPreKey = signedPreKey
-
-      // ── Anti-downgrade: authenticate forward-secrecy capability ────────────
-      // When we can sign (signFrame wired) AND we have a signed prekey, advertise
-      // forward-secrecy capability with a SIGNED `supportsV2:true` commitment —
-      // an ECDSA signature over supportsV2 + depositPubKey + boxPubKey + nonce/ts
-      // (see _canonicalJoin).  The mutable signedPreKey is authenticated by its
-      // OWN sig, so a server that strips it leaves this commitment intact: the
-      // receiver still verifies supportsV2, pins us as v2-capable, and catches the
-      // absent prekey as a downgrade instead of treating us as legacy.  When
-      // signFrame is null (e.g. the BroadcastChannel / fabricSignaling stub) the
-      // join is sent unsigned exactly as before — and synchronously, since no
-      // `await` is reached.
-      const supportsV2 = !!(this._signFrame && signedPreKey)
-      if (supportsV2) join.supportsV2 = true
+      // Announce ourselves to the session room (see _buildJoinPayload). When
+      // signFrame is null the join is sent SYNCHRONOUSLY (no await reached), so a
+      // consumer that inspects the socket right after 'open' sees it immediately.
       if (this._signFrame) {
-        const nonce = crypto.randomUUID()
-        const ts = Date.now()
-        join.nonce = nonce
-        join.ts = ts
-        const canonical = _canonicalJoin({
-          session: this._session,
-          from: this._peerId,
-          depositPubKey,
-          boxPubKey,
-          supportsV2,
-          nonce,
-          ts,
-        })
-        join.sig = await this._signFrame(canonical)
+        this._buildJoinPayload().then((join) => this._send(join))
+      } else {
+        this._send(this._buildJoinBase().join)
       }
-      this._send(join)
     })
 
     ws.addEventListener('message', async (ev) => {
       let frame
       try { frame = JSON.parse(ev.data) } catch { return }
       if (frame.channel !== SIGNAL_CHANNEL) return
-      // Only deliver frames addressed to this session and this peer (or broadcast).
-      const p = frame.payload
-      if (!p) return
-      if (p.session && p.session !== this._session) return
-      if (p.to && p.to !== this._peerId) return
+      // Delegate to the transport-agnostic processor: the server stamps `from`,
+      // so `frame.from` is the sender peerId.
+      await this._processSignal(frame.from, frame.payload)
+    })
 
-      const senderPeerId = frame.from
+    ws.addEventListener('close', () => {
+      if (this._stopped) return
+      this.dispatchEvent(new CustomEvent('signaling-close'))
+      this._scheduleReconnect()
+    })
 
-      // ── TOFU key import on 'join' ───────────────────────────────────────────
+    ws.addEventListener('error', () => {
+      // 'close' will follow; handled there.
+    })
+  }
+
+  /**
+   * Process one inbound SignalPayload from `senderPeerId`, applying the full E2E
+   * peer-authentication pipeline (TOFU key/box/prekey import, signed-join
+   * anti-downgrade pinning, offer/answer/ice signature + freshness + replay
+   * checks) and dispatching a `signal` event to the consumer (FabricClient).
+   *
+   * This is TRANSPORT-AGNOSTIC: the WebSocket message handler calls it with the
+   * server-stamped `from`, and the rendezvous transport (rendezvousSignaling.js)
+   * calls it with the sender peerId carried in the opaque rendezvous envelope.
+   * The peer-auth handshake is therefore identical end-to-end regardless of
+   * whether frames arrive over the host box's WebSocket or a relay's rendezvous
+   * signal queue.
+   *
+   * @param {string} senderPeerId - the sender's application peer id
+   * @param {object} p            - the SignalPayload (offer/answer/ice/join/leave)
+   */
+  async _processSignal(senderPeerId, p) {
+    // Only deliver frames addressed to this session and this peer (or broadcast).
+    if (!p) return
+    if (p.session && p.session !== this._session) return
+    if (p.to && p.to !== this._peerId) return
+
+    // ── TOFU key import on 'join' ───────────────────────────────────────────
       // When a peer announces with a depositPubKey, store it (first key wins).
       // This is the primary identity-binding step: the server's JWT auth ensures
       // `from` is the authenticated peerId; we bind their pubkey to that identity.
@@ -555,18 +549,7 @@ export class SignalingClient extends EventTarget {
         // compatibility (fabricSignaling.js / BroadcastChannel paths).
       }
 
-      this.dispatchEvent(new CustomEvent('signal', { detail: { from: senderPeerId, payload: p } }))
-    })
-
-    ws.addEventListener('close', () => {
-      if (this._stopped) return
-      this.dispatchEvent(new CustomEvent('signaling-close'))
-      this._scheduleReconnect()
-    })
-
-    ws.addEventListener('error', () => {
-      // 'close' will follow; handled there.
-    })
+    this.dispatchEvent(new CustomEvent('signal', { detail: { from: senderPeerId, payload: p } }))
   }
 
   /**
@@ -579,6 +562,22 @@ export class SignalingClient extends EventTarget {
    * @returns {Promise<void>}
    */
   async signal(type, toId, data = {}) {
+    this._send(await this._buildSignalPayload(type, toId, data))
+  }
+
+  /**
+   * Build (and, when `signFrame` is configured, ECDSA-sign) a SignalPayload for
+   * `type`/`toId`/`data`. Pure — it does not touch the transport, so it is shared
+   * by the WebSocket `signal()` above and the rendezvous transport, which sends
+   * the returned payload as an opaque blob rather than a WS frame. The canonical
+   * signed bytes are identical on both paths, so peer authentication is unchanged.
+   *
+   * @param {string} type - offer | answer | ice
+   * @param {string} toId - recipient peerId
+   * @param {object} data - { sdp?, candidate?, pubKey? }
+   * @returns {Promise<object>} the (possibly signed) SignalPayload
+   */
+  async _buildSignalPayload(type, toId, data = {}) {
     const payload = { type, session: this._session, to: toId, ...data }
 
     if (this._signFrame) {
@@ -605,7 +604,72 @@ export class SignalingClient extends EventTarget {
       payload.sig = await this._signFrame(canonical)
     }
 
-    this._send(payload)
+    return payload
+  }
+
+  /**
+   * Build (and, when `signFrame` is configured, ECDSA-sign) this peer's `join`
+   * announcement payload — the deposit/box/signed-prekey public keys plus the
+   * signed `supportsV2` anti-downgrade commitment. Pure (no transport), so both
+   * the WebSocket open handler and the rendezvous transport publish the identical
+   * signed join: over WS it is a room broadcast; over rendezvous it is deposited
+   * onto the session's shared discovery board.
+   *
+   * @returns {Promise<object>} the (possibly signed) join payload
+   */
+  async _buildJoinPayload() {
+    const { join, depositPubKey, boxPubKey, supportsV2 } = this._buildJoinBase()
+    if (this._signFrame) {
+      const nonce = crypto.randomUUID()
+      const ts = Date.now()
+      join.nonce = nonce
+      join.ts = ts
+      const canonical = _canonicalJoin({
+        session: this._session,
+        from: this._peerId,
+        depositPubKey,
+        boxPubKey,
+        supportsV2,
+        nonce,
+        ts,
+      })
+      join.sig = await this._signFrame(canonical)
+    }
+    return join
+  }
+
+  /**
+   * Build the UNSIGNED base join object plus the derived key fields the signing
+   * step needs. Synchronous, so the WebSocket open handler can send an unsigned
+   * join without awaiting (preserving the historical synchronous-send behaviour).
+   *
+   * @returns {{ join: object, depositPubKey: string|null, boxPubKey: string|null, supportsV2: boolean }}
+   */
+  _buildJoinBase() {
+    // Publish the deposit signing public key (when available) so the server can
+    // bind it to our authenticated peerId and verify relay deposit signatures.
+    const join = { type: 'join', session: this._session }
+    const depositPubKey = this._getDepositPubKey?.() ?? null
+    if (depositPubKey) join.depositPubKey = depositPubKey
+    const boxPubKey = this._getBoxPubKey?.() ?? null
+    if (boxPubKey) join.boxPubKey = boxPubKey
+    // Publish the signed prekey {id, pub, sig} so peers can establish a
+    // forward-secret (X3DH/v2) relay session. The pub is signed by our ECDSA
+    // identity (mirroring boxPubKey/depositPubKey); peers verify it before use.
+    const signedPreKey = this._getSignedPreKey?.() ?? null
+    if (signedPreKey) join.signedPreKey = signedPreKey
+
+    // ── Anti-downgrade: authenticate forward-secrecy capability ────────────
+    // When we can sign (signFrame wired) AND we have a signed prekey, advertise
+    // forward-secrecy capability with a SIGNED `supportsV2:true` commitment —
+    // an ECDSA signature over supportsV2 + depositPubKey + boxPubKey + nonce/ts
+    // (see _canonicalJoin).  The mutable signedPreKey is authenticated by its
+    // OWN sig, so a server that strips it leaves this commitment intact: the
+    // receiver still verifies supportsV2, pins us as v2-capable, and catches the
+    // absent prekey as a downgrade instead of treating us as legacy.
+    const supportsV2 = !!(this._signFrame && signedPreKey)
+    if (supportsV2) join.supportsV2 = true
+    return { join, depositPubKey, boxPubKey, supportsV2 }
   }
 
   /** Cleanly stop reconnecting and close the socket. */

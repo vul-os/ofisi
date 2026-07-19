@@ -48,7 +48,8 @@ repos:
 | `@vulos/relay-client/endpoints`  | cloud↔LAN endpoint failover (`selectEndpoint`, etc.)    |
 | `@vulos/relay-client/offlineBootstrap` | one-call offline-first shell bootstrap            |
 | `@vulos/relay-client/signaling`  | `SignalingClient` over `/api/peering/stream` WebSocket  |
-| `@vulos/relay-client/fabric`     | `FabricClient` — WebRTC mesh + relay-circuit fallback   |
+| `@vulos/relay-client/fabric`     | `FabricClient` — WebRTC mesh + relay-circuit fallback (opt-in `rendezvousBaseUrl`) |
+| `@vulos/relay-client/rendezvous` | `RendezvousClient` — open announce/resolve/signal/mailbox + ICE against any relayd |
 | `@vulos/relay-client/presence`   | `PresenceManager` + `usePresence` React hook            |
 | `@vulos/relay-client/call`       | `createCall` — P2P mesh audio/video call                |
 | `@vulos/relay-client/useLiveCursors` | live-cursors React hook (`peerColor`)               |

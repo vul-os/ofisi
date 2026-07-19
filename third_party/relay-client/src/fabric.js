@@ -35,6 +35,8 @@ import {
 import { PreKeyStore, x3dhInitiate, x3dhRespond } from './prekeys.js'
 import { tokenTransportSecure } from './secureTransport.js'
 import { RelayDepositError } from './errors.js'
+import { RendezvousClient, RendezvousIdentity } from './rendezvous.js'
+import { RendezvousSignalingClient } from './rendezvousSignaling.js'
 
 /**
  * Byte-length of a relay payload datum.  Used by the billing meter to count
@@ -107,8 +109,42 @@ export class FabricClient extends EventTarget {
     authToken = null,
     allowUnsignedRelayAuth = false,
     requirePeerAuth = true,
+    // ── OPEN RENDEZVOUS transport (optional) ─────────────────────────────────
+    // When set, this points the fabric at ANY vulos-relayd's open
+    // announce/resolve/signal/mailbox + ICE surface, as an alternative to the
+    // host box's /api/peering/* backend. Providing it ONLY changes defaults that
+    // were not explicitly overridden (ICE is derived from the relay), and exposes
+    // a ready RendezvousClient at .rendezvous — the existing /api/peering/* path
+    // is untouched when this option is absent.
+    rendezvousBaseUrl = '',
+    // Ed25519 identity for rendezvous writes. A RendezvousIdentity, or a 32-byte
+    // secret key (Uint8Array), or omitted to auto-generate an ephemeral one.
+    rendezvousIdentity = null,
+    // Mount prefix on the relay (default "/rendezvous").
+    rendezvousPrefix = '/rendezvous',
   }) {
     super()
+
+    // Rendezvous mode: derive the ICE URL from the relay unless the caller set an
+    // explicit iceUrl, and build the RendezvousClient. This runs BEFORE the token
+    // transport guard below so a rendezvous-derived ICE URL is validated too.
+    this._rendezvous = null
+    if (rendezvousBaseUrl) {
+      let ident = rendezvousIdentity
+      if (!(ident instanceof RendezvousIdentity)) {
+        ident = ident ? new RendezvousIdentity(ident) : RendezvousIdentity.generate()
+      }
+      this._rendezvous = new RendezvousClient({
+        baseUrl: rendezvousBaseUrl,
+        identity: ident,
+        prefix: rendezvousPrefix,
+        authToken,
+      })
+      // Only override ICE when the caller left it at the /api/peering default.
+      if (iceUrl === '/api/peering/ice') {
+        iceUrl = this._rendezvous.iceUrl()
+      }
+    }
 
     // ── Credential-transport guard (security: plaintext token leak) ──────────
     // When an authToken is configured it is attached as `Authorization: Bearer`
@@ -186,11 +222,12 @@ export class FabricClient extends EventTarget {
     /** @type {number} bytes picked up (received) via relay in this session */
     this._relayedBytesIn = 0
 
-    this._signaling = new SignalingClient({
-      signalingUrl,
+    // Shared callbacks — identical for both transports so the signed join/signal
+    // payloads (and thus the E2E peer-auth handshake) are produced the same way
+    // whether frames ride the host box's WebSocket or a relay's rendezvous inbox.
+    const signalingCallbacks = {
       sessionId,
       peerId,
-      authToken,
       // Publish the deposit signing public key in the join frame so the relay
       // server can bind it to our authenticated peerId and verify deposit sigs.
       getDepositPubKey: () => this._depositPubKeyB64,
@@ -213,7 +250,24 @@ export class FabricClient extends EventTarget {
       // outright — no TOFU fallback for unkeyed peers.  Frames from peers whose
       // key IS stored are always verified regardless of this flag.
       requirePeerAuth: this._requirePeerAuth,
-    })
+    }
+
+    // Transport selection: when a rendezvous relay is configured, run the whole
+    // signaling lifecycle (presence discovery + offer/answer/ICE) over its OPEN
+    // announce/resolve/signal surface with no host box. Otherwise use the host
+    // box's /api/peering/* WebSocket exactly as before (default, unchanged path).
+    if (this._rendezvous) {
+      this._signaling = new RendezvousSignalingClient({
+        selfClient: this._rendezvous,
+        ...signalingCallbacks,
+      })
+    } else {
+      this._signaling = new SignalingClient({
+        signalingUrl,
+        authToken,
+        ...signalingCallbacks,
+      })
+    }
     this._signaling.addEventListener('signal', (ev) => this._onSignal(ev.detail))
     this._signaling.addEventListener('signaling-open', () => {
       // Re-offer to any existing peers after a reconnect.
@@ -273,6 +327,17 @@ export class FabricClient extends EventTarget {
     const out = {}
     for (const [id, ps] of this._peers) out[id] = ps.state
     return out
+  }
+
+  /**
+   * The RendezvousClient bound to this fabric when constructed with a
+   * `rendezvousBaseUrl`, else null. Use it for open announce/resolve/signal/
+   * mailbox against the relay (see rendezvous.js). Its `.key` is this peer's
+   * Ed25519 rendezvous address.
+   * @type {RendezvousClient|null}
+   */
+  get rendezvous() {
+    return this._rendezvous
   }
 
   // ── Billing G-1: relay byte meter ─────────────────────────────────────────
@@ -536,131 +601,189 @@ export class FabricClient extends EventTarget {
       return
     }
     try {
-      const headers = { 'Content-Type': 'application/json' }
-      if (this._authToken) {
-        // Bearer JWT takes precedence when present.
-        headers['Authorization'] = `Bearer ${this._authToken}`
-      } else if (this._allowUnsignedRelayAuth) {
-        // Forgeable unsigned fallback: "Vula-Relay <peerId>.<ts>" (anyone can
-        // claim any peerId). Only emitted when the caller has explicitly opted
-        // in via allowUnsignedRelayAuth; relay accept policy decides the rest.
-        headers['Authorization'] = `Vula-Relay ${this._peerId}.${Math.floor(Date.now() / 1000)}`
-      }
-
-      const res = await fetch(`${this._relayBase}/api/peering/relay/pickup`, {
-        method: 'GET',
-        headers,
-      })
-      if (!res.ok) return
-      const { blobs } = await res.json()
-      if (!Array.isArray(blobs)) return
-
+      const blobs = await this._relayFetch()
+      if (!Array.isArray(blobs) || blobs.length === 0) return
       const ackIds = []
       for (const blob of blobs) {
-        try {
-          // ── MED-DoS: relay blob size cap ────────────────────────────────────
-          // Cap the encoded ciphertext size up front (before any crypto work).
-          // The exact plaintext cap is re-checked post-decrypt below.
-          if (typeof blob.blob_b64 !== 'string' || blob.blob_b64.length > MAX_RELAY_BLOB_B64) {
-            continue  // oversized / malformed → drop
-          }
-
-          // ── E2E confidentiality: the blob carries the sender's box pubkey ────
-          // (epk).  Without it we cannot derive the shared secret, so the blob
-          // is undecryptable — drop it (fail closed; no plaintext fallback).
-          if (!blob.epk) continue
-
-          // ── MED: verify relay-blob inbound signature ─────────────────────────
-          // The depositor signs { to, from, nonce, blob_b64, epk } (see
-          // _relayDeposit).  If we hold a key for the sender (imported via
-          // signaling join / TOFU), the blob MUST carry a valid signature.
-          // Unknown senders (no key held) are allowed through for backward
-          // compat with pre-auth relay clients — confidentiality still holds
-          // because decryption below depends only on the box keys.
-          if (blob.sig && blob.nonce) {
-            const sigMsg = JSON.stringify({
-              to: this._peerId,
-              from: blob.from,
-              nonce: blob.nonce,
-              blob_b64: blob.blob_b64,
-              epk: blob.epk,
-            })
-            const result = await this._signaling.verifyPeerSig(blob.from, sigMsg, blob.sig)
-            if (result === false) continue  // key held + sig invalid → tamper/impersonation
-            // result === null: no key stored → allow through (backward compat)
-          } else if (this._signaling.hasPeerKey(blob.from)) {
-            // Sender published a key via signaling but blob is unsigned.
-            // Reject: prevents server-injected blobs and pre-auth-era replays
-            // from being accepted once the sender has upgraded to signed deposits.
-            continue
-          }
-
-          // ── Decrypt end-to-end ──────────────────────────────────────────────
-          // openRelayBlob* throws on tamper / wrong key (AEAD failure) or a
-          // version/length mismatch → caught below and the blob is skipped.
-          await this._ensurePreKeys()
-          let plaintextBytes
-          if (relayBlobVersion(blob.blob_b64) === 2) {
-            // ── v2: X3DH forward-secret content key ──────────────────────────
-            const parsed = parseRelayBlobV2(blob.blob_b64)
-            const spkPriv = this._preKeys.signedPreKeyPriv(parsed.signedPreKeyId)
-            if (!spkPriv) continue            // unknown signed prekey → fail closed
-            let opkPriv = null
-            if (parsed.oneTimePreKeyId) {
-              opkPriv = this._preKeys.oneTimePreKeyPriv(parsed.oneTimePreKeyId)
-              // Already-consumed / unknown one-time prekey: fail closed. This also
-              // rejects replays of a one-time-prekey handshake (FS).
-              if (!opkPriv) continue
-            }
-            const sk = x3dhRespond({
-              identityPriv: this._boxKeyPair.privateKey,
-              senderIdentityPub: b64ToBytes(blob.epk),
-              signedPreKeyPriv: spkPriv,
-              oneTimePreKeyPriv: opkPriv,
-              ephemeralPub: parsed.ephemeralPub,
-              senderId: blob.from,
-              recipientId: this._peerId,
-            })
-            // Throws on tamper / wrong key BEFORE we burn the one-time prekey.
-            plaintextBytes = openRelayBlobV2({
-              parsed, key: sk, from: blob.from, to: this._peerId, session: this._session,
-            })
-            // FORWARD SECRECY: delete the consumed one-time prekey now so its
-            // private scalar can never again derive this (or any) message key.
-            if (parsed.oneTimePreKeyId) this._preKeys.consumeOneTimePreKey(parsed.oneTimePreKeyId)
-          } else {
-            // ── v1: legacy static-static ECDH (no forward secrecy) ───────────
-            plaintextBytes = openRelayBlob({
-              blobB64: blob.blob_b64,
-              recipientBoxPriv: this._boxKeyPair.privateKey,
-              senderBoxPubB64: blob.epk,
-              from: blob.from,
-              to: this._peerId,
-              session: this._session,
-            })
-          }
-          const rawPayload = new TextDecoder().decode(plaintextBytes)
-          if (rawPayload.length > MAX_PAYLOAD_BYTES) continue  // oversized plaintext → drop
-          const msg = JSON.parse(rawPayload)
-          if (msg.session !== this._session) continue
-
-          // ── billing meter: count inbound payload bytes ─────────────────────
-          this._relayedBytesIn += _byteSize(msg.data)
-          this.dispatchEvent(new CustomEvent('message', { detail: { from: blob.from, data: msg.data } }))
-          ackIds.push(blob.id)
-        } catch { /* malformed / undecryptable blob, skip */ }
+        const id = await this._processRelayBlob(blob)
+        if (id) ackIds.push(id)
       }
-
-      if (ackIds.length) {
-        await fetch(`${this._relayBase}/api/peering/relay/ack`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ blob_ids: ackIds }),
-        }).catch(() => { /* best-effort */ })
-      }
+      if (ackIds.length) await this._relayAck(ackIds)
     } catch (err) {
       console.warn('[fabric] relay poll error:', err.message)
     }
+  }
+
+  /**
+   * Authorization headers for the host-box relay fallback endpoints. Unused on
+   * the rendezvous mailbox path (that transport is Ed25519-signature-authed).
+   */
+  _relayHeaders() {
+    const headers = { 'Content-Type': 'application/json' }
+    if (this._authToken) {
+      // Bearer JWT takes precedence when present.
+      headers['Authorization'] = `Bearer ${this._authToken}`
+    } else if (this._allowUnsignedRelayAuth) {
+      // Forgeable unsigned fallback: "Vula-Relay <peerId>.<ts>" (anyone can
+      // claim any peerId). Only emitted when the caller has explicitly opted
+      // in via allowUnsignedRelayAuth; relay accept policy decides the rest.
+      headers['Authorization'] = `Vula-Relay ${this._peerId}.${Math.floor(Date.now() / 1000)}`
+    }
+    return headers
+  }
+
+  /**
+   * Fetch pending relay-fallback blobs, normalised to the internal shape
+   * { id, from, blob_b64, epk, sig, nonce } regardless of transport.
+   *   • rendezvous mode → the peer's rendezvous MAILBOX (content-blind, OS-free);
+   *     each mailbox blob's opaque payload is our JSON deposit envelope.
+   *   • host-box mode   → GET /api/peering/relay/pickup (unchanged).
+   */
+  async _relayFetch() {
+    if (this._rendezvous) {
+      const mb = await this._rendezvous.mailboxPoll({ wait: 0 })
+      return mb
+        .map((b) => {
+          const w = this._unwrapRelayEnvelope(b.payload)
+          if (!w) return null
+          // The rendezvous blob id is what we ack; carry it as the blob id.
+          return { id: b.id, from: w.from, blob_b64: w.blob_b64, epk: w.epk, sig: w.sig, nonce: w.nonce }
+        })
+        .filter(Boolean)
+    }
+    const res = await fetch(`${this._relayBase}/api/peering/relay/pickup`, {
+      method: 'GET',
+      headers: this._relayHeaders(),
+    })
+    if (!res.ok) return []
+    const { blobs } = await res.json()
+    return Array.isArray(blobs) ? blobs : []
+  }
+
+  /** Ack consumed relay-fallback blobs on whichever transport is in use. */
+  async _relayAck(ackIds) {
+    if (this._rendezvous) {
+      await this._rendezvous.mailboxAck(ackIds).catch(() => { /* best-effort */ })
+      return
+    }
+    await fetch(`${this._relayBase}/api/peering/relay/ack`, {
+      method: 'POST',
+      headers: this._relayHeaders(),
+      body: JSON.stringify({ blob_ids: ackIds }),
+    }).catch(() => { /* best-effort */ })
+  }
+
+  /** Parse a rendezvous mailbox blob's opaque bytes back into our deposit envelope. */
+  _unwrapRelayEnvelope(bytes) {
+    try {
+      const w = JSON.parse(new TextDecoder().decode(bytes))
+      if (!w || typeof w !== 'object' || typeof w.blob_b64 !== 'string') return null
+      return w
+    } catch { return null }
+  }
+
+  /**
+   * Verify + decrypt one relay-fallback blob and, on success, dispatch its
+   * message and return the id to ack. Returns null to drop the blob (oversized,
+   * missing epk, bad signature, undecryptable, wrong session). The crypto is
+   * IDENTICAL on both transports — only the byte source differs.
+   *
+   * @param {{id,from,blob_b64,epk,sig,nonce}} blob
+   * @returns {Promise<string|null>}
+   */
+  async _processRelayBlob(blob) {
+    try {
+      // ── MED-DoS: relay blob size cap ────────────────────────────────────
+      // Cap the encoded ciphertext size up front (before any crypto work).
+      // The exact plaintext cap is re-checked post-decrypt below.
+      if (typeof blob.blob_b64 !== 'string' || blob.blob_b64.length > MAX_RELAY_BLOB_B64) {
+        return null  // oversized / malformed → drop
+      }
+
+      // ── E2E confidentiality: the blob carries the sender's box pubkey ────
+      // (epk).  Without it we cannot derive the shared secret, so the blob
+      // is undecryptable — drop it (fail closed; no plaintext fallback).
+      if (!blob.epk) return null
+
+      // ── MED: verify relay-blob inbound signature ─────────────────────────
+      // The depositor signs { to, from, nonce, blob_b64, epk } (see
+      // _relayDeposit).  If we hold a key for the sender (imported via
+      // signaling join / TOFU), the blob MUST carry a valid signature.
+      // Unknown senders (no key held) are allowed through for backward
+      // compat with pre-auth relay clients — confidentiality still holds
+      // because decryption below depends only on the box keys.
+      if (blob.sig && blob.nonce) {
+        const sigMsg = JSON.stringify({
+          to: this._peerId,
+          from: blob.from,
+          nonce: blob.nonce,
+          blob_b64: blob.blob_b64,
+          epk: blob.epk,
+        })
+        const result = await this._signaling.verifyPeerSig(blob.from, sigMsg, blob.sig)
+        if (result === false) return null  // key held + sig invalid → tamper/impersonation
+        // result === null: no key stored → allow through (backward compat)
+      } else if (this._signaling.hasPeerKey(blob.from)) {
+        // Sender published a key via signaling but blob is unsigned.
+        // Reject: prevents server-injected blobs and pre-auth-era replays
+        // from being accepted once the sender has upgraded to signed deposits.
+        return null
+      }
+
+      // ── Decrypt end-to-end ──────────────────────────────────────────────
+      // openRelayBlob* throws on tamper / wrong key (AEAD failure) or a
+      // version/length mismatch → caught below and the blob is skipped.
+      await this._ensurePreKeys()
+      let plaintextBytes
+      if (relayBlobVersion(blob.blob_b64) === 2) {
+        // ── v2: X3DH forward-secret content key ──────────────────────────
+        const parsed = parseRelayBlobV2(blob.blob_b64)
+        const spkPriv = this._preKeys.signedPreKeyPriv(parsed.signedPreKeyId)
+        if (!spkPriv) return null            // unknown signed prekey → fail closed
+        let opkPriv = null
+        if (parsed.oneTimePreKeyId) {
+          opkPriv = this._preKeys.oneTimePreKeyPriv(parsed.oneTimePreKeyId)
+          // Already-consumed / unknown one-time prekey: fail closed. This also
+          // rejects replays of a one-time-prekey handshake (FS).
+          if (!opkPriv) return null
+        }
+        const sk = x3dhRespond({
+          identityPriv: this._boxKeyPair.privateKey,
+          senderIdentityPub: b64ToBytes(blob.epk),
+          signedPreKeyPriv: spkPriv,
+          oneTimePreKeyPriv: opkPriv,
+          ephemeralPub: parsed.ephemeralPub,
+          senderId: blob.from,
+          recipientId: this._peerId,
+        })
+        // Throws on tamper / wrong key BEFORE we burn the one-time prekey.
+        plaintextBytes = openRelayBlobV2({
+          parsed, key: sk, from: blob.from, to: this._peerId, session: this._session,
+        })
+        // FORWARD SECRECY: delete the consumed one-time prekey now so its
+        // private scalar can never again derive this (or any) message key.
+        if (parsed.oneTimePreKeyId) this._preKeys.consumeOneTimePreKey(parsed.oneTimePreKeyId)
+      } else {
+        // ── v1: legacy static-static ECDH (no forward secrecy) ───────────
+        plaintextBytes = openRelayBlob({
+          blobB64: blob.blob_b64,
+          recipientBoxPriv: this._boxKeyPair.privateKey,
+          senderBoxPubB64: blob.epk,
+          from: blob.from,
+          to: this._peerId,
+          session: this._session,
+        })
+      }
+      const rawPayload = new TextDecoder().decode(plaintextBytes)
+      if (rawPayload.length > MAX_PAYLOAD_BYTES) return null  // oversized plaintext → drop
+      const msg = JSON.parse(rawPayload)
+      if (msg.session !== this._session) return null
+
+      // ── billing meter: count inbound payload bytes ─────────────────────
+      this._relayedBytesIn += _byteSize(msg.data)
+      this.dispatchEvent(new CustomEvent('message', { detail: { from: blob.from, data: msg.data } }))
+      return blob.id
+    } catch { /* malformed / undecryptable blob, skip */ return null }
   }
 
   /**
@@ -705,9 +828,6 @@ export class FabricClient extends EventTarget {
         return
       }
 
-      const headers = { 'Content-Type': 'application/json' }
-      if (this._authToken) headers['Authorization'] = `Bearer ${this._authToken}`
-
       // Plaintext is the same {session, data} envelope as before, now sealed.
       const plaintext = new TextEncoder().encode(
         JSON.stringify({ session: this._session, data }),
@@ -734,18 +854,28 @@ export class FabricClient extends EventTarget {
       // The corresponding public key is published in the signaling join payload.
       const sigB64 = await this._signDeposit(signingMsg)
 
+      const envelope = { to: toPeerId, from: this._peerId, blob_b64, nonce, sig: sigB64, epk }
+
+      if (this._rendezvous) {
+        // OS-free fallback: deposit the SAME signed+sealed envelope into the
+        // recipient's content-blind rendezvous MAILBOX. The relay only moves
+        // opaque bytes keyed by the peer's Ed25519 address; it cannot read or
+        // forge the inner ECDSA-signed, XChaCha-sealed blob.
+        const rk = this._signaling.rdvKeyFor(toPeerId)
+        if (!rk) {
+          console.warn(`[fabric] relay deposit skipped for ${toPeerId}: rendezvous address unknown`)
+          return
+        }
+        const wrapped = new TextEncoder().encode(JSON.stringify(envelope))
+        await this._rendezvous.mailboxDeposit(rk, wrapped, RELAY_TTL_HOURS * 3600)
+        return
+      }
+
+      const headers = this._relayHeaders()
       await fetch(`${this._relayBase}/api/peering/relay/deposit`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          to: toPeerId,
-          from: this._peerId,
-          blob_b64,
-          ttl_hours: RELAY_TTL_HOURS,
-          nonce,
-          sig: sigB64,
-          epk,
-        }),
+        body: JSON.stringify({ ...envelope, ttl_hours: RELAY_TTL_HOURS }),
       })
     } catch (err) {
       console.warn('[fabric] relay deposit error:', err.message)
