@@ -1,0 +1,15 @@
+.git
+node_modules
+third_party/relay-client/node_modules
+dist
+dist-lib
+dist-office
+dist-ssr
+data
+uploads
+test-results
+playwright-report
+blob-report
+.playwright
+e2e-results
+*.log

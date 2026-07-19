@@ -17,7 +17,7 @@ flaky test.
 Go (backend) pentests:
 
 ```bash
-cd vulos-office
+cd ofisi
 
 # Run only the pentest suites (verbose):
 CGO_ENABLED=0 go test ./backend/... -run 'Pentest' -v
@@ -29,7 +29,7 @@ CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go t
 Frontend (HTML render / sanitiser) pentest:
 
 ```bash
-cd vulos-office
+cd ofisi
 npx vitest run src/apps/slides/sanitize.test.js
 # or the full vitest suite:
 npm test

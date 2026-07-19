@@ -6,15 +6,17 @@
 # volume.
 #
 # ── Deploy ────────────────────────────────────────────────────────────────────
-# The Dockerfile needs a PARENT build context (sibling vulos-apps/ + vulos-relay/
-# for the Go `replace` and the SPA `file:` deps — see Dockerfile header). Because
-# Fly sends the config-file's directory as the build context, build+push the
-# image out-of-band and deploy by image reference rather than letting Fly build:
+# The @vulos/relay-client SPA dependency is vendored in-repo at
+# third_party/relay-client (see third_party/relay-client/VENDOR.md), so the
+# Dockerfile no longer needs a parent/sibling-repo build context — but Fly
+# still sends the config-file's directory as the build context, so build+push
+# the image out-of-band and deploy by image reference rather than letting Fly
+# build:
 #
-#   # from the directory that CONTAINS vulos-office/ vulos-apps/ vulos-relay/
-#   docker build -f vulos-office/Dockerfile -t ghcr.io/vul-os/vulos-office:latest .
-#   docker push ghcr.io/vul-os/vulos-office:latest
-#   fly deploy -c vulos-office/fly.toml --image ghcr.io/vul-os/vulos-office:latest
+#   # from the ofisi repo root
+#   docker build -t ghcr.io/vul-os/ofisi:latest .
+#   docker push ghcr.io/vul-os/ofisi:latest
+#   fly deploy -c fly.toml --image ghcr.io/vul-os/ofisi:latest
 #
 # (The [build].image below points Fly at that pushed image so a bare `fly deploy`
 # also works once the image is published.)
@@ -23,19 +25,19 @@ app            = "vulos-office"
 primary_region = "PLACEHOLDER"   # Fly region code (e.g. "iad", "lhr", "fra")
 
 [build]
-  image = "ghcr.io/vul-os/vulos-office:latest"
+  image = "ghcr.io/vul-os/ofisi:latest"
 
 # Storage: local by default (data + uploads under /srv/{data,uploads}, since the
 # image's WORKDIR is /srv and the server's data_dir/uploads_dir default to
 # ./data and ./uploads). To use a shared Postgres instead, set DATABASE_URL as a
 # secret — main.go/storage.Resolve select Postgres when DATABASE_URL (or
 # VULOS_DATABASE_URL) is present, overriding the local default:
-#   fly secrets set -c vulos-office/fly.toml DATABASE_URL=postgres://...
+#   fly secrets set -c fly.toml DATABASE_URL=postgres://...
 #
 # ── SSO session introspection (cloud / multi-user) ────────────────────────────
 # Office holds NO session-signing power. In cloud it validates the browser's
 # `vc_session` cookie against the control plane by introspection. Set as secrets:
-#   fly secrets set -c vulos-office/fly.toml \
+#   fly secrets set -c fly.toml \
 #     IDENTITY_URL=https://cp.vulos.org \
 #     VULOS_CP_TOKEN=<the CP shared secret (== CP_SHARED_SECRET)>
 # With IDENTITY_URL UNSET the SSO path is disabled and Office keeps its local
