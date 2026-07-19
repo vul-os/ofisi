@@ -60,6 +60,19 @@ function isNode() {
  *   the Node branch must not touch the `new URL` literal at all.
  */
 async function wasmBytes() {
+  // Both branches locate the module RELATIVE TO THIS FILE, so both need
+  // `import.meta.url`. Ofisi's library build (vite.config.lib.js) also emits a
+  // CommonJS artifact, in which the bundler replaces `import.meta` with `{}` —
+  // there is no module URL to resolve against and no way to invent one. Say so
+  // plainly instead of failing later with a confusing `undefined` base URL:
+  // callers already fall back to their previous engine on a rejected load, and
+  // a clear reason is the difference between a known limitation and a bug hunt.
+  if (typeof import.meta === 'undefined' || !import.meta.url) {
+    throw new Error(
+      'dmtap-sync-wasm: no import.meta.url — the CommonJS library build cannot ' +
+      'locate the .wasm. Use the ESM build to run on the substrate engine.',
+    )
+  }
   if (isNode()) {
     const nodeModule = 'node:module'
     const nodeFs = 'node:fs/promises'

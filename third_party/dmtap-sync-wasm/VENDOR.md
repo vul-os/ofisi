@@ -46,6 +46,24 @@ pin — the sizes below are the identity of this copy:
 |---|---:|---:|
 | `vendor/dmtap_sync_bg.wasm` | 395,912 B | 154,657 B |
 
+## Known limitation: the CommonJS library build
+
+`vite.config.lib.js` emits a CJS artifact alongside the ESM one, and a bundler
+replaces `import.meta` with `{}` in CJS output. This loader locates the `.wasm`
+relative to its own module URL, so there is nothing to resolve against and the
+load rejects with an explicit message.
+
+That is a **contained** limitation, not a broken build: the only consumer is
+`SheetsEditor`, which already falls back to the `crdt/grid.js` engine when the
+substrate fails to load. So a CJS library consumer with `VITE_SUBSTRATE_SYNC=on`
+gets the hand-rolled engine and a working spreadsheet. The ESM library build,
+the app build and Vitest all get the substrate.
+
+Fixing it properly means embedding the module as a base64 string (which costs
+every consumer ~530 KB of JS whether they use it or not) or shipping a
+`--target nodejs` copy for CJS. Neither is worth it before a CJS consumer
+actually needs the substrate path.
+
 ## Sync from upstream
 
 ```sh
