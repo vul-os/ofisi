@@ -62,6 +62,12 @@ func NewPostgresStorage(cfg *config.Config) (*PostgresStorage, error) {
 	return s, nil
 }
 
+// Pool exposes the underlying pgx pool so sibling subsystems that share the
+// office schema (e.g. the CRDT update log) can reuse the same connection pool —
+// its search_path is already pinned to "office". The core storage contract is
+// unchanged; this is an escape hatch used only by the composition root (main.go).
+func (s *PostgresStorage) Pool() *pgxpool.Pool { return s.pool }
+
 func (s *PostgresStorage) migrate() error {
 	ctx := context.Background()
 	// CREATE SCHEMA must run with an unqualified connection (no search_path

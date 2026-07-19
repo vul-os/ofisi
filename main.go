@@ -309,15 +309,36 @@ func main() {
 	// frontend dual-writes during the transition. Filesystem-backed for phase 1
 	// (data/updates/<id>/), independent of the primary storage backend.
 	if cfg.Persistence.UpdateLog {
-		ulStore, err := updatelog.NewLocalStore(filepath.Join(cfg.Server.DataDir, "updates"))
-		if err != nil {
-			log.Fatalf("[persistence] failed to open update log: %v", err)
+		// Store selection MIRRORS the primary storage backend so the update log
+		// lives wherever the documents do:
+		//   • postgres storage → Postgres update-log (shares the office schema +
+		//     pool; append/prune are transactional with a per-file advisory lock).
+		//   • local / S3 storage → filesystem LocalStore under data/updates/<id>/.
+		//     (S3 has no append-with-monotonic-seq primitive, so the durable frame
+		//     log stays on local disk; the whole-doc PUT still writes through to the
+		//     bucket for the object copy.)
+		var ulStore updatelog.Store
+		var ulWhere string
+		if pg, ok := store.(*storage.PostgresStorage); ok {
+			s, err := updatelog.NewPostgresStore(pg.Pool())
+			if err != nil {
+				log.Fatalf("[persistence] failed to open Postgres update log: %v", err)
+			}
+			ulStore = s
+			ulWhere = "Postgres (office.file_updates / office.file_update_snapshots)"
+		} else {
+			dir := filepath.Join(cfg.Server.DataDir, "updates")
+			s, err := updatelog.NewLocalStore(dir)
+			if err != nil {
+				log.Fatalf("[persistence] failed to open update log: %v", err)
+			}
+			ulStore = s
+			ulWhere = "filesystem under " + dir
 		}
 		ulHandler := handlers.NewUpdateLogHandler(ulStore, store)
 		protected.GET("/files/:id/updates", ulHandler.List)
 		writes.POST("/files/:id/updates", ulHandler.Append)
-		log.Printf("[persistence] CRDT update-log ENABLED (append-only frames under %s)",
-			filepath.Join(cfg.Server.DataDir, "updates"))
+		log.Printf("[persistence] CRDT update-log ENABLED (append-only frames, backend: %s)", ulWhere)
 	}
 
 	// Parity: folder tree (per-account, ACL-owned like files).
