@@ -114,6 +114,29 @@ export class YP2PCollabSession extends EventTarget {
 
     this._fabric.addEventListener('state', (ev) => {
       this.dispatchEvent(new CustomEvent('state', { detail: ev.detail }))
+      // RESYNC ON REACHABILITY (not on join()).
+      //
+      // join() fires its state-vector request immediately, but at that moment no
+      // peer transport exists yet: a WebRTC data channel takes seconds of ICE to
+      // open, and FabricClient DROPS anything sent to a peer that is still
+      // 'connecting' (its own comment says "caller should buffer"). So the
+      // join-time request reached nobody, and nothing re-sent it — two peers who
+      // opened the same room and then sat idle never converged, and a late
+      // joiner never received the existing document at all. Sync only appeared
+      // to work if someone happened to type AFTER the channel opened.
+      //
+      // Found by the real-transport E2E (e2e-p2p/), invisible to the unit tests
+      // because an injected fake fabric is connected the instant it is created.
+      //
+      // Fix: ask each peer for what we lack the moment that peer becomes
+      // reachable — over a direct channel ('connected') or the content-blind
+      // relay circuit ('relay'). It is idempotent (the answer is a delta
+      // computed from OUR state vector, and merging can only add), so a
+      // re-connect or a duplicate event costs one small frame.
+      const { peerId, state } = ev.detail || {}
+      if (!peerId) return
+      if (state !== 'connected' && state !== 'relay') return
+      this._resyncWith(peerId).catch(() => { /* peer vanished again — next event retries */ })
     })
     this._fabric.addEventListener('message', (ev) => {
       this._onPeerFrame(ev.detail).catch(() => { /* undecryptable frame — drop */ })
@@ -179,6 +202,17 @@ export class YP2PCollabSession extends EventTarget {
   async resync() {
     const sv = Y.encodeStateVector(this._ctx.ydoc)
     await this._broadcast({ type: 'ysync-req', sv: bytesToB64(sv) })
+  }
+
+  /**
+   * Same as resync(), addressed to ONE peer. Used when that peer becomes
+   * reachable (see the 'state' handler in the constructor) so the exchange
+   * happens when there is actually a transport to carry it.
+   * @param {string} peerId
+   */
+  async _resyncWith(peerId) {
+    const sv = Y.encodeStateVector(this._ctx.ydoc)
+    await this._sendTo(peerId, { type: 'ysync-req', sv: bytesToB64(sv) })
   }
 
   leave() {

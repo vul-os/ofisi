@@ -101,6 +101,17 @@ export class P2PCollabSession extends EventTarget {
 
     this._fabric.addEventListener('state', (ev) => {
       this.dispatchEvent(new CustomEvent('state', { detail: ev.detail }))
+      // RESYNC ON REACHABILITY — see the same guard in yP2PSession.js for the
+      // full story. join()'s snapshot request is emitted before any peer
+      // transport exists (ICE takes seconds) and FabricClient drops sends to a
+      // peer that is still 'connecting', so the bootstrap has to happen when the
+      // peer actually becomes reachable, not when we joined. Idempotent: a
+      // snapshot is MERGED, never overwritten.
+      const { peerId, state } = ev.detail || {}
+      if (!peerId) return
+      if (state !== 'connected' && state !== 'relay') return
+      this._sendTo(peerId, { type: 'snap-req' })
+        .catch(() => { /* peer vanished again — the next state event retries */ })
     })
     this._fabric.addEventListener('message', (ev) => {
       // Frames are E2E-sealed; open is async, so we fire-and-forget.

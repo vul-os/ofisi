@@ -179,3 +179,65 @@ describe('YP2PCollabSession — the document over an E2E-encrypted room', () => 
     expect(owner.editor.getJSON().content[0].content[0].text).toContain('ok')
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('resync on peer reachability (regression: the real-transport gap)', () => {
+  // WHY THIS EXISTS. join() fires its state-vector request immediately, but with
+  // a REAL transport no peer is connected yet — a WebRTC data channel takes
+  // seconds of ICE, and FabricClient silently drops anything addressed to a peer
+  // that is still 'connecting'. The join-time request therefore reached nobody
+  // and nothing re-sent it, so two peers that opened a room and sat idle never
+  // converged and a late joiner never received the document at all. The e2e-p2p
+  // suite caught it; a fake fabric never could, because it is "connected" the
+  // instant it is constructed. What is pinned here is the fix: becoming
+  // reachable triggers a state-vector request ADDRESSED TO THAT PEER.
+  class SilentFabric extends EventTarget {
+    constructor() { super(); this.sent = []; this.unicast = [] }
+    async join() {}
+    leave() {}
+    send(frame) { this.sent.push(frame) }
+    sendTo(peerId, frame) { this.unicast.push({ peerId, frame }) }
+    /** Simulate the fabric reporting a peer transition. */
+    reportState(peerId, state) {
+      this.dispatchEvent(new CustomEvent('state', { detail: { peerId, state } }))
+    }
+  }
+
+  const mkSession = async (fabric) => {
+    const ydoc = new Y.Doc()
+    const ctx = createYContext(null, ydoc)
+    // A context needs a fail-closed validator for untrusted peer updates; this
+    // suite is about the resync trigger, not ingress, so accept-all is fine.
+    ctx.applyUpdate = () => ({ applied: true })
+    const { session } = await YP2PCollabSession.create({
+      peerId: 'owner', fileId: 'doc1', baseUrl: INVITE, ctx, fabric,
+    })
+    return session
+  }
+
+  it('sends a state-vector request to a peer that becomes directly connected', async () => {
+    const fabric = new SilentFabric()
+    await mkSession(fabric)
+    fabric.reportState('peer-1', 'connected')
+    await settle()
+    expect(fabric.unicast.map((u) => u.peerId)).toContain('peer-1')
+  })
+
+  it('also does so for a peer reachable only over the relay circuit', async () => {
+    const fabric = new SilentFabric()
+    await mkSession(fabric)
+    fabric.reportState('peer-2', 'relay')
+    await settle()
+    expect(fabric.unicast.map((u) => u.peerId)).toContain('peer-2')
+  })
+
+  it('does not chase a peer that is merely connecting or gone', async () => {
+    const fabric = new SilentFabric()
+    await mkSession(fabric)
+    fabric.reportState('peer-3', 'connecting')
+    fabric.reportState('peer-4', 'disconnected')
+    await settle()
+    expect(fabric.unicast).toHaveLength(0)
+  })
+})

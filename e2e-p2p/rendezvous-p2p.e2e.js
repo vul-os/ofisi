@@ -1,0 +1,431 @@
+/**
+ * rendezvous-p2p.e2e.js — proving the single biggest architectural claim in the
+ * repo, end to end, with nothing mocked:
+ *
+ *   "A STANDALONE Ofisi (no Vulos OS, no account, no /api/peering/*) does real
+ *    peer-to-peer collaboration through any self-hosted vulos-relayd."
+ *
+ * Everything else about that claim was covered only by selector unit tests with
+ * a fake fabric. This suite runs the real thing: a real `vulos-relayd` binary
+ * built from the sibling vulos-relay checkout with the rendezvous role enabled,
+ * two real standalone `vulos-office` servers (separate ports, separate data
+ * dirs — no shared state whatsoever), two real browser contexts, and a real
+ * WebRTC data channel.
+ *
+ * ── What "proven" means here ────────────────────────────────────────────────
+ *
+ * The two peers are served by two DIFFERENT Ofisi servers that share no storage
+ * and no document endpoint. The only things they have in common are (a) the one
+ * relayd both are configured to discover through, and (b) the room key, which
+ * lives in the invite link's URL fragment and is never sent to any server. So
+ * if a keystroke in browser A shows up in browser B, discovery MUST have gone
+ * through the relayd — there is no other path between them. On top of that
+ * necessary-condition argument the suite adds direct evidence:
+ *
+ *   • the relay's OWN presence state is read back from the relay's origin
+ *     (GET /rendezvous/resolve/<key>) and must know the key each browser
+ *     announced — soft state only the relay could hold;
+ *   • the browsers' request logs must show the rendezvous protocol
+ *     (announce/signal) and must show NO /api/peering/* at all;
+ *   • the negative control: with the relayd stopped, the same flow does not
+ *     connect.
+ *
+ * ── Why the browser calls /api/rendezvous instead of the relayd ─────────────
+ *
+ * relayd's rendezvous surface sends no CORS headers and 405s the preflight, so
+ * a direct cross-origin fetch from Ofisi's origin cannot work. That is asserted
+ * below as a fact about the relay (not assumed), and it is why Ofisi
+ * pass-through-proxies the protocol on its own origin. See
+ * backend/handlers/rendezvous_proxy.go.
+ */
+
+import { test, expect } from '@playwright/test'
+import { startStack, relayResolve, createDoc, relayRepoAvailable, RELAY_REPO } from './stack.mjs'
+
+/** Shared stack for the whole file — building three binaries once is the point. */
+let stack
+
+test.beforeAll(async () => {
+  test.skip(!relayRepoAvailable(),
+    `vulos-relay checkout not found at ${RELAY_REPO} — set VULOS_RELAY_REPO to run the real-P2P suite`)
+  stack = await startStack({ offices: 2, localOnlyOffice: true })
+})
+
+test.afterAll(async () => {
+  if (stack) await stack.stop()
+})
+
+/**
+ * Instrument a page BEFORE any script runs so we can (a) see every
+ * RTCPeerConnection it creates and (b) ask, at the end, whether the connection
+ * that carried the edits was a DIRECT host-to-host pair or a relayed one.
+ */
+async function instrumentWebRTC(page) {
+  await page.addInitScript(() => {
+    window.__pcs = []
+    const Native = window.RTCPeerConnection
+    if (!Native) return
+    window.RTCPeerConnection = class extends Native {
+      constructor(...args) {
+        super(...args)
+        window.__pcs.push(this)
+      }
+    }
+    window.RTCPeerConnection.prototype = Native.prototype
+  })
+}
+
+/**
+ * Ask the page's live peer connections which ICE candidate pair actually
+ * succeeded. Returns one entry per connected peer connection:
+ *   { state, localType, remoteType }
+ * localType 'host' on both ends == a genuinely direct browser-to-browser
+ * channel; 'relay' == a TURN-relayed circuit.
+ */
+function selectedCandidatePairs(page) {
+  return page.evaluate(async () => {
+    const out = []
+    for (const pc of window.__pcs || []) {
+      if (pc.connectionState !== 'connected') continue
+      const stats = await pc.getStats()
+      const all = [...stats.values()]
+      const pair = all.find((s) => s.type === 'candidate-pair' && (s.selected || s.state === 'succeeded' || s.nominated))
+      const local = pair ? all.find((s) => s.id === pair.localCandidateId) : null
+      const remote = pair ? all.find((s) => s.id === pair.remoteCandidateId) : null
+      out.push({
+        state: pc.connectionState,
+        localType: local?.candidateType || null,
+        remoteType: remote?.candidateType || null,
+      })
+    }
+    return out
+  })
+}
+
+/** Mirror a page's console into the test output — collab failures are almost
+ * always visible there ("[p2p] …", "[collab] …") and a silent page makes a
+ * convergence timeout impossible to diagnose. */
+function mirrorConsole(page, tag) {
+  page.on('console', (msg) => {
+    const t = msg.text()
+    // P2P_E2E_VERBOSE=1 mirrors everything; by default only collab-relevant lines.
+    if (process.env.P2P_E2E_VERBOSE || /\[p2p\]|\[collab\]|rendezvous|fabric|peer/i.test(t)) {
+      console.log(`[${tag}] ${msg.type()}: ${t}`)
+    }
+  })
+  page.on('pageerror', (err) => console.log(`[${tag}] pageerror: ${err.message}`))
+}
+
+/** Record every request a page makes, so we can assert on the transport after. */
+function recordRequests(page) {
+  const seen = []
+  page.on('request', (req) => seen.push({ method: req.method(), url: req.url(), postData: req.postData() }))
+  page.on('websocket', (ws) => seen.push({ method: 'WS', url: ws.url(), postData: null }))
+  return seen
+}
+
+/** Wait for the editor of an Ofisi docs page to be interactive. */
+async function openDoc(page, url) {
+  await page.goto(url)
+  await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 60_000 })
+}
+
+/** Mint a read-write invite link from the share UI. */
+async function mintInviteLink(page) {
+  await page.getByRole('button', { name: /Share — with people/i }).click()
+  await page.getByRole('button', { name: /Share via link \(P2P\)/i }).click()
+  await expect(page.getByText('Editor link')).toBeVisible({ timeout: 30_000 })
+  const rw = await page.locator('input[readonly]').evaluateAll(
+    (els) => els.map((e) => e.value).filter((v) => /#vp2p=/.test(v))[0],
+  )
+  expect(rw, 'the share modal must produce a #vp2p= invite link').toMatch(/#vp2p=/)
+  // Close the modal so it does not sit over the editor while we type.
+  await page.keyboard.press('Escape')
+  return rw
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('relayd rendezvous is reachable but NOT cross-origin usable — the reason Ofisi proxies it', async ({ request }) => {
+  // Server-to-server (no browser, no CORS): the relay is up and speaking the
+  // protocol.
+  const health = await request.get(`${stack.relayUrl}/rendezvous/healthz`)
+  expect(health.ok()).toBe(true)
+  expect((await health.json()).role).toBe('rendezvous')
+
+  // …but it emits no CORS headers, and answers a preflight with 405. This is
+  // the measured fact that forces the same-origin proxy. If a future relayd
+  // grows CORS, this assertion fails and the proxy can be revisited — better
+  // than silently carrying a workaround forever.
+  const ice = await request.get(`${stack.relayUrl}/rendezvous/ice`, {
+    headers: { Origin: stack.offices[0].url },
+  })
+  expect(ice.headers()['access-control-allow-origin'], 'relayd rendezvous CORS posture changed').toBeUndefined()
+
+  const preflight = await request.fetch(`${stack.relayUrl}/rendezvous/announce`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: stack.offices[0].url,
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type',
+    },
+  })
+  expect(preflight.status()).toBe(405)
+
+  // And the same-origin proxy each standalone Ofisi mounts DOES reach it.
+  const viaProxy = await request.get(`${stack.offices[0].url}/api/rendezvous/healthz`)
+  expect(viaProxy.ok()).toBe(true)
+  expect((await viaProxy.json()).role).toBe('rendezvous')
+})
+
+test('a standalone Ofisi advertises the rendezvous and mounts no host-box peering', async ({ request }) => {
+  const [a] = stack.offices
+
+  // The premise of the whole claim: this binary serves no /api/peering/*.
+  const peering = await request.get(`${a.url}/api/peering/ice`)
+  expect(peering.status(), 'a standalone Ofisi must not serve host-box peering').toBe(404)
+
+  const reach = await (await request.get(`${a.url}/api/reachability`)).json()
+  expect(reach.rendezvous_url).toBe(stack.relayUrl)
+  expect(reach.rendezvous_proxy_path).toBe('/api/rendezvous')
+})
+
+test('THE PAYOFF — two standalone Ofisi servers collaborate P2P through the relayd', async ({ browser }) => {
+  const [a, b] = stack.offices
+  const docA = await createDoc(a.url, 'P2P Proof A')
+  const docB = await createDoc(b.url, 'P2P Proof B')
+
+  const ctxA = await browser.newContext()
+  const ctxB = await browser.newContext()
+  const pageA = await ctxA.newPage()
+  const pageB = await ctxB.newPage()
+  await instrumentWebRTC(pageA)
+  await instrumentWebRTC(pageB)
+  mirrorConsole(pageA, 'A')
+  mirrorConsole(pageB, 'B')
+  const reqA = recordRequests(pageA)
+  const reqB = recordRequests(pageB)
+
+  try {
+    // A: open a doc on server A and mint an invite link.
+    await openDoc(pageA, `${a.url}/docs/${docA}`)
+    const rwLink = await mintInviteLink(pageA)
+
+    // B: open the SAME room on server B. Only the fragment (the room key)
+    // crosses over — the origin and the document id are B's own. Nothing about
+    // A's server is involved in B's session.
+    const fragment = rwLink.split('#')[1]
+    await openDoc(pageB, `${b.url}/docs/${docB}#${fragment}`)
+
+    // Both sides must announce themselves to the relay (through their own
+    // server's same-origin proxy) before anything can connect.
+    await expect
+      .poll(() => reqA.filter((r) => r.url.includes('/api/rendezvous/')).length, {
+        message: 'peer A never spoke the rendezvous protocol',
+        timeout: 60_000,
+      })
+      .toBeGreaterThan(0)
+    await expect
+      .poll(() => reqB.filter((r) => r.url.includes('/api/rendezvous/')).length, {
+        message: 'peer B never spoke the rendezvous protocol',
+        timeout: 60_000,
+      })
+      .toBeGreaterThan(0)
+
+    // RELAY-SIDE GROUND TRUTH: the key each browser announced is really in the
+    // relay's presence store. Read straight from the relay's own origin.
+    const announcedKeys = [...reqA, ...reqB]
+      .filter((r) => r.url.includes('/api/rendezvous/announce') && r.postData)
+      .map((r) => { try { return JSON.parse(r.postData).key } catch { return null } })
+      .filter(Boolean)
+    expect(announcedKeys.length, 'no signed announce was sent to the relay').toBeGreaterThan(0)
+
+    await expect.poll(async () => {
+      for (const key of announcedKeys) {
+        const { status } = await relayResolve(stack.relayUrl, key)
+        if (status === 200) return true
+      }
+      return false
+    }, { message: 'the relay does not know any announced peer — signaling did not reach it', timeout: 60_000 })
+      .toBe(true)
+
+    // THE CONVERGENCE: type in A, see it in B. There is no server path between
+    // these two browsers, so this can only have travelled peer-to-peer.
+    const marker = `hello-from-A-${Date.now()}`
+    await pageA.locator('.ProseMirror').click()
+    await pageA.keyboard.type(marker)
+    // Establish that the local edit landed at all, so a failure below is
+    // unambiguously a propagation failure and not a typing/focus problem.
+    await expect(pageA.locator('.ProseMirror'), 'the local edit did not even land in A').toContainText(marker)
+
+    await expect(pageB.locator('.ProseMirror'), 'peer A\'s edit never reached peer B')
+      .toContainText(marker, { timeout: 90_000 })
+
+    // …and back the other way, which also proves the channel is bidirectional
+    // rather than a one-shot snapshot.
+    const markerB = ` and-back-from-B-${Date.now()}`
+    await pageB.locator('.ProseMirror').click()
+    await pageB.keyboard.press('End')
+    await pageB.keyboard.type(markerB)
+    await expect(pageA.locator('.ProseMirror')).toContainText(markerB, { timeout: 90_000 })
+
+    // Both documents now hold BOTH edits — CRDT convergence, not last-writer-wins.
+    await expect(pageA.locator('.ProseMirror')).toContainText(marker)
+    await expect(pageB.locator('.ProseMirror')).toContainText(marker)
+    await expect(pageB.locator('.ProseMirror')).toContainText(markerB.trim())
+
+    // No host-box peering was involved anywhere — this really was the
+    // rendezvous transport, not a fallback onto some /api/peering/* surface.
+    for (const [name, reqs] of [['A', reqA], ['B', reqB]]) {
+      const peering = reqs.filter((r) => r.url.includes('/api/peering/stream'))
+      expect(peering, `peer ${name} used host-box peering signaling`).toHaveLength(0)
+    }
+
+    // WHICH PATH CARRIED IT — direct data channel, or the content-blind relay
+    // circuit? Both are the documented behaviour (§3 of docs/COLLABORATION.md:
+    // direct first, relay circuit as the fallback for pairs that cannot
+    // hole-punch), and both are P2P *through the rendezvous* — so the assertion
+    // is that ONE of them demonstrably carried the edits, and the run says
+    // which. Insisting on "direct" would be a lie in any sandbox where ICE
+    // cannot complete; accepting neither would let a broken transport pass.
+    const pairsA = await selectedCandidatePairs(pageA)
+    const pairsB = await selectedCandidatePairs(pageB)
+    const directPairs = [...pairsA, ...pairsB]
+    const anyDirect = directPairs.some((p) => p.localType === 'host' && p.remoteType === 'host')
+    // The relay circuit is the rendezvous MAILBOX (content-blind, ciphertext
+    // only) — distinct from the signal inbox used for offer/answer/ICE.
+    const mailboxCalls = [...reqA, ...reqB].filter((r) => r.url.includes('/api/rendezvous/mailbox')).length
+
+    console.log('[p2p-e2e] transport — direct pairs:', JSON.stringify(directPairs),
+      '| relay-circuit mailbox calls:', mailboxCalls)
+    if (anyDirect) {
+      console.log('[p2p-e2e] DIRECT: a host/host WebRTC data channel carried the edits')
+    } else {
+      console.warn('[p2p-e2e] FALLBACK: no direct candidate pair formed in this sandbox — ' +
+        'the edits rode the content-blind relay circuit instead')
+    }
+    expect(
+      anyDirect || mailboxCalls > 0,
+      'the edits converged over neither a WebRTC data channel nor the relay circuit — ' +
+      'something other than the P2P transport moved them',
+    ).toBe(true)
+
+  } finally {
+    await ctxA.close()
+    await ctxB.close()
+  }
+})
+
+test('offline divergence — both peers edit disconnected, then converge on reconnect', async ({ browser }) => {
+  const [a, b] = stack.offices
+  const docA = await createDoc(a.url, 'Divergence A')
+  const docB = await createDoc(b.url, 'Divergence B')
+
+  const ctxA = await browser.newContext()
+  const ctxB = await browser.newContext()
+  const pageA = await ctxA.newPage()
+  const pageB = await ctxB.newPage()
+  await instrumentWebRTC(pageA)
+  await instrumentWebRTC(pageB)
+  mirrorConsole(pageA, 'A')
+  mirrorConsole(pageB, 'B')
+
+  try {
+    await openDoc(pageA, `${a.url}/docs/${docA}`)
+    const rwLink = await mintInviteLink(pageA)
+    await openDoc(pageB, `${b.url}/docs/${docB}#${rwLink.split('#')[1]}`)
+
+    // Establish the session first, so "reconnect" means something.
+    const warmup = `warm-${Date.now()}`
+    await pageA.locator('.ProseMirror').click()
+    await pageA.keyboard.type(warmup)
+    await expect(pageB.locator('.ProseMirror')).toContainText(warmup, { timeout: 90_000 })
+
+    // SEVER THE TRANSPORT. Two things are needed, and both model a real
+    // outage. Closing the RTCPeerConnection is the data channel going away
+    // (a sleeping laptop, a dropped Wi-Fi link) — note that Playwright's
+    // setOffline alone does NOT do this, since an established WebRTC flow is
+    // not HTTP and keeps running. setOffline then keeps them apart by blocking
+    // the rendezvous signaling they would otherwise use to reconnect
+    // immediately.
+    await ctxA.setOffline(true)
+    await ctxB.setOffline(true)
+    const dropPeers = (page) => page.evaluate(() => (window.__pcs || []).forEach((pc) => { try { pc.close() } catch { /* already closed */ } }))
+    await dropPeers(pageA)
+    await dropPeers(pageB)
+
+    const soloA = ` soloA-${Date.now()}`
+    const soloB = ` soloB-${Date.now()}`
+    await pageA.locator('.ProseMirror').click()
+    await pageA.keyboard.press('End')
+    await pageA.keyboard.type(soloA)
+    await pageB.locator('.ProseMirror').click()
+    await pageB.keyboard.press('End')
+    await pageB.keyboard.type(soloB)
+
+    // Each side kept editing locally — collaboration never blocks typing.
+    await expect(pageA.locator('.ProseMirror')).toContainText(soloA.trim())
+    await expect(pageB.locator('.ProseMirror')).toContainText(soloB.trim())
+    // …and they really are diverged: neither has the other's offline edit.
+    await expect(pageA.locator('.ProseMirror'), 'the peers were never actually severed').not.toContainText(soloB.trim())
+    await expect(pageB.locator('.ProseMirror'), 'the peers were never actually severed').not.toContainText(soloA.trim())
+
+    // Reconnect: rediscovery through the relayd, a fresh data channel, and the
+    // state-vector exchange must deliver exactly what each side missed, in BOTH
+    // directions, with nothing discarded.
+    await ctxA.setOffline(false)
+    await ctxB.setOffline(false)
+
+    await expect(pageA.locator('.ProseMirror'), "B's offline edit was lost")
+      .toContainText(soloB.trim(), { timeout: 120_000 })
+    await expect(pageB.locator('.ProseMirror'), "A's offline edit was lost")
+      .toContainText(soloA.trim(), { timeout: 120_000 })
+    // Union merge: the warm-up edit and both offline edits all survive.
+    await expect(pageA.locator('.ProseMirror')).toContainText(warmup)
+    await expect(pageA.locator('.ProseMirror')).toContainText(soloA.trim())
+    await expect(pageB.locator('.ProseMirror')).toContainText(soloB.trim())
+  } finally {
+    await ctxA.close()
+    await ctxB.close()
+  }
+})
+
+test('NEGATIVE — with no rendezvous configured, standalone Ofisi reports local-only and never fakes a session', async ({ browser, request }) => {
+  const lo = stack.localOnly
+  expect(lo, 'the local-only instance must be booted for this test').toBeTruthy()
+
+  // The server tells the truth: no rendezvous, no proxy path, and the proxy
+  // routes do not exist at all.
+  const reach = await (await request.get(`${lo.url}/api/reachability`)).json()
+  expect(reach.rendezvous_url).toBe('')
+  expect(reach.rendezvous_proxy_path).toBe('')
+  expect((await request.get(`${lo.url}/api/rendezvous/healthz`)).status(),
+    'the rendezvous proxy must not be mounted when nothing is configured').toBe(404)
+  expect((await request.get(`${lo.url}/api/peering/ice`)).status()).toBe(404)
+
+  const docId = await createDoc(lo.url, 'Local Only')
+  const ctx = await browser.newContext()
+  const page = await ctx.newPage()
+  const reqs = recordRequests(page)
+  try {
+    await openDoc(page, `${lo.url}/docs/${docId}`)
+    await page.getByRole('button', { name: /Share — with people/i }).click()
+    await page.getByRole('button', { name: /Share via link \(P2P\)/i }).click()
+
+    // The honesty contract: it says so, rather than minting links that would
+    // look real and never connect anyone. If this ever silently produced an
+    // invite link, the positive test above would prove nothing.
+    await expect(page.getByText(/P2P collaboration isn't available on this server/i))
+      .toBeVisible({ timeout: 30_000 })
+    const links = await page.locator('input[readonly]').evaluateAll(
+      (els) => els.map((e) => e.value).filter((v) => /#vp2p=/.test(v)),
+    )
+    expect(links, 'a local-only deployment must not mint invite links').toHaveLength(0)
+
+    // And it never reached for a transport it does not have.
+    expect(reqs.filter((r) => r.url.includes('/api/rendezvous/'))).toHaveLength(0)
+    expect(reqs.filter((r) => r.url.includes('/api/peering/stream'))).toHaveLength(0)
+  } finally {
+    await ctx.close()
+  }
+})

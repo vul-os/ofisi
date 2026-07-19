@@ -315,6 +315,7 @@ export class FabricClient extends EventTarget {
     this._stopped = true
     clearInterval(this._relayPollTimer)
     for (const ps of this._peers.values()) {
+      clearTimeout(ps.reinitTimer)
       ps.dc?.close()
       ps.pc?.close()
     }
@@ -476,6 +477,8 @@ export class FabricClient extends EventTarget {
 
     dc.addEventListener('open', () => {
       clearTimeout(ps.relayTimer)
+      clearTimeout(ps.reinitTimer)
+      ps.reinitDelay = 0
       this._setPeerState(remoteId, ps, 'connected')
     })
 
@@ -490,10 +493,7 @@ export class FabricClient extends EventTarget {
     dc.addEventListener('close', () => {
       if (!this._stopped) {
         this._setPeerState(remoteId, ps, 'disconnected')
-        // Attempt reconnect after a short back-off.
-        setTimeout(() => {
-          if (!this._stopped) this._initiatePeer(remoteId)
-        }, 2_000)
+        this._scheduleReinitiate(remoteId, ps)
       }
     })
 
@@ -516,6 +516,8 @@ export class FabricClient extends EventTarget {
     if (type === 'leave') {
       const ps = this._peers.get(from)
       if (ps) {
+        ps.left = true              // explicit departure — stop reconnect attempts
+        clearTimeout(ps.reinitTimer)
         ps.dc?.close()
         ps.pc?.close()
         this._setPeerState(from, ps, 'disconnected')
@@ -527,6 +529,26 @@ export class FabricClient extends EventTarget {
     if (!ps) return                       // peer limit reached
 
     if (type === 'offer') {
+      // GLARE GUARD (local patch — see VENDOR.md "Local patches").
+      //
+      // Over the rendezvous transport BOTH peers see each other's `join` on the
+      // shared presence board, so both call _initiatePeer() and both send an
+      // offer. Without a tie-break each side then reset()s its own connection to
+      // answer the other's offer, both offers are abandoned, and the negotiation
+      // deadlocks until the 8s relay timer fires — observed failing ~1 run in 3
+      // in the real-transport E2E (ofisi e2e-p2p/).
+      //
+      // Standard perfect-negotiation resolution: exactly one side is "polite",
+      // decided by a comparison both sides compute identically and oppositely.
+      // The IMPOLITE side ignores an offer that collides with its own in-flight
+      // offer (its own negotiation survives); the polite side rolls back and
+      // answers. When there is no collision this changes nothing, so the
+      // host-box WebSocket path — where only one side ever initiates — behaves
+      // exactly as before.
+      const polite = this._peerId > from
+      if (!polite && ps.pc && ps.pc.signalingState === 'have-local-offer') {
+        return
+      }
       ps.reset()
       const pc = this._buildPC(from, ps)
       ps.pc = pc
@@ -573,11 +595,46 @@ export class FabricClient extends EventTarget {
 
   _setRelayTimer(remoteId, ps) {
     clearTimeout(ps.relayTimer)
+    // GLARE/FALLBACK SYMMETRY (local patch — see VENDOR.md "Local patches").
+    // Start listening on the relay circuit as soon as a negotiation is in
+    // flight, not only once WE give up on it. The peer may give up before we do
+    // (its timer, its NAT), and it then deposits into OUR mailbox — which we
+    // would never read while we still believed we were merely 'connecting'.
+    // That made the documented content-blind fallback one-directional and, in
+    // practice, dead. Polling stops itself once no peer needs it (_relayPoll).
+    this._startRelayPolling()
     ps.relayTimer = setTimeout(() => {
       if (ps.state !== 'connected') {
         this._activateRelay(remoteId, ps)
       }
     }, RELAY_TIMEOUT_MS)
+  }
+
+  /**
+   * Keep trying to rebuild a dropped peer connection (local patch — see
+   * VENDOR.md "Local patches").
+   *
+   * The previous behaviour was ONE retry, 2s after the data channel closed. Over
+   * the rendezvous transport that single attempt is often spent while the
+   * network is still down (a sleeping laptop, a dropped link), and nothing ever
+   * tries again: the peer's `join` is dispatched only once per peer from the
+   * presence board, so the signaling layer will not re-trigger negotiation
+   * either. The session then stayed dead until a page reload — the exact case
+   * the offline-divergence E2E exercises.
+   *
+   * Retries with exponential back-off (2s → 16s), stops on success, on an
+   * explicit peer `leave`, and when the client is torn down.
+   */
+  _scheduleReinitiate(remoteId, ps) {
+    if (this._stopped || ps.left) return
+    clearTimeout(ps.reinitTimer)
+    ps.reinitDelay = ps.reinitDelay ? Math.min(ps.reinitDelay * 2, 16_000) : 2_000
+    ps.reinitTimer = setTimeout(() => {
+      if (this._stopped || ps.left) return
+      if (ps.state === 'connected') { ps.reinitDelay = 0; return }
+      this._initiatePeer(remoteId).catch(() => { /* next attempt covers it */ })
+      this._scheduleReinitiate(remoteId, ps)
+    }, ps.reinitDelay)
   }
 
   _activateRelay(remoteId, ps) {
@@ -594,7 +651,11 @@ export class FabricClient extends EventTarget {
   }
 
   async _relayPoll() {
-    const relayPeers = [...this._peers.entries()].filter(([, ps]) => ps.state === 'relay')
+    // 'connecting' counts (see _setRelayTimer): a peer that has already fallen
+    // back is depositing for us while we are still negotiating. Once every peer
+    // is either connected or gone, this clears itself.
+    const relayPeers = [...this._peers.entries()]
+      .filter(([, ps]) => ps.state === 'relay' || ps.state === 'connecting')
     if (relayPeers.length === 0) {
       clearInterval(this._relayPollTimer)
       this._relayPollTimer = null
@@ -781,6 +842,16 @@ export class FabricClient extends EventTarget {
 
       // ── billing meter: count inbound payload bytes ─────────────────────
       this._relayedBytesIn += _byteSize(msg.data)
+      // A blob arriving from this peer proves the relay circuit works in at
+      // least one direction and that the peer has given up on direct. Adopt it
+      // for our own sends too (local patch — see VENDOR.md), otherwise our
+      // replies keep being dropped against a peer we still list as
+      // 'connecting' and the fallback stays half-open.
+      const senderPs = this._peers.get(blob.from)
+      if (senderPs && senderPs.state !== 'connected' && senderPs.state !== 'relay') {
+        clearTimeout(senderPs.relayTimer)
+        this._setPeerState(blob.from, senderPs, 'relay')
+      }
       this.dispatchEvent(new CustomEvent('message', { detail: { from: blob.from, data: msg.data } }))
       return blob.id
     } catch { /* malformed / undecryptable blob, skip */ return null }
@@ -1126,10 +1197,15 @@ class PeerState {
     this.state = 'disconnected'
     this.relayTimer = null
     this.pendingCandidates = []
+    // Reconnect bookkeeping (local patch — see VENDOR.md "Local patches").
+    this.reinitTimer = null
+    this.reinitDelay = 0
+    this.left = false         // peer sent an explicit 'leave' — do not chase it
   }
 
   reset() {
     clearTimeout(this.relayTimer)
+    clearTimeout(this.reinitTimer)
     this.dc?.close()
     this.pc?.close()
     this.pc = null

@@ -180,3 +180,59 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  # ── Real P2P integration E2E (relayd + two standalone servers) ──────────────
+  # The opposite of the job above: nothing is mocked. It builds a real
+  # `vulos-relayd` from the sibling checkout (READ-ONLY — only `go build`), runs
+  # two standalone `vulos-office` servers pointed at its rendezvous role, and
+  # proves that two browsers collaborate peer-to-peer through it with no Vulos
+  # OS and no account — the repo's central architectural claim. Deliberately a
+  # SEPARATE job so its heavier, WebRTC-dependent runtime can never destabilise
+  # the fast suites.
+  e2e-p2p:
+    name: Real P2P E2E (relayd rendezvous)
+    runs-on: ubuntu-latest
+    needs: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout sibling vulos-relay
+        run: git clone --depth 1 https://github.com/vul-os/vulos-relay ../vulos-relay
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+
+      # Built here rather than inside the suite so a broken relay checkout is
+      # reported as what it is, and never mistaken for a failure of the claim.
+      - name: Build vulos-relayd (from the unmodified sibling checkout)
+        run: cd ../vulos-relay && go build -o "$RUNNER_TEMP/vulos-relayd" ./cmd/vulos-relayd
+
+      - name: Run real P2P E2E
+        run: npm run test:e2e:p2p
+        env:
+          CI: 'true'
+          VULOS_RELAYD_BIN: ${{ runner.temp }}/vulos-relayd
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-p2p
+          path: playwright-report/
+          retention-days: 7

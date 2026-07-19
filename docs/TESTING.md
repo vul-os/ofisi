@@ -17,6 +17,12 @@ no relay): the API surface is mocked.
 │   • the entire backend is mocked in-browser via page.route.         │
 │   • covers the flows jsdom cannot: the @fortune-sheet canvas grid,  │
 │     reveal.js rendering, real toolbar + menu interaction.           │
+├─────────────────────────────────────────────────────────────────────┤
+│ Layer 3 — Real P2P integration      npm run test:e2e:p2p             │
+│   • NOTHING mocked: a real vulos-relayd (rendezvous role) + two      │
+│     standalone vulos-office servers + two browsers + real WebRTC.   │
+│   • proves OS-free peer-to-peer collaboration end to end.           │
+│   • separate config/job so it cannot destabilise layers 1–2.        │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -68,7 +74,43 @@ handler mirroring the MSW backend (auth, files, versions with the wave-14 gate,
 comments, suggestions). The `officePage` fixture attaches it automatically;
 `installBackend(page, { role })` lets a test choose the role for the restore gate.
 
-The E2E specs:
+### Layer 3 — Real P2P integration (`npm run test:e2e:p2p`)
+
+The one suite in this repo with **no mocks at all**. It exists because the
+repo's central architectural claim — *a standalone Ofisi, with no Vulos OS and
+no account, does real peer-to-peer collaboration through any self-hosted
+`vulos-relayd`* — was otherwise covered only by selector unit tests with a fake
+fabric.
+
+```bash
+npm run test:e2e:p2p
+```
+
+What it boots (`e2e-p2p/stack.mjs`): a real `vulos-relayd` built from the
+sibling `../vulos-relay` checkout with `-rendezvous`, and **two** standalone
+`vulos-office` servers on separate ports with separate data dirs, both pointed
+at that relayd — plus a third with no rendezvous configured for the negative
+case. The two peers therefore share **no** server: only the relayd, and the room
+key in the invite link's URL fragment.
+
+| Requirement | Notes |
+|-------------|-------|
+| Go toolchain | builds the Ofisi binary and (unless `VULOS_RELAYD_BIN` is set) `vulos-relayd` |
+| `../vulos-relay` checkout | override with `VULOS_RELAY_REPO`; the suite **never modifies** it, it only `go build`s to a temp path. The whole file skips with a clear message when it is absent. |
+| `VULOS_RELAYD_BIN` | optional prebuilt relayd — what CI uses, so a broken relay checkout is reported as such and never mistaken for a failed claim |
+| Chromium flags | `playwright.p2p.config.js` sets `--disable-features=WebRtcHideLocalIpsWithMdns` so two loopback contexts can actually see each other's host candidates. This affects candidate visibility only — no protocol, signaling path or crypto changes. |
+
+What it asserts: the relay is reachable but **not** cross-origin usable (which
+is why Ofisi proxies it same-origin); a standalone Ofisi serves no
+`/api/peering/*`; two browsers converge in both directions with the relay's own
+presence state confirming the signaling went through it; offline divergence
+merges as a union on reconnect; and — the negative control — an unconfigured
+deployment reports local-only and refuses to mint invite links. The transport
+that carried the edits is asserted as *either* a direct host/host WebRTC pair
+*or* the content-blind relay circuit, and the run logs which, rather than
+pretending "direct" in a sandbox where ICE cannot complete.
+
+### The mocked E2E specs (layer 2):
 
 | File | Covers |
 |------|--------|

@@ -103,10 +103,18 @@ content-blind peer-discovery surface, and Ofisi picks one of three, in order:
    a Vulos OS / Vulos Relay deployment fronts Ofisi. Unchanged default.
 2. **A configured rendezvous URL** — the base URL of any **self-hosted
    `vulos-relayd`**'s OPEN rendezvous surface (announce/resolve/signal/mailbox
-   + ICE). The browser talks to it **directly** — no Vulos OS, no account, no
-   host-box backend required at all. Set it and a bare **standalone** Ofisi
-   binary (which mounts no `/api/peering/*` — see `main.go`) gets **real**
-   peer-to-peer collaboration.
+   + ICE). No Vulos OS and no account are required. Set it and a bare
+   **standalone** Ofisi binary (which mounts no `/api/peering/*` — see
+   `main.go`) gets **real** peer-to-peer collaboration.
+
+   Setting it also mounts `/api/rendezvous/*`, a same-origin pass-through to
+   that relayd. The browser calls **that**, not the relayd's origin, because
+   relayd's rendezvous surface sends no CORS headers and 405s the preflight —
+   a direct cross-origin call fails in the browser. The pass-through is
+   discovery-only and content-blind; see
+   [COLLABORATION.md](COLLABORATION.md) §3 for exactly what it does and does
+   not expose, and `backend/handlers/rendezvous_proxy.go` for its guards. With
+   no rendezvous URL configured those routes do not exist at all.
 3. **Local-only** — neither is reachable; the editor keeps working, autosaves,
    and says so honestly (an "Offline" pill) instead of showing a false "Live".
 
@@ -128,9 +136,14 @@ externally-reachable origin:
 |----------|-------------|---------|
 | `VULOS_OFFICE_PUBLIC_URL` | This Office instance's externally-reachable origin (a public domain, or a vulos-relay tunnel URL when behind NAT/CGNAT). Used to build P2P invite links / signaling targets an external peer can actually reach, instead of blindly trusting `window.location.origin` (which may be a LAN-only address). | — (falls back to the visitor's own origin) |
 
+The same response carries `rendezvous_proxy_path` (`/api/rendezvous`, or `""`
+when nothing is configured) — the path the client must call. Clients treat an
+empty value as "not available" rather than guessing.
+
 See `backend/config/config.go` and `src/lib/collab/transportSelection.js` for
 the selection logic, and `src/lib/collab/reachableBase.js` for the client-side
-fetch/cache.
+fetch/cache. The whole path is proven end to end against a real `vulos-relayd`
+by `npm run test:e2e:p2p` (see `e2e-p2p/`).
 
 ---
 

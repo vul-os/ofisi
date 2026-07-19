@@ -49,7 +49,16 @@ Both of the above need peer discovery: a place to exchange WebRTC offer/answer/I
 
    This is the original, unchanged default. It carries no document content, and it is the one transport that can bind an authenticated account session (an `authToken`) to the peer identity.
 
-2. **Any relayd rendezvous (no Vulos OS / host box needed).** When host-box peering isn't reachable — most notably a **standalone** Ofisi binary, which mounts no `/api/peering/*` at all (see `main.go`) — Ofisi checks for a configured **rendezvous URL**: `config.yaml` `collab.rendezvous_url` / env `VULOS_RENDEZVOUS_URL` (see [CONFIGURATION.md](CONFIGURATION.md)). When set, the browser talks **directly** to that URL's OPEN announce/resolve/signal/mailbox + ICE surface (`@vulos/relay-client`'s `RendezvousClient` / `RendezvousSignalingClient`) — any self-hosted `vulos-relayd` instance is enough, with no Vulos OS, no account, and no host-box backend in the loop at all. Everything else about the session is identical: direct WebRTC first, the same content-blind relay-circuit fallback, the same E2E crypto. **This is what makes a bare standalone Ofisi capable of real peer-to-peer collaboration.**
+2. **Any relayd rendezvous (no Vulos OS / host box needed).** When host-box peering isn't reachable — most notably a **standalone** Ofisi binary, which mounts no `/api/peering/*` at all (see `main.go`) — Ofisi checks for a configured **rendezvous URL**: `config.yaml` `collab.rendezvous_url` / env `VULOS_RENDEZVOUS_URL` (see [CONFIGURATION.md](CONFIGURATION.md)). When set, the session uses that relayd's OPEN announce/resolve/signal/mailbox + ICE surface (`@vulos/relay-client`'s `RendezvousClient` / `RendezvousSignalingClient`) — any self-hosted `vulos-relayd` is enough, with **no Vulos OS and no account**. Everything else about the session is identical: direct WebRTC first, the same content-blind relay-circuit fallback, the same E2E crypto. **This is what makes a bare standalone Ofisi capable of real peer-to-peer collaboration** — and it is proven end to end, against a real relayd binary in a real browser, by `e2e-p2p/` (`npm run test:e2e:p2p`).
+
+   **How the browser reaches it — and why not directly.** The browser calls **Ofisi's own origin** at `/api/rendezvous/*`, and Ofisi forwards those requests verbatim to the configured relayd. This is not a preference: relayd's rendezvous surface sends **no CORS headers** and answers the preflight `OPTIONS /rendezvous/announce` with `405`, so a cross-origin `fetch()` from Ofisi's origin fails in the browser before it reaches the network. (The E2E asserts that relay behaviour, so if a future relayd does send CORS it is noticed rather than assumed.) What this changes, stated plainly:
+
+   - Ofisi's server sees the rendezvous **envelopes** it forwards — a room's derived id, Ed25519 addresses, timing, sizes. That is exactly the metadata the relayd itself sees, and it is metadata only.
+   - It stays **content-blind**: every signal/mailbox payload is sealed under the room key, which lives in the invite link's URL fragment and reaches no server. Proxying ciphertext does not make it readable.
+   - Live document edits still never traverse it. This is **discovery only**; the edits ride the WebRTC data channel (or the content-blind relay circuit).
+   - Still no Vulos OS, no account, no host box. What is in the loop is the standalone Ofisi binary you are already trusting to serve you the app.
+
+   Implementation: `backend/handlers/rendezvous_proxy.go` (fixed upstream, allow-listed protocol paths, no redirect-following, no credentials forwarded, mounted only when a rendezvous URL is configured).
 
 3. **Local-only.** Neither of the above is reachable (or reaches a network at all): peers cannot discover each other, so collaboration stays **local-only** (you keep editing; your work autosaves) and the UI says so honestly — an "Offline" pill and a plain explanation in the share dialog, never a false "Live".
 
@@ -152,6 +161,11 @@ All four editors are wired: **Docs** and **Whiteboard** are plain Y.Docs and use
 You can confirm the serverless property from the outside:
 
 ```bash
+# 0. Or just run the proof: a real relayd + two standalone Ofisi servers +
+#    two browsers, asserting convergence, the transport used, and that an
+#    unconfigured deployment stays honestly local-only.
+npm run test:e2e:p2p
+
 # 1. There is NO server-mediated collab endpoint. These must 404:
 curl -i "https://office.example.org/v1/documents/<id>/collab/stream"   # expect 404
 curl -i "https://office.example.org/v1/documents/<id>/collab/ops"      # expect 404
@@ -161,6 +175,10 @@ curl -i "https://office.example.org/api/peering/ice"   # 404 ⇒ standalone, no 
 
 # 3. Is a rendezvous URL configured instead (no host box needed)?
 curl -i "https://office.example.org/api/reachability"  # rendezvous_url: "" ⇒ not configured (local-only)
+
+# 4. When one IS configured, the same-origin discovery proxy is live (§3).
+#    Not configured ⇒ this 404s, and collaboration is honestly local-only.
+curl -i "https://office.example.org/api/rendezvous/healthz"   # {"role":"rendezvous"}
 ```
 
 In the browser, DevTools → Network shows the truth: opening a `#vp2p=` link opens either a **WebSocket to `/api/peering/stream`** (host-box discovery) or a request to the configured rendezvous URL (relayd discovery) — discovery only in both cases — and then a **WebRTC data channel** — and **no `collab/*` request ever appears**, because there is no document server to call. The document bytes travel inside the encrypted data channel, not any HTTP request.
@@ -181,7 +199,7 @@ In the browser, DevTools → Network shows the truth: opening a `#vp2p=` link op
 
 **Does collaboration work across two different Ofisi servers?** Yes, as long as the peers can reach the same discovery surface — either both point at the same host-box peering fabric, or both resolve the same rendezvous URL — collaboration is between *browsers*, not servers. The document does not live on either server for the purpose of the live session.
 
-**Does live P2P collaboration require a Vulos OS or a Vulos account?** No. A configured rendezvous URL (config.yaml `collab.rendezvous_url` / `VULOS_RENDEZVOUS_URL`, see [CONFIGURATION.md](CONFIGURATION.md)) gets a bare standalone Ofisi real peer-to-peer collaboration against any self-hosted `vulos-relayd` — no Vulos OS, no account, no host-box backend.
+**Does live P2P collaboration require a Vulos OS or a Vulos account?** No. A configured rendezvous URL (config.yaml `collab.rendezvous_url` / `VULOS_RENDEZVOUS_URL`, see [CONFIGURATION.md](CONFIGURATION.md)) gets a bare standalone Ofisi real peer-to-peer collaboration against any self-hosted `vulos-relayd` — no Vulos OS, no account. The standalone binary does carry the *discovery* traffic on its own origin (§3), because the relay serves no CORS; it stays content-blind, and the document never touches it. This is not a claim on paper: `npm run test:e2e:p2p` boots a real relayd and two standalone servers and makes two browsers converge through them.
 
 **What happens with no network at all?** You keep editing; the CRDT applies locally and an IndexedDB draft protects your work. It syncs to peers when you reconnect, and autosaves to your storage.
 
@@ -207,7 +225,7 @@ Consequences: server backups capture your saved documents and version history; t
 - **Yjs** — the CRDT library backing the Docs document; carries structure and formatting, not just text.
 - **Update** — one atomic Yjs change, carried as an envelope `{ y:1, u:<base64> }`.
 - **Fabric** — the Vulos peering transport (`@vulos/relay-client`): direct WebRTC first, content-blind relay fallback, discovery via either the host box's `/api/peering/*` or a configured relayd's open rendezvous surface (see §3).
-- **Rendezvous URL** — `config.yaml` `collab.rendezvous_url` / `VULOS_RENDEZVOUS_URL`: the base URL of a self-hosted `vulos-relayd`'s open rendezvous surface, letting a standalone Ofisi (no host box) still discover peers directly.
+- **Rendezvous URL** — `config.yaml` `collab.rendezvous_url` / `VULOS_RENDEZVOUS_URL`: the base URL of a self-hosted `vulos-relayd`'s open rendezvous surface, letting a standalone Ofisi (no host box, no account) still discover peers. Reached through Ofisi's own `/api/rendezvous/*` pass-through — see §3 for why, and for what that does and does not expose.
 - **Room** — an E2E-encrypted collaboration session identified by a key-derived `roomId`; membership = possession of the invite key.
 - **Capability (`rw`/`ro`)** — what an invite link grants; `rw` links carry MAC authority to write, `ro` links can only decrypt.
 - **Rotation** — minting a fresh room + key to revoke all previously shared links.

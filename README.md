@@ -256,7 +256,8 @@ Full documentation lives in **[`docs/`](docs/)**.
 ```bash
 npm run dev:web        # Vite (:5173) + Go API (:8080)
 npm test               # unit + RTL/MSW integration tests (Vitest)
-npm run test:e2e       # browser E2E (Playwright)
+npm run test:e2e       # browser E2E (Playwright, backend mocked)
+npm run test:e2e:p2p   # REAL P2P: a live vulos-relayd + two standalone servers
 npm run build          # frontend dist/ + Go binary
 npm run screenshots    # regenerate the docs/screenshots gallery
 
