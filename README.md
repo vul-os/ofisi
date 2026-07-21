@@ -10,8 +10,6 @@ Documents, spreadsheets, slides, and whiteboards — **CRDT-native** and
 **real-time**, shipped as a single binary, running on **your own storage**.
 No cloud account, no telemetry, no lock-in.
 
-<sub><img src="docs/assets/ofisi-logo.png" height="14" alt="VulOS"> Part of <strong><a href="https://vulos.org">VulOS</a></strong> — the open, self-hostable web OS &amp; app suite. Runs standalone, or as an app hosted by the Vulos OS.</sub>
-
 [![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-D0471F.svg)](LICENSE-MIT)
 [![Self-hostable](https://img.shields.io/badge/self--hostable-single%20binary-E07A5F)](SELFHOST.md)
@@ -61,38 +59,6 @@ flowchart LR
 > original internal name; the commands below use `./vulos-office` for that
 > reason. The product is **Ofisi** everywhere in the docs — the internal name is
 > kept only to avoid a churny, risky module/binary rename.
-
----
-
-## Part of VulOS
-
-**Vulos = free, open-source software + two paid services.** The Vulos OS, all its
-apps (Ofisi included), and the app store are **OSS and free — you self-host
-them**. You self-provision and self-pay your own box (Fly / Hetzner / any VPS /
-home server); Vulos does **not** host or provision boxes. Vulos bills for only
-two things: **Vulos Relay** (reachability) and **backup storage** (buckets).
-There is no compute/box billing, no mail billing, and no app-store subscription.
-
-VulOS is an open, self-hostable web OS + app suite. The **Vulos OS** is the shell
-(launcher, windows, dock, assistant) that hosts the apps; each product also runs
-independently on its own:
-
-- **Vulos OS** — the web-native desktop shell that hosts the apps
-- **Ofisi (Vulos Office)** — documents: docs, sheets, slides, PDF, and
-  **whiteboards** (the Excalidraw-based whiteboard is an Office **document
-  type** — there is **no separate Board product**)
-- **Vulos Files** — file storage + P2P sharing, built into the OS
-- **Vulos Relay** — sovereign connectivity / reachability fabric
-  (`@vulos/relay-client`) — one of the two paid services
-- **llmux** — sovereign AI gateway
-
-PIM is **bring-your-own** (Mail / Calendar / Contacts via lilmail + the OS's
-Calendar/Contacts widgets); chat and video are **third-party** (Matrix/Element;
-Element Call / Jitsi) — not Vulos products.
-
-**Ofisi's role:** the office/documents app. It runs standalone **and** is hosted
-as an app by the Vulos OS — the same binary, with the OS wiring identity and
-scoped storage in front of it.
 
 ---
 
@@ -303,3 +269,10 @@ project; source and issues at [github.com/vul-os/ofisi](https://github.com/vul-o
 <sub><strong>Ofisi</strong> · A real, self-hostable collaborative office suite you own. · Open by design.</sub>
 
 </div>
+
+---
+
+<p align="center">
+  <a href="https://vulos.org"><img src="site/assets/vulos-logo.png" alt="vulos" height="20"></a><br>
+  <sub><a href="https://vulos.org"><b>vulos</b></a> — open by design</sub>
+</p>
