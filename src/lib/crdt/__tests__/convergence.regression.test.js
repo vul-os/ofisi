@@ -426,6 +426,104 @@ describe('BUG9: slides offline-reconnect converges per object (no lost edits)', 
 })
 
 // ---------------------------------------------------------------------------
+// BUG10 (DMTAP ordered-domain audit) — grid.js / tree.js decoded a remote
+// OpID's Lamport counter with a bare `parseInt` and compared the results
+// numerically. A malformed counter (non-numeric, negative, or missing)
+// parses to NaN, and NaN is neither `<` nor `>=` anything in JS: `ai !== bi`
+// is always true and `ai < bi` is always false whenever either side is NaN.
+// GridCRDT.apply() only rejects a candidate op when `opIdLess(op.id,
+// existing.opId)` is true, and TreeCRDT's MOVE case only applies a move when
+// `!opIdLess(op.id, n.ordId)` is true — both treat "false" as "this op wins".
+// So a single hostile peer on the (unsigned, per the code's own header
+// comments) fabric room could send ONE op with a garbage id and have it
+// silently overwrite any cell or reorder/reparent any slide, unconditionally,
+// regardless of the real Lamport order. This is the same class of bug as
+// FEEDS.md §4.3's ordered-domain invariant (an anti-rollback/LWW rule is a
+// claim about a total order, and it is only as sound as the domain the
+// counter is decoded into) and the fix kerf-pub shipped for its `seq`/`ts`
+// decode: reject a malformed counter at the decode boundary rather than
+// admitting it into the comparison and hoping NaN happens to fail safe.
+// ---------------------------------------------------------------------------
+describe('BUG10: a malformed remote OpID counter cannot win an LWW compare', () => {
+  beforeEach(() => { try { localStorage.clear(); sessionStorage.clear() } catch { /* jsdom */ } })
+
+  it('grid: a hostile grid_op with a non-numeric counter does not overwrite an existing cell', () => {
+    const fab = new FakeFabric()
+    const s = new GridSession({ sessionId: 'sheetH', replicaId: 'victim', fabricClient: fab })
+    s.setCell(0, 0, 'legit')
+    expect(s.cells()).toEqual([{ r: 0, c: 0, v: 'legit' }])
+
+    fab.dispatchEvent(new CustomEvent('message', {
+      detail: { data: JSON.stringify({
+        type: 'grid_op', session: 'sheetH',
+        op: { kind: 1, id: '00000000000000000000_notanumber_evil', key: { r: 0, c: 0 }, v: 'HACKED' },
+      }) },
+    }))
+    expect(s.cells()).toEqual([{ r: 0, c: 0, v: 'legit' }]) // unchanged, not 'HACKED'
+  })
+
+  it('grid: a hostile grid_op with a negative counter does not overwrite an existing cell', () => {
+    const fab = new FakeFabric()
+    const s = new GridSession({ sessionId: 'sheetH2', replicaId: 'victim', fabricClient: fab })
+    s.setCell(0, 0, 'legit')
+
+    fab.dispatchEvent(new CustomEvent('message', {
+      detail: { data: JSON.stringify({
+        type: 'grid_op', session: 'sheetH2',
+        op: { kind: 1, id: '00000000000000000000_-5_evil', key: { r: 0, c: 0 }, v: 'HACKED' },
+      }) },
+    }))
+    expect(s.cells()).toEqual([{ r: 0, c: 0, v: 'legit' }])
+  })
+
+  it('grid: a well-formed higher-counter op still legitimately wins (fix does not break LWW)', () => {
+    const fab = new FakeFabric()
+    const s = new GridSession({ sessionId: 'sheetH3', replicaId: 'victim', fabricClient: fab })
+    s.setCell(0, 0, 'legit') // victim's own counter is small (this replica's first tick)
+
+    fab.dispatchEvent(new CustomEvent('message', {
+      detail: { data: JSON.stringify({
+        type: 'grid_op', session: 'sheetH3',
+        op: { kind: 1, id: '00000000000000000000_0000000099_peer', key: { r: 0, c: 0 }, v: 'newer' },
+      }) },
+    }))
+    expect(s.cells()).toEqual([{ r: 0, c: 0, v: 'newer' }]) // a real higher counter still wins
+  })
+
+  it('tree: a hostile MOVE with a non-numeric counter does not reorder a slide', () => {
+    const fab = new FakeFabric()
+    const s = new TreeSession({ sessionId: 'deckH', replicaId: 'victim', fabricClient: fab })
+    const first = s.insertSlide('a', { t: 'one' })
+    const second = s.insertSlide('z', { t: 'two' })
+    expect(s.orderedSlides().map((x) => x.nodeId)).toEqual([first, second])
+
+    // TREE_OP_MOVE = 2. Move `first` past `second` with a garbage counter.
+    fab.dispatchEvent(new CustomEvent('message', {
+      detail: { data: JSON.stringify({
+        type: 'tree_op', session: 'deckH',
+        op: { kind: 2, id: '00000000000000000000_garbage_evil', target: first, parent: '', ordKey: 'zz' },
+      }) },
+    }))
+    expect(s.orderedSlides().map((x) => x.nodeId)).toEqual([first, second]) // order unchanged
+  })
+
+  it('tree: a well-formed higher-counter MOVE still legitimately reorders (fix does not break LWW)', () => {
+    const fab = new FakeFabric()
+    const s = new TreeSession({ sessionId: 'deckH2', replicaId: 'victim', fabricClient: fab })
+    const first = s.insertSlide('a', { t: 'one' })
+    const second = s.insertSlide('z', { t: 'two' })
+
+    fab.dispatchEvent(new CustomEvent('message', {
+      detail: { data: JSON.stringify({
+        type: 'tree_op', session: 'deckH2',
+        op: { kind: 2, id: '00000000000000000000_0000000099_peer', target: first, parent: '', ordKey: 'zz' },
+      }) },
+    }))
+    expect(s.orderedSlides().map((x) => x.nodeId)).toEqual([second, first]) // real reorder applies
+  })
+})
+
+// ---------------------------------------------------------------------------
 // BUG 7 (deep/office2) — Slides tree cold-join created a PHANTOM DUPLICATE slide
 // after any reorder.
 //

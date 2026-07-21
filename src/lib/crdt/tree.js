@@ -71,12 +71,45 @@ class LamportClock {
   }
 }
 
+/**
+ * Decode the counter segment of an OpID string ("wallMs_counter_replicaId")
+ * as a non-negative integer, or return null if it isn't one.
+ *
+ * This is the ordered-domain decode boundary for the Lamport counter: an
+ * anti-rollback / LWW rule is a claim about a total order, and it is only as
+ * sound as the domain the counter is decoded into (the same invariant DMTAP's
+ * SYNC.md §3 states for the HLC and FEEDS.md §4.3 states for `seq`). A bare
+ * `parseInt` admits negatives and non-numeric garbage as NaN instead of
+ * rejecting them here.
+ */
+function opIdCounter(id) {
+  const n = Number(String(id).split('_')[1])
+  return Number.isInteger(n) && n >= 0 ? n : null
+}
+
+// Compare two OpID strings — returns true if a < b (mirrors OpID.Less).
+//
+// WAVE-56 SECURITY: `id` is a compound string carried verbatim over an
+// unsigned P2P fabric room / durable snapshot — nothing enforces its shape
+// before it reaches here. The previous implementation decoded the counter
+// with a bare `parseInt` and compared the results with `<`/`!==`: a
+// malformed counter (non-numeric, negative, or missing) parses to NaN, and
+// NaN is neither `<` nor `>=` anything in JS, so `ai !== bi` is always true
+// and `ai < bi` is always false whenever either side is malformed. The
+// TREE_OP_MOVE handler below treats "opIdLess(op.id, n.ordId) returned
+// false" as license to apply the move (`!opIdLess(...)`), so a single
+// hostile peer sending one move with a garbage id could silently reparent
+// or reorder any node, unconditionally, regardless of the real Lamport
+// order. Reject at the decode boundary instead: a malformed id sorts
+// strictly BELOW every well-formed one, in both argument positions, so it
+// can never win a compare it takes part in.
 function opIdLess(a, b) {
-  const [, ac, ar] = a.split('_')
-  const [, bc, br] = b.split('_')
-  const ai = parseInt(ac, 10)
-  const bi = parseInt(bc, 10)
+  const ai = opIdCounter(a)
+  const bi = opIdCounter(b)
+  if (ai === null || bi === null) return ai === null && bi !== null
   if (ai !== bi) return ai < bi
+  const ar = String(a).split('_')[2]
+  const br = String(b).split('_')[2]
   return ar < br
 }
 
