@@ -261,15 +261,6 @@ invariants. No CLA required.
 
 [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE) — © VulOS. Ofisi is a VulOS
 project; source and issues at [github.com/vul-os/ofisi](https://github.com/vul-os/ofisi).
-
----
-
-<div align="center">
-
-<sub><strong>Ofisi</strong> · A real, self-hostable collaborative office suite you own. · Open by design.</sub>
-
-</div>
-
 ---
 
 <p align="center">
