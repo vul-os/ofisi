@@ -261,6 +261,7 @@ invariants. No CLA required.
 
 [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE) — © VulOS. Ofisi is a VulOS
 project; source and issues at [github.com/vul-os/ofisi](https://github.com/vul-os/ofisi).
+
 ---
 
 <p align="center">
