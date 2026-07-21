@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ofisi — A real, self-hostable collaborative office suite you own.</title>
+<meta name="description" content="A real, self-hostable collaborative office suite you own. Documents, spreadsheets, slides, and whiteboards — CRDT-native, real-time, one Go binary, on your own storage.">
+<link rel="icon" href="./assets/ofisi-logo.png">
+<style>*,*::before,*::after{box-sizing:border-box}
+:root{
+  --bg:#09090B; --bg-soft:#0E0E10; --panel:#131316; --panel-2:#18181B;
+  --border:rgba(255,255,255,.08); --border-2:rgba(255,255,255,.13);
+  --text:#FAFAFA; --muted:#A1A1AA; --faint:#71717A;
+  --radius:16px; --max:1120px;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono","Geist Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased;font-size:16px}
+body::before{content:"";position:fixed;inset:0;z-index:-1;background:
+  radial-gradient(1100px 600px at 80% -10%, color-mix(in srgb,var(--accent) 10%, transparent), transparent 60%),
+  radial-gradient(900px 500px at -10% 10%, color-mix(in srgb,var(--accent-2) 8%, transparent), transparent 55%),
+  var(--bg);}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;display:block}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+.accent{color:var(--accent)}
+
+/* Header */
+.site-header{position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);background:color-mix(in srgb,var(--bg) 72%, transparent);border-bottom:1px solid var(--border)}
+.nav{display:flex;align-items:center;gap:18px;height:64px}
+.brand{display:flex;align-items:center;gap:11px;font-weight:600;font-size:18px;letter-spacing:-.03em}
+.brand .tile{width:34px;height:34px;border-radius:9px;overflow:hidden;box-shadow:0 1px 0 rgba(255,255,255,.12) inset, 0 4px 14px rgba(0,0,0,.35)}
+.brand .tile img{width:100%;height:100%;object-fit:contain}
+.nav-spacer{flex:1}
+.nav-links{display:flex;align-items:center;gap:22px}
+.nav-links a{color:var(--muted);font-size:14.5px;font-weight:500;transition:color .15s}
+.nav-links a:hover{color:var(--text)}
+.vulos-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--border-2);border-radius:999px;font-size:13px;color:var(--muted);transition:border-color .15s,color .15s}
+.vulos-badge:hover{border-color:var(--accent);color:var(--text)}
+.vulos-badge img{width:16px;height:16px;border-radius:4px}
+@media(max-width:760px){.nav-links{display:none}}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:11px;font-weight:600;font-size:15px;border:1px solid transparent;cursor:pointer;transition:transform .12s,box-shadow .2s,background .2s,border-color .2s}
+.btn:hover{transform:translateY(-1px)}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;box-shadow:0 8px 26px -8px color-mix(in srgb,var(--accent) 60%, transparent)}
+.btn-primary:hover{box-shadow:0 12px 34px -8px color-mix(in srgb,var(--accent) 75%, transparent)}
+.btn-ghost{background:var(--panel);border-color:var(--border-2);color:var(--text)}
+.btn-ghost:hover{border-color:var(--accent)}
+
+/* Hero */
+.hero{padding:84px 0 56px}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:.02em;color:var(--accent);background:color-mix(in srgb,var(--accent) 10%, transparent);border:1px solid color-mix(in srgb,var(--accent) 28%, transparent);padding:6px 13px;border-radius:999px}
+.hero .wordmark{margin:26px 0 0;font-size:clamp(48px,8vw,76px);font-weight:800;letter-spacing:-.04em;line-height:1}
+.hero .tagline{font-size:clamp(18px,2.4vw,23px);color:var(--text);margin:18px 0 0;max-width:720px;font-weight:500}
+.hero .blurb{font-size:16.5px;color:var(--muted);margin:18px 0 0;max-width:660px}
+.cta-row{display:flex;flex-wrap:wrap;gap:13px;margin-top:30px}
+.hero-visual{margin-top:54px;border-radius:var(--radius);border:1px solid var(--border-2);overflow:hidden;box-shadow:0 40px 80px -30px rgba(0,0,0,.7);background:var(--panel)}
+.hero-visual img{width:100%;display:block}
+
+/* Sections */
+.section{padding:64px 0}
+.section h2{font-size:clamp(26px,4vw,36px);letter-spacing:-.03em;margin:0 0 8px;font-weight:800}
+.section .lead{color:var(--muted);margin:0 0 38px;font-size:17px;max-width:640px}
+
+/* Features */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+@media(max-width:900px){.grid{grid-template-columns:1fr 1fr}}
+@media(max-width:620px){.grid{grid-template-columns:1fr}}
+.card{background:linear-gradient(180deg,var(--panel),var(--bg-soft));border:1px solid var(--border);border-radius:var(--radius);padding:24px;transition:border-color .2s,transform .2s}
+.card:hover{border-color:color-mix(in srgb,var(--accent) 45%, var(--border));transform:translateY(-2px)}
+.card .dot{width:34px;height:34px;border-radius:9px;background:color-mix(in srgb,var(--accent) 13%, transparent);border:1px solid color-mix(in srgb,var(--accent) 32%, transparent);display:grid;place-items:center;margin-bottom:15px}
+.card .dot::after{content:"";width:11px;height:11px;border-radius:3px;background:var(--accent)}
+.card h3{margin:0 0 8px;font-size:17.5px;letter-spacing:-.01em}
+.card p{margin:0;color:var(--muted);font-size:14.5px}
+.card code{font-family:var(--mono);font-size:.86em;background:rgba(255,255,255,.06);padding:1px 5px;border-radius:5px;color:var(--text)}
+
+/* Quickstart */
+.quick{display:grid;grid-template-columns:1.1fr 1fr;gap:34px;align-items:center}
+@media(max-width:820px){.quick{grid-template-columns:1fr}}
+.codeblock{background:#0C0C0E;border:1px solid var(--border-2);border-radius:var(--radius);overflow:hidden}
+.codeblock .bar{display:flex;align-items:center;gap:7px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.codeblock .bar i{width:11px;height:11px;border-radius:50%;background:#26262b;display:inline-block}
+.codeblock pre{margin:0;padding:18px 20px;overflow:auto;font-family:var(--mono);font-size:13.5px;line-height:1.75;color:#D4D4D8}
+.codeblock .c{color:var(--faint)}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:16px}
+.steps li{display:flex;gap:14px;align-items:flex-start}
+.steps .num{flex:none;width:28px;height:28px;border-radius:8px;background:color-mix(in srgb,var(--accent) 13%, transparent);border:1px solid color-mix(in srgb,var(--accent) 32%, transparent);color:var(--accent);font-weight:700;display:grid;place-items:center;font-size:14px}
+.steps b{display:block;font-size:15.5px}
+.steps span{color:var(--muted);font-size:14px}
+
+/* Collaboration band */
+.decent{background:linear-gradient(120deg,var(--panel),var(--bg-soft));border:1px solid var(--border);border-radius:var(--radius);padding:40px}
+.decent h2{margin-top:0}
+.decent .cols{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:28px}
+@media(max-width:820px){.decent .cols{grid-template-columns:1fr}}
+.decent h4{margin:0 0 6px;font-size:16px;letter-spacing:-.01em}
+.decent h4::before{content:"/ ";color:var(--accent);font-weight:700}
+.decent p{margin:0;color:var(--muted);font-size:14.5px}
+
+/* Vulos band */
+.vulos-band{margin:24px 0;background:linear-gradient(120deg,var(--panel),var(--bg-soft));border:1px solid var(--border);border-radius:var(--radius);padding:40px;display:flex;gap:26px;align-items:center}
+@media(max-width:680px){.vulos-band{flex-direction:column;text-align:center}}
+.vulos-band img{width:60px;height:60px;border-radius:14px;flex:none}
+.vulos-band h3{margin:0 0 6px;font-size:21px}
+.vulos-band p{margin:0;color:var(--muted);max-width:680px}
+.vulos-band .more{margin-top:14px;display:inline-flex;color:var(--accent);font-weight:600;font-size:15px}
+
+/* Footer */
+.site-footer{border-top:1px solid var(--border);margin-top:40px;padding:40px 0}
+.foot{display:flex;flex-wrap:wrap;gap:18px;align-items:center;justify-content:space-between}
+.foot .left{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px}
+.foot .left img{width:20px;height:20px;border-radius:5px}
+.foot .links{display:flex;gap:20px;flex-wrap:wrap}
+.foot .links a{color:var(--muted);font-size:14px}
+.foot .links a:hover{color:var(--text)}
+</style>
+<style>:root{--accent:#d0471f;--accent-2:#e07a5f}</style>
+</head>
+<body>
+<header class="site-header"><div class="wrap nav">
+    <a class="brand" href="./index.html"><span class="tile"><img src="./assets/ofisi-logo.png" alt="Ofisi mark"></span>Ofisi</a>
+    <div class="nav-spacer"></div>
+    <nav class="nav-links">
+      <a href="./index.html#features">Features</a>
+      <a href="./index.html#collaboration">Collaboration</a>
+      <a href="./docs.html">Docs</a>
+      <a href="https://github.com/vul-os/ofisi" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <a class="vulos-badge" href="https://vulos.org" target="_blank" rel="noopener" title="Part of Vulos">
+      <img src="./assets/vulos-logo.png" alt="Vulos">Part of Vulos
+    </a>
+  </div></header>
+<main>
+  <section class="hero"><div class="wrap">
+    <span class="eyebrow">No cloud account · No telemetry · No lock-in</span>
+    <h1 class="wordmark" style="margin:26px 0 0">Ofisi</h1>
+    <p class="tagline">A real, self-hostable collaborative office suite you own.</p>
+    <p class="blurb">Documents, spreadsheets, slides, and whiteboards in one clean, modern web app — shipped as a single Go binary with the entire frontend embedded. Real-time co-editing is peer-to-peer and CRDT-native: there is no central document server. Your files live in your own storage. What you run is what you own.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#quickstart">Get started</a>
+      <a class="btn btn-ghost" href="./docs.html">Read the docs</a>
+      <a class="btn btn-ghost" href="https://github.com/vul-os/ofisi" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+    <div class="hero-visual"><img src="./screenshots/home-light.png" alt="Ofisi — documents, sheets, slides, and whiteboards in one warm, self-hosted suite" loading="lazy"></div>
+  </div></section>
+
+  <section class="section" id="features"><div class="wrap">
+    <h2>One suite, every surface</h2>
+    <p class="lead">Documents-only by design — Docs, Sheets, Slides, Whiteboards, and PDF signing. Chat, video, and mail are deliberately not part of it.</p>
+    <div class="grid">
+      <div class="card"><div class="dot"></div><h3>Documents</h3><p>Rich-text editing (TipTap) — headings, tables, inline images, footnotes, task lists, links. Anchored comments, suggestions (track-changes with accept/reject), version history with restore, find/replace, live outline and word count.</p></div>
+      <div class="card"><div class="dot"></div><h3>Spreadsheets</h3><p>A full grid (Fortune Sheet) — formulas, number formats, conditional formatting, data validation, charts, filters, pivot tables, named ranges, and freeze panes.</p></div>
+      <div class="card"><div class="dot"></div><h3>Slides</h3><p>A from-scratch positioned-object canvas — free drag/resize/rotate of text, shapes, and images; per-element animations, themes, editable master slides, per-slide transitions, and a presenter view with notes and timer.</p></div>
+      <div class="card"><div class="dot"></div><h3>Whiteboards</h3><p>An infinite hand-drawn canvas built on the MIT Excalidraw editor — shapes, arrows, freehand, text, and images. The scene is a Yjs CRDT synced over the same E2E-encrypted P2P engine as Docs.</p></div>
+      <div class="card"><div class="dot"></div><h3>Real-time co-editing</h3><p>Always peer-to-peer, no central document server. Edits sync as CRDT updates inside an end-to-end-encrypted room; peers connect directly over WebRTC with a content-blind relay only as a hard-NAT fallback. Share by invite link — the key rides the URL fragment.</p></div>
+      <div class="card"><div class="dot"></div><h3>PDF import, export &amp; signing</h3><p>Import and export <code>.docx</code>, <code>.xlsx</code>, <code>.csv</code>, <code>.pptx</code>, Markdown, HTML, and PDF. View, annotate, fill AcroForm fields, and sign PDFs — including multi-party signing envelopes with a cryptographic audit trail.</p></div>
+    </div>
+  </div></section>
+
+  <section class="section" id="quickstart"><div class="wrap">
+    <h2>Quick start</h2>
+    <p class="lead">Ofisi runs by itself — no account, no cloud, no external service required. One binary, your storage.</p>
+    <div class="quick">
+      <div class="codeblock">
+        <div class="bar"><i></i><i></i><i></i></div>
+        <pre><span class="c"># Docker — one line</span>
+docker run -d --name ofisi \
+  -p 8080:8080 \
+  -v ofisi-data:/srv/data \
+  ghcr.io/vul-os/ofisi:latest
+
+<span class="c"># or build the single binary from source</span>
+git clone https://github.com/vul-os/ofisi.git
+cd ofisi
+npm install &amp;&amp; npm run build
+./vulos-office</pre>
+      </div>
+      <ol class="steps">
+        <li><span class="num">1</span><div><b>Run it</b><span>Docker one-liner, or build from source with Go 1.25+ and Node 18+. No database server, no cloud, nothing to sign up for.</span></div></li>
+        <li><span class="num">2</span><div><b>Open the app</b><span>Head to <code>http://localhost:8080</code>. Single-user with local storage by default; data lives in <code>./data</code> and <code>./uploads</code> — the whole app, in one file.</span></div></li>
+        <li><span class="num">3</span><div><b>Own it</b><span>Optionally turn on auth, PostgreSQL, or an S3-compatible store. Nothing is hosted for you unless you choose it.</span></div></li>
+      </ol>
+    </div>
+  </div></section>
+
+  <section class="section" id="collaboration"><div class="wrap">
+    <div class="decent">
+      <h2>Collaboration without a middleman</h2>
+      <p class="lead" style="margin-bottom:0">Real-time co-editing that no server can read. Peers converge with no authority in the middle — because edits are conflict-free (CRDTs), and the room key never leaves your browser.</p>
+      <div class="cols">
+        <div><h4>No central document server</h4><p>Docs and whiteboards sync as Yjs updates; Sheets and Slides use LWW/tree CRDTs. Peers connect directly over WebRTC. The only server role is content-blind peer discovery — it learns that peers share a random room id, never any content.</p></div>
+        <div><h4>End-to-end encrypted rooms</h4><p>Every session runs inside an E2E-encrypted room whose key never reaches any server. Share by invite link — the key rides the URL fragment. A content-blind relay steps in only as a hard-NAT fallback.</p></div>
+        <div><h4>Carries the open-office torch</h4><p>Ofisi carries the torch lit by LibreOffice and OpenOffice into the browser — free, open, and community-driven — on a fast React frontend and a lightweight Go backend. Open formats in and out, MIT-licensed, no lock-in.</p></div>
+      </div>
+    </div>
+  </div></section>
+
+  <section class="section"><div class="wrap">
+    <div class="vulos-band">
+      <img src="./assets/vulos-logo.png" alt="Vulos logo">
+      <div>
+        <h3>Part of Vulos</h3>
+        <p><a href="https://vulos.org" target="_blank" rel="noopener" style="color:var(--text);font-weight:600">Vulos</a> is a family of open, self-hostable apps. Ofisi is a fully standalone product — it never requires Vulos infrastructure — but it also installs as a one-click app on a Vulos OS box, where the same binary runs behind the box gateway with scoped storage and single sign-on. Self-hosting it yourself is always the default path, and never second-class.</p>
+        <a class="more" href="https://vulos.org" target="_blank" rel="noopener">Explore Vulos →</a>
+      </div>
+    </div>
+  </div></section>
+</main>
+<footer class="site-footer"><div class="wrap foot">
+    <div class="left"><img src="./assets/vulos-logo.png" alt="Vulos"> <span>Part of <a href="https://vulos.org" target="_blank" rel="noopener" style="color:var(--text)">Vulos</a> — open, self-hostable apps. Standalone by design.</span></div>
+    <div class="links">
+      <a href="./docs.html">Docs</a>
+      <a href="https://github.com/vul-os/ofisi" target="_blank" rel="noopener">GitHub</a>
+      <a href="./LICENSE.txt">License</a>
+      <a href="https://vulos.org" target="_blank" rel="noopener">vulos.org</a>
+    </div>
+  </div></footer>
+</body>
+</html>
