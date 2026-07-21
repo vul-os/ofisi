@@ -13,7 +13,7 @@ No cloud account, no telemetry, no lock-in.
 <sub><img src="docs/assets/ofisi-logo.png" height="14" alt="VulOS"> Part of <strong><a href="https://vulos.org">VulOS</a></strong> — the open, self-hostable web OS &amp; app suite. Runs standalone, or as an app hosted by the Vulos OS.</sub>
 
 [![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-D0471F.svg)](LICENSE)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-D0471F.svg)](LICENSE-MIT)
 [![Self-hostable](https://img.shields.io/badge/self--hostable-single%20binary-E07A5F)](SELFHOST.md)
 [![CRDT · real-time](https://img.shields.io/badge/CRDT-real--time%20P2P-14B8A6)](docs/COLLABORATION.md)
 [![Tests](https://img.shields.io/badge/tests-passing-D0471F)](docs/TESTING.md)
@@ -293,7 +293,8 @@ invariants. No CLA required.
 
 ## License
 
-[MIT](LICENSE) — free to use, modify, and distribute. Ofisi is yours.
+[MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE) — © VulOS. Ofisi is a VulOS
+project; source and issues at [github.com/vul-os/ofisi](https://github.com/vul-os/ofisi).
 
 ---
 

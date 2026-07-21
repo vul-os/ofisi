@@ -2,7 +2,7 @@
   "name": "ofisi",
   "private": false,
   "version": "0.3.0",
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite build && go run .",
