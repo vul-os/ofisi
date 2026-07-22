@@ -3,7 +3,8 @@
  * (WAVE-27).
  *
  * Sheets and Slides gained live presence (roster + cursors + status pill) by
- * reusing the exact same relay-client fabric that Docs uses. To avoid copying
+ * reusing the exact same first-party WebRTC fabric that Docs uses (see
+ * src/lib/collab/webrtc/). To avoid copying
  * the identity / colour / status-mapping logic into three editors, the pure,
  * transport-agnostic pieces live here and are unit-tested in isolation.
  *
@@ -13,7 +14,7 @@
  * the CRDT session's `.fabric`, mirroring DocsCollabSession).
  */
 
-import { peerColor } from '@vulos/relay-client/useLiveCursors'
+import { peerColor } from './webrtc/useLiveCursors.js'
 
 /**
  * Derive a stable local collaborator identity, mirroring the approach used in

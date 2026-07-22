@@ -13,8 +13,9 @@
  *      installed PWA) we DO register.
  *
  *   2. registerServiceWorker() — boots the offline-first app shell in
- *      production, top-level only. It delegates to the shared relay-client
- *      bootstrap, which (a) registers public/sw.js for app-shell caching,
+ *      production, top-level only. It delegates to the first-party offline
+ *      bootstrap (src/lib/endpoints/offlineBootstrap.js), which (a) registers
+ *      public/sw.js for app-shell caching,
  *      (b) primes the cloud↔LAN endpoint failover so the first API call already
  *      has a reachable endpoint chosen, and (c) wires SW update detection.
  *      No-op in dev, when embedded, or on unsupported browsers. Failures are
@@ -25,7 +26,7 @@
  * path carrying document bytes. See src/sw.security.test.js for the contract.
  */
 
-import { bootstrapOffline } from '@vulos/relay-client/offlineBootstrap'
+import { bootstrapOffline } from './endpoints/offlineBootstrap.js'
 
 // True when this document is nested inside another browsing context. Reading
 // window.top is allowed cross-origin (only touching its properties would throw),

@@ -1,10 +1,10 @@
-import { selectEndpoint, currentEndpoint, invalidateEndpoint } from '@vulos/relay-client/endpoints'
+import { selectEndpoint, currentEndpoint, invalidateEndpoint } from './endpoints/index.js'
 
 const API_PREFIX = '/api'
 
 // Resolve the API base URL through the endpoint-failover layer. The selected
 // base is a same-origin '' by default, or a cloud/LAN origin when the OS shell
-// injects window.__VULOS_ENDPOINTS__. See @vulos/relay-client/endpoints.
+// injects window.__VULOS_ENDPOINTS__. See src/lib/endpoints/index.js.
 async function apiBase() {
   const base = await selectEndpoint()
   return base + API_PREFIX
@@ -324,5 +324,5 @@ export const api = {
   // see src/lib/crdt/yP2PSession.js). There is deliberately NO server-mediated
   // collab API here — no op relay, no doc-state hub, no server presence. The only
   // server role in collab is content-blind peer discovery (signaling + ICE),
-  // handled by @vulos/relay-client against the host's /api/peering/* endpoints.
+  // handled by src/lib/collab/webrtc/fabric.js against the host's /api/peering/* endpoints.
 }

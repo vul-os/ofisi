@@ -1,10 +1,8 @@
 /**
- * offlineBootstrap.js — @vulos/relay-client offline-first shell bootstrap.
+ * offlineBootstrap.js — Ofisi's offline-first shell bootstrap.
  *
- * Merged from the pre-existing copies:
- *   • vulos/src/lib/offlineBootstrap.js        (127 LOC — most complete:
- *     also handles SW update detection, plus startOfflineQueueFlushLoop()).
- *   • vulos-office/src/lib/offlineBootstrap.js (40 LOC).
+ * First-party (re-homed from the vendored relay-client copy so Ofisi
+ * no longer depends on that package — see src/lib/endpoints/index.js).
  *
  * Three responsibilities, run once at app entry:
  *   1. Register the service worker (default '/sw.js') that caches the app
@@ -39,7 +37,7 @@
  * Idempotent: safe to import from multiple entry points.
  */
 
-import { selectEndpoint } from './endpoints.js'
+import { selectEndpoint } from './index.js'
 
 let _booted = false
 let _waitingWorker = null

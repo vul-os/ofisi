@@ -29,7 +29,7 @@
  *   session.applyLocal(prev, next)   // no-op writes for ro peers
  */
 
-import { FabricClient } from '@vulos/relay-client/fabric'
+import { FabricClient } from '../collab/webrtc/fabric.js'
 import { TextCRDT } from './text.js'
 import {
   parseInvite, generateInvite, deriveRoomKeys,

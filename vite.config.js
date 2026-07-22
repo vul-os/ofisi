@@ -63,10 +63,12 @@ export default defineConfig({
     // assertion anywhere is relaxed.
     testTimeout: 20_000,
   },
-  // @vulos/relay-client is a symlinked file: dep that ships its own copy of
-  // react in node_modules. Vite 6 (rollup) resolved its bare `react` imports
-  // from this project root; Vite 8 (rolldown) resolves them from the dep's own
-  // location, loading a SECOND React and breaking hooks. Pin to one copy.
+  // Belt-and-suspenders: pin to one React copy. (Historically load-bearing
+  // when the vendored WebRTC fabric was a symlinked `file:` npm dependency
+  // shipping its own react in node_modules — Vite 8's rolldown resolver would
+  // otherwise load a SECOND React from that dep's own location, breaking
+  // hooks. It is now first-party source under src/lib/collab/webrtc/ with no
+  // node_modules of its own, but the pin is harmless to keep.)
   resolve: {
     dedupe: ['react', 'react-dom'],
   },

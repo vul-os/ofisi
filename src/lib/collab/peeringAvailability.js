@@ -5,8 +5,8 @@
  * The STANDALONE Office binary (see main.go) never mounts `/api/peering/ice`
  * or `/api/peering/stream` — that fabric is provided by a Vulos OS / Vulos
  * Relay host in front of Office (see docs/COLLABORATION.md §4, docs/
- * ADMIN-GUIDE.md "Peering fabric"). Unfortunately the relay-client's
- * FabricClient.join() resolves successfully even when the signaling
+ * ADMIN-GUIDE.md "Peering fabric"). Unfortunately FabricClient's (src/lib/
+ * collab/webrtc/fabric.js) join() resolves successfully even when the signaling
  * WebSocket never connects: it fire-and-forgets the WS connect (retrying with
  * backoff in the background) and its ICE fetch silently falls back to an
  * empty server list on a 404. Left unchecked, that means `configured`/

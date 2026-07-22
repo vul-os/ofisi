@@ -52,9 +52,7 @@ function manualChunks(id) {
 }
 
 export default defineConfig({
-  // Same one-React pin as vite.config.js: @vulos/relay-client is a symlinked
-  // file: dep carrying its own react, which Vite 8's rolldown resolver would
-  // otherwise bundle as a second copy (silent build, broken hooks at runtime).
+  // Same one-React pin as vite.config.js — see the comment there.
   resolve: {
     dedupe: ['react', 'react-dom'],
   },

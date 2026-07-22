@@ -8,6 +8,32 @@ Ofisi uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed — Ofisi is now self-contained: no dependency on another Vulos product's package
+
+- Removed the `@vulos/relay-client` npm dependency (`third_party/relay-client`)
+  entirely. Ofisi no longer depends on any other Vulos product's package.
+- **Endpoint selection** (cloud↔LAN failover used by the API client, PWA
+  bootstrap, and `main.jsx`/`office.jsx` entry points) is re-homed as
+  first-party code at `src/lib/endpoints/` (`index.js`, `offlineBootstrap.js`)
+  plus `src/lib/roundTripCheck.js` (the xlsx import/export fidelity dev tool).
+- **Live P2P collaboration is unchanged and still on by default** — direct
+  WebRTC first, content-blind relay-circuit fallback only on hard NAT, the
+  same E2E-encrypted rooms, the same presence/live-cursors. The `FabricClient`
+  transport (plus signaling/rendezvous/prekey/relay-box support code) is
+  re-homed as first-party source at `src/lib/collab/webrtc/` instead of a
+  vendored package dependency. Unused subpaths the SDK shipped but Ofisi never
+  imported (a Node health-check export, region-aware PoP selection, audio/
+  video calling signaling) were dropped rather than carried along.
+- **New:** STUN/TURN are now directly configurable (`VITE_STUN_URLS`,
+  `VITE_TURN_URL`, `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL`, or runtime
+  `window.__VULOS_ENDPOINTS__` injection) so a standalone deployment can
+  self-host its own TURN server (coturn) for peers behind strict/symmetric NAT
+  without depending on a host box or a `vulos-relayd`. See the new
+  [docs/COTURN.md](docs/COTURN.md) for a full coturn setup, and
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the variables. Default
+  behaviour is unchanged in spirit (STUN via the public Google server unless
+  overridden; TURN opt-in only).
+
 ---
 
 ## [0.3.0] - 2026-07-17

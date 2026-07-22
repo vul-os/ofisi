@@ -12,7 +12,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 // invokes it under a guard failure (dev / embedded / unsupported). Hoisted so
 // the mock factory (itself hoisted above the imports) can reference it.
 const { bootstrapOffline } = vi.hoisted(() => ({ bootstrapOffline: vi.fn() }))
-vi.mock('@vulos/relay-client/offlineBootstrap', () => ({ bootstrapOffline }))
+vi.mock('./endpoints/offlineBootstrap.js', () => ({ bootstrapOffline }))
 
 import { isEmbedded, pwaEnabled, registerServiceWorker } from './pwa.js'
 

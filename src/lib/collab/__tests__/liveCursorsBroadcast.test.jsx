@@ -1,7 +1,7 @@
 /**
  * liveCursorsBroadcast.test.jsx — WAVE-27 cursor/selection broadcast + throttle.
  *
- * Sheets and Slides broadcast cell/slide selection through the relay-client
+ * Sheets and Slides broadcast cell/slide selection through the first-party
  * `useLiveCursors` hook (the same one Docs uses). This exercises that hook with
  * a fake fabric to prove:
  *   - the leading edge fires immediately (send on first call),
@@ -12,7 +12,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useLiveCursors } from '@vulos/relay-client/useLiveCursors'
+import { useLiveCursors } from '../webrtc/useLiveCursors.js'
 
 class FakeFabric extends EventTarget {
   constructor() { super(); this.sent = [] }

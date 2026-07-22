@@ -6,9 +6,9 @@
 # volume.
 #
 # ── Deploy ────────────────────────────────────────────────────────────────────
-# The @vulos/relay-client SPA dependency is vendored in-repo at
-# third_party/relay-client (see third_party/relay-client/VENDOR.md), so the
-# Dockerfile no longer needs a parent/sibling-repo build context — but Fly
+# The WebRTC collaboration fabric is first-party source under
+# src/lib/collab/webrtc/ (no vendored npm package), so the Dockerfile no
+# longer needs a parent/sibling-repo build context — but Fly
 # still sends the config-file's directory as the build context, so build+push
 # the image out-of-band and deploy by image reference rather than letting Fly
 # build:

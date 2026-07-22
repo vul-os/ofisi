@@ -6,6 +6,8 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Component map, collaboration transports, key design decisions |
 | [API.md](API.md) | REST API reference (files, versions, collab, signing) |
 | [CONFIGURATION.md](CONFIGURATION.md) | All env vars, config.yaml reference, OTEL/SMTP/storage |
+| [COLLABORATION.md](COLLABORATION.md) | How real-time P2P collaboration works end to end |
+| [COTURN.md](COTURN.md) | Self-hosting a TURN server (coturn) for collaboration behind strict NAT |
 | [TESTING.md](TESTING.md) | Test layers (Vitest unit + RTL/MSW integration, Playwright E2E) |
 | [SCREENSHOTS.md](SCREENSHOTS.md) | Screenshot gallery + how to regenerate |
 | [DEPLOY.md](DEPLOY.md) | Deployment guide — Docker, single-box co-location |

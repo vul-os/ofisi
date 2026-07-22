@@ -32,7 +32,7 @@
  */
 
 import * as Y from 'yjs'
-import { FabricClient } from '@vulos/relay-client/fabric'
+import { FabricClient } from '../collab/webrtc/fabric.js'
 import {
   parseInvite, generateInvite, deriveRoomKeys,
   sealFrame, openFrame, CAP_RW, CAP_RO,

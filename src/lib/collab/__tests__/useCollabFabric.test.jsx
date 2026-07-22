@@ -19,7 +19,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { _resetPeeringProbeCache } from '../peeringAvailability.js'
 import { _resetReachableBaseCache } from '../reachableBase.js'
 
-// ── Mock the relay-client fabric with a controllable fake ─────────────────────
+// ── Mock the first-party WebRTC fabric with a controllable fake ───────────────
 let lastFabric = null
 let joinBehaviour = 'resolve' // 'resolve' | 'reject'
 
@@ -42,7 +42,7 @@ class FakeFabric extends EventTarget {
   }
 }
 
-vi.mock('@vulos/relay-client/fabric', () => ({
+vi.mock('../webrtc/fabric.js', () => ({
   FabricClient: class {
     constructor(opts) { return new FakeFabric(opts) }
   },

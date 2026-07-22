@@ -7,10 +7,10 @@
 # config file, no cloud, no account.
 #
 # ── BUILD CONTEXT (read before building) ──────────────────────────────────────
-# The @vulos/relay-client dependency is vendored in-repo at
-# third_party/relay-client (see third_party/relay-client/VENDOR.md) — there is
-# no sibling-repo `file:../vulos-relay/client` dependency anymore, so a plain
-# clone-and-build works with the repo itself as the build context:
+# Ofisi's WebRTC collaboration fabric is first-party source under
+# src/lib/collab/webrtc/ (no vendored npm package, no sibling-repo checkout of
+# any kind needed), so a plain clone-and-build works with the repo itself as
+# the build context:
 #
 #   docker build -t ghcr.io/vul-os/ofisi:latest .
 #
@@ -20,14 +20,14 @@
 #     ghcr.io/vul-os/ofisi:latest
 #   # open http://localhost:8080
 
-# ── Stage 1: build the SPA (vendored relay-client, no sibling repo needed) ────
+# ── Stage 1: build the SPA ─────────────────────────────────────────────────────
 FROM node:20-bookworm AS web
 WORKDIR /build
 COPY . /build
 # Drop any node_modules dragged in from the host (there is no .dockerignore
 # excluding it). Host node_modules can hold platform-native binaries (e.g.
 # macOS rollup) that break under Linux — force clean Linux installs.
-RUN rm -rf /build/node_modules /build/third_party/relay-client/node_modules
+RUN rm -rf /build/node_modules
 # `npm ci` needs a lockfile in sync; the repo ships package-lock.json. Fall
 # back to `npm install` only if ci fails (e.g. lockfile drifted locally).
 RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund

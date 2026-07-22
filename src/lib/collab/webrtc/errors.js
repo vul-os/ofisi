@@ -1,9 +1,9 @@
 /**
- * errors.js — @vulos/relay-client structured error types.
+ * errors.js — Ofisi's first-party WebRTC/fabric structured error types.
  *
- * Exported from the root barrel so consumers can instanceof-check:
+ * Exported from the barrel so consumers can instanceof-check:
  *
- *   import { SignalingError, RelayDepositError, EndpointError } from '@vulos/relay-client'
+ *   import { SignalingError, RelayDepositError, EndpointError } from '../lib/collab/webrtc/index.js'
  *   try { ... } catch (err) {
  *     if (err instanceof SignalingError) { ... }
  *   }

@@ -1,7 +1,7 @@
 /**
- * secureTransport.js — @vulos/relay-client credential-transport guard (internal).
+ * secureTransport.js — Ofisi's WebRTC fabric credential-transport guard (internal).
  *
- * The relay client is a TRUST-BOUNDARY participant: it holds a short-lived
+ * The fabric client is a TRUST-BOUNDARY participant: it holds a short-lived
  * Bearer JWT (the box/app session token) and attaches it to two kinds of
  * outbound request —
  *

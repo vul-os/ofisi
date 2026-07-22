@@ -80,7 +80,7 @@ export const SEED_ORIGIN = 'vulos-seed'
 
 // ── Bounds (fail-closed) ────────────────────────────────────────────────────
 // A single peer-to-peer update must fit well inside the fabric's per-frame data
-// cap (256 KiB, see @vulos/relay-client MAX_PAYLOAD_BYTES) once base64-inflated
+// cap (256 KiB, see src/lib/collab/webrtc/fabric.js MAX_PAYLOAD_BYTES) once base64-inflated
 // (+33%). Oversized frames are dropped by the transport, so we bound here first.
 export const MAX_UPDATE_BYTES = 128 * 1024
 // A snapshot is the whole compacted document; bounded so a state-vector resync

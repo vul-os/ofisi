@@ -53,7 +53,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { FabricClient } from '@vulos/relay-client/fabric'
+import { FabricClient } from './webrtc/fabric.js'
 import {
   selectCollabTransport,
   TRANSPORT_LOCAL_ONLY,
@@ -65,7 +65,7 @@ import {
  * @param {string}  opts.peerId     - stable per-tab id (CRDT replicaId)
  * @param {boolean} [opts.enabled=true] - set false to stay fully local (no fabric)
  * @returns {{
- *   fabric: import('@vulos/relay-client/fabric').FabricClient | null,
+ *   fabric: import('./webrtc/fabric.js').FabricClient | null,
  *   peers: Record<string, string>,
  *   joined: boolean,
  *   configured: boolean,

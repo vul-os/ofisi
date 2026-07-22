@@ -46,7 +46,7 @@ Image facts (from the `Dockerfile`):
 - `EXPOSE 8080`; built-in `HEALTHCHECK` polls `GET /healthz`.
 - The binary is static (CGO off; Postgres via pure-Go pgx) on Alpine.
 
-**Building the image yourself**: the `@vulos/relay-client` SPA dependency is vendored in-repo at `third_party/relay-client` (see `third_party/relay-client/VENDOR.md`), so a plain build from the repo root works — no sibling-repo checkout needed:
+**Building the image yourself**: the WebRTC collaboration fabric is first-party source under `src/lib/collab/webrtc/` (no separate package, no sibling-repo checkout needed), so a plain build from the repo root always works:
 
 ```bash
 docker build -t ghcr.io/vul-os/ofisi:latest .

@@ -1,11 +1,16 @@
 /**
- * endpoints.js — @vulos/relay-client multi-endpoint failover.
+ * src/lib/endpoints/index.js — Ofisi's cloud↔LAN endpoint failover.
  *
- * Shared cloud↔LAN endpoint failover for every Vulos web surface (the OS shell,
- * vulos-office). Previously duplicated as `vulos/src/lib/endpoints.js` and
- * `vulos-office/src/lib/endpoints.js`. Promoted here from the vulos OS copy
- * (the richest — it owned `seedFromResolveBackend`) with two new opt-in config
- * seams so consumers can migrate without disturbing their existing user state:
+ * First-party (re-homed from the vendored relay-client package —
+ * endpoint selection is not P2P/relay functionality, just failover between a
+ * cloud route and a directly-reachable LAN box, so it lives in Ofisi's own
+ * tree rather than depending on another product's package).
+ *
+ * Shared cloud↔LAN endpoint failover, historically duplicated across every
+ * Vulos web surface (the OS shell, vulos-office). Promoted from the vulos OS
+ * copy (the richest — it owned `seedFromResolveBackend`) with two opt-in
+ * config seams so each surface can migrate without disturbing existing user
+ * state:
  *
  *   • `lsKeyPrefix`  — localStorage namespace (default
  *                      'vulos.relay-client.endpoints.v1'). Consumers that

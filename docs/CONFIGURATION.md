@@ -132,7 +132,9 @@ substrate's movable tree reproduces it and what remains.
 
 Blank by default. Ofisi's own backend never mediates live collaboration — the
 Docs/Whiteboard invite-link path and the Sheets/Slides presence layer both talk
-peer-to-peer over `@vulos/relay-client`'s `FabricClient` (see
+peer-to-peer over Ofisi's own first-party `FabricClient`
+(`src/lib/collab/webrtc/fabric.js` — re-homed from the vendored relay-client
+SDK so Ofisi depends on no other Vulos product's package; see
 [COLLABORATION.md](COLLABORATION.md) §3). That transport needs a lightweight,
 content-blind peer-discovery surface, and Ofisi picks one of three, in order:
 
@@ -186,6 +188,48 @@ See `backend/config/config.go` and `src/lib/collab/transportSelection.js` for
 the selection logic, and `src/lib/collab/reachableBase.js` for the client-side
 fetch/cache. The whole path is proven end to end against a real `vulos-relayd`
 by `npm run test:e2e:p2p` (see `e2e-p2p/`).
+
+---
+
+### `VITE_STUN_URLS` / `VITE_TURN_*` — STUN/TURN for direct WebRTC (no other Vulos product required)
+
+Collaboration's default path is **direct WebRTC** — a data channel straight
+between two browsers (see [COLLABORATION.md](COLLABORATION.md) §3). Making
+that direct connection happen behind NAT needs **STUN** (near-universal, just
+tells you your own public address) and, for the minority of peer pairs behind
+a **symmetric NAT** that can't hole-punch at all, **TURN** (relays the
+traffic; content-blind here — see §3). Neither requires a host box, a
+`vulos-relayd`, or any other Vulos product — they are plain build-time env
+vars consumed by `src/lib/collab/webrtc/call/ice.js`:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VITE_STUN_URLS` | Comma-separated `stun:` URLs, e.g. `stun:stun.example.org:3478`. Set to the empty string `''` to disable STUN entirely (not just unset it). | the public Google STUN server |
+| `VITE_TURN_URL` | Comma-separated `turn:`/`turns:` URLs for your TURN server, e.g. `turn:turn.example.org:3478,turns:turn.example.org:5349`. | — (no TURN by default) |
+| `VITE_TURN_USERNAME` | TURN username (coturn `lt-cred-mech`: a static `user=` name, or the username half of a time-limited credential). | — |
+| `VITE_TURN_CREDENTIAL` | TURN credential/password matching `VITE_TURN_USERNAME`. | — |
+
+These only take effect as a **fallback** — when the host's own ICE endpoint
+(`/api/peering/ice`, or a configured rendezvous relayd's ICE surface) is
+unreachable or returns nothing, which is exactly the standalone/self-hosted
+case with no other Vulos product in front of Ofisi. TURN is never defaulted
+(unlike STUN): a TURN server relays your traffic, so it is opt-in only, via
+the variables above.
+
+A host page may also inject these at runtime instead of build time, via
+`window.__VULOS_ENDPOINTS__`:
+
+```js
+window.__VULOS_ENDPOINTS__ = {
+  stunUrls: ['stun:stun.example.org:3478'],
+  turn: { urls: ['turn:turn.example.org:3478'], username: 'ofisi', credential: '…' },
+}
+```
+
+**Self-hosting your own TURN server:** see [COTURN.md](COTURN.md) for a
+complete, runnable coturn setup (apt and Docker), a minimal `turnserver.conf`,
+the firewall ports to open, and exactly which of the variables above to point
+at it.
 
 ---
 

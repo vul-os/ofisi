@@ -44,7 +44,7 @@ Ofisi running → http://localhost:8080
 | Boot dies with `auth is enabled but no JWT signing secret is configured` | `auth.enabled: true` without a secret | `export VULOS_OFFICE_JWT_SECRET="$(openssl rand -hex 32)"` (or `VULOS_OFFICE_DEV=1` for local dev only) |
 | Boot dies with `Storage init failed` | Bad `DATABASE_URL` / unreachable Postgres / unwritable `data_dir` | Check the URL and DB reachability; ensure the process can create `./data` (in Docker the writable dirs are `/srv/data`, `/srv/uploads`) |
 | Starts but you expected your config | Log shows `Config error: … — using defaults` | The server reads `config.yaml` **from its working directory**. Run it from the directory that holds the file |
-| Docker build fails resolving `@vulos/relay-client` | Stale `node_modules`/lockfile — the dependency is vendored at `third_party/relay-client` (see its `VENDOR.md`), no sibling repo needed | Build from the repo root: `docker build -t ghcr.io/vul-os/ofisi:latest .` |
+| Docker build fails resolving an npm dependency | Stale `node_modules`/lockfile in the build context, or a `file:third_party/*` vendored dep out of sync with `package-lock.json` | Build from the repo root with a clean context: `docker build -t ghcr.io/vul-os/ofisi:latest .`; if it persists, delete `node_modules` and re-run `npm install` before building |
 | Container healthcheck failing | App not listening on 8080 or crash-looping | `docker logs`; confirm `server.addr` and the port mapping; hit `/healthz` from inside the container |
 
 ---

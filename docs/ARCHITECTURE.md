@@ -22,7 +22,9 @@ Ofisi is a collaborative document editing + e-signing service. It exposes:
 > collaboration is ALWAYS peer-to-peer … deliberately NO central document
 > server"). There are **two CRDT session flavours**, both riding the **same**
 > end-to-end-encrypted room (`src/lib/crdt/p2pRoom.js`) over the same
-> `@vulos/relay-client` fabric transport:
+> first-party `src/lib/collab/webrtc/fabric.js` fabric transport (re-homed
+> from the vendored relay-client SDK — Ofisi depends on no other Vulos
+> product's package):
 > - **Yjs session** (`YP2PCollabSession`, `src/lib/crdt/yP2PSession.js`) — the
 >   structure-aware path used by **Docs**. The document is a Yjs document
 >   (`src/lib/crdt/ydoc.js`), kept in lock-step with ProseMirror by
@@ -87,7 +89,8 @@ flowchart TD
     (`p2pSession.js`).
 
   Both families sync over the **single** collab transport: the E2E-encrypted
-  peer-to-peer room (`p2pRoom.js`) on the `@vulos/relay-client` fabric. There is
+  peer-to-peer room (`p2pRoom.js`) on the first-party WebRTC fabric
+  (`src/lib/collab/webrtc/fabric.js`). There is
   no server-mediated collab transport (no SSE op-stream, no doc-state hub) — the
   server's only collaboration role is content-blind peer discovery, which can be
   served either by this server's own `/api/peering/*` or by a configured
