@@ -54,12 +54,6 @@ flowchart LR
 
 > *"Vula" — open the door. Ofisi is that door.*
 
-> **Historical name.** Ofisi's Go module and the built binary are still named
-> `vulos-office` (and the npm package is `ofisi`). That was the product's
-> original internal name; the commands below use `./vulos-office` for that
-> reason. The product is **Ofisi** everywhere in the docs — the internal name is
-> kept only to avoid a churny, risky module/binary rename.
-
 ---
 
 ## Features
@@ -140,7 +134,10 @@ npm run build
 ```
 
 Open <http://localhost:8080>. Data lives in `./data` and `./uploads` — that's the
-whole app, in one file. To require login (still fully standalone):
+whole app, in one file. The Go module and the binary it builds are named
+`vulos-office`; the npm package and the product are **Ofisi**.
+
+To require login (still fully standalone):
 
 ```bash
 # config.yaml → auth.enabled: true
